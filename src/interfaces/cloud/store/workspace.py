@@ -17,11 +17,10 @@ import tempfile
 import threading
 import time
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.interfaces import run_names
 from src.interfaces.cloud.config import CloudConfig
@@ -32,8 +31,6 @@ from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
-
-    from azure.storage.fileshare import ShareServiceClient
 
 
 # `<op>_result.json` -- train, evaluate, resume, train-static. The writer was
@@ -63,28 +60,21 @@ def _is_snapshot_dir(name: str) -> bool:
 
 
 def pull_metadata(
-    service: ShareServiceClient,
-    share_name: str,
     destination: Path,
+    record: Mapping[str, Mapping[str, Any]],
     *,
     run: str | None = None,
-    previous: Path | None = None,
-    published_rungs: Mapping[str, set[str]] | None = None,
 ) -> int:
-    """Materialise the published JSON record into ``destination``.
+    """Materialise the published record into ``destination``. Returns manifests.
 
-    Returns how many files were FETCHED, not how many the tree holds: with
-    ``previous`` -- a tree this function built earlier -- an unchanged etag is
-    hard-linked across instead of downloaded.
+    `record` is what the container holds, from `blob.published_record` -- passed
+    in rather than read here, so this stays a function about building a tree and
+    the one round trip has a single owner.
     """
-    published = [
-        entry.name
-        for entry in share.list_entries(service, share_name, share.ARCHIVE_DIR)
-        if entry.is_directory
-    ]
+    published = sorted(record)
     if run is not None:
-        # Resolved HERE, against the share's own listing, because this decides
-        # what gets downloaded -- a fragment rejected at this point never
+        # Resolved HERE, against what is actually published, because this
+        # decides what gets written -- a fragment rejected at this point never
         # reaches `resolve_run_dir`, and the reader would refuse a run that
         # exists. Same rule on both sides: `src.interfaces.run_names`.
         matches = run_names.matching(run, published)
@@ -94,86 +84,25 @@ def pull_metadata(
             raise CommandError(run_names.unknown_message(run, published))
         published = matches
 
-    # The WALK, not only the downloads. Each run is an independent traversal of
-    # directory listings, and a listing is a round trip like any other: 18 runs
-    # walked one after another was 12.4s of the ~20s a `--source share` read
-    # took, before a single file had been fetched.
-    def _walk(name: str) -> tuple[list[tuple[str, Path, str | None]], list[Path]]:
-        found: list[tuple[str, Path, str | None]] = []
-        markers: list[Path] = []
-        for remote, etag in share.walk_files(
-            service,
-            share_name,
-            f"{share.ARCHIVE_DIR}/{name}",
-            skip_dir=_is_snapshot_dir,
-        ):
-            relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
-            leaf = Path(relative).name
-            if leaf.startswith(archive.MARKER_PREFIX):
-                # Residue: the share stopped being told which rungs are
-                # complete when a rung became one object. The container's
-                # listing answers that below.
-                continue
-            if share.is_snapshot_path(relative) or not share.is_metadata(leaf):
-                continue
-            if leaf.endswith(DEAD_SUFFIX):
-                continue
-            found.append((remote, destination / relative, etag))
-        return found, markers
-
-    with ThreadPoolExecutor(max_workers=min(_PARALLEL_DOWNLOADS, len(published) or 1)) as pool:
-        walked = list(pool.map(_walk, published))
-    wanted = [entry for batch, _ in walked for entry in batch]
-
-    # THE CONTAINER SAYS WHICH RUNGS EXIST, recreated locally as the marker
-    # files every reader already knows how to glob. Written rather than
-    # downloaded: a marker's whole content is that it exists, so one listing
-    # of the container is the entire fact for every run at once. The share
-    # used to hold these, and a marker there could only ever assert something
-    # about a directory it might have half-copied.
-    held = published_rungs or {}
+    # THE CONTAINER IS THE RECORD. Every run's manifest and every rung it
+    # holds come from one listing plus a small download each -- no share, no
+    # etag cache, no hard links. That machinery existed for 4,251 immutable
+    # eval documents re-fetched on a 45s console TTL; those live in Postgres
+    # now and what is left is 345 manifests of a few KB.
+    written = 0
     for name in published:
-        for rung in held.get(name, ()):
-            marker = destination / name / archive.marker_for(rung)
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            marker.touch()
-
-    # INCREMENTAL against `previous`, on the same argument `download_tasks` uses
-    # for legs/: a published record never changes once written, so an unchanged
-    # etag means the bytes are already on disk and a hard link is the whole
-    # refresh. Before this, a 45s console TTL re-fetched all 4,251 immutable
-    # documents every time -- 6.4s of the 24.4s rebuild, paid every 45 seconds.
-    known = _etags(previous)
-    fetch: list[tuple[str, Path]] = []
-    for remote, local, etag in wanted:
-        relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
-        held = previous / relative if previous is not None else None
-        if held is not None and etag is not None and known.get(relative) == etag and held.is_file():
-            local.parent.mkdir(parents=True, exist_ok=True)
-            _link(held, local)
-        else:
-            fetch.append((remote, local))
-
-    # One round trip per file, and a run's eval documents now carry their full
-    # sample vectors -- so this is latency-bound on a link where latency is the
-    # whole cost. The downloads are independent and `download_file` builds its
-    # own file client, so they overlap.
-    if fetch:
-        with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
-            futures = [
-                pool.submit(share.download_file, service, share_name, remote, local)
-                for remote, local in fetch
-            ]
-            for future in futures:
-                future.result()
-
-    (destination / _ETAGS_NAME).write_text(
-        "".join(
-            f"{etag or ''}\t{remote[len(f'{share.ARCHIVE_DIR}/') :]}\n"
-            for remote, _, etag in wanted
-        )
-    )
-    return len(fetch)
+        entry = record.get(name) or {}
+        run_dir = destination / name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        body = entry.get("manifest")
+        if body is not None:
+            (run_dir / records.STATIC_CHECKPOINT).write_bytes(body)
+            written += 1
+        # A marker's whole content is that it exists, and what it says is which
+        # rungs a fetch could actually get. The container's listing is that.
+        for rung in entry.get("rungs") or ():
+            (run_dir / archive.marker_for(rung)).touch()
+    return written
 
 
 def resolve_published_run(run: str) -> str:
@@ -462,18 +391,9 @@ def _link(source: Path, destination: Path) -> None:
         shutil.copyfile(source, destination)
 
 
-def _materialise(root: Path, *, run: str | None, previous: Path | None = None) -> None:
-    """Pull the published record into ``root``, reusing ``previous`` where it can."""
-    config = CloudConfig.load()
-    service = share.share_client(config)
-    pull_metadata(
-        service,
-        config.share_name,
-        root,
-        run=run,
-        previous=previous,
-        published_rungs=blob.published_rungs(config),
-    )
+def _materialise(root: Path, *, run: str | None, previous: Path | None = None) -> None:  # noqa: ARG001 -- `previous` is the console's cache handle, kept while it still passes one
+    """Pull the published record into ``root``."""
+    pull_metadata(root, blob.published_record(CloudConfig.load()), run=run)
 
 
 def _require_published(root: Path, run: str) -> None:
