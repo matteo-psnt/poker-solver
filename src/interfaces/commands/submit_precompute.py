@@ -121,12 +121,12 @@ def run(args: argparse.Namespace) -> PrecomputeDispatchPayload:
             )
         ]
     )
-    return PrecomputeDispatchPayload(
+    return payload.extend(
+        PrecomputeDispatchPayload,
         abstraction_config=args.config,
         target_name=target,
         already_published=existing,
         force=args.force,
-        **payload.model_dump(exclude={"op"}),
     )
 
 

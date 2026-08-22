@@ -188,7 +188,7 @@ def run(args: argparse.Namespace) -> SubmitPayload:
             )
         ]
     )
-    return SubmitPayload(target_iteration=args.to, **payload.model_dump(exclude={"op"}))
+    return payload.extend(SubmitPayload, target_iteration=args.to)
 
 
 def render(payload: SubmitPayload) -> None:

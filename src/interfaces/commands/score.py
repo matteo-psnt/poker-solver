@@ -116,12 +116,7 @@ def run(args: argparse.Namespace) -> ScorePayload:
             for rung in rungs
         ]
     )
-    return ScorePayload(
-        run_id=run_id,
-        method=args.method,
-        rungs=rungs,
-        **payload.model_dump(exclude={"op"}),
-    )
+    return payload.extend(ScorePayload, run_id=run_id, method=args.method, rungs=rungs)
 
 
 def render(payload: ScorePayload) -> None:
