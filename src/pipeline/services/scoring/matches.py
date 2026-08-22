@@ -34,6 +34,7 @@ def _with_resolver_overrides(
     leaf_continuation_fraction: float | None,
     max_iterations: int | None,
     root_prior_weight: float | None,
+    leaf_rollouts: int | None,
 ) -> Any:
     """The run's config, with the two knobs an A/B over leaf valuation needs.
 
@@ -50,15 +51,18 @@ def _with_resolver_overrides(
     field already exists for exactly this ("a determinism knob for reproducible
     experiments and tests").
     """
-    if leaf_continuation_fraction is None and max_iterations is None and root_prior_weight is None:
+    # Built as a dict rather than a chain of `and ... is None`: every knob added
+    # here has had to edit that condition too, and forgetting it would silently
+    # return the run's config while the caller believed it had overridden one.
+    requested = {
+        "leaf_continuation_fraction": leaf_continuation_fraction,
+        "max_iterations": max_iterations,
+        "root_prior_weight": root_prior_weight,
+        "leaf_rollouts": leaf_rollouts,
+    }
+    updates: dict[str, Any] = {k: v for k, v in requested.items() if v is not None}
+    if not updates:
         return config
-    updates: dict[str, Any] = {}
-    if leaf_continuation_fraction is not None:
-        updates["leaf_continuation_fraction"] = leaf_continuation_fraction
-    if max_iterations is not None:
-        updates["max_iterations"] = max_iterations
-    if root_prior_weight is not None:
-        updates["root_prior_weight"] = root_prior_weight
     return config.model_copy(update={"resolver": config.resolver.model_copy(update=updates)})
 
 
@@ -71,6 +75,7 @@ def evaluate_run_resolver_gate(
     leaf_continuation_fraction: float | None = None,
     max_iterations: int | None = None,
     root_prior_weight: float | None = None,
+    leaf_rollouts: int | None = None,
     workers: int = 1,
     allin_runouts: int = 1,
 ) -> EvaluationOutput:
@@ -91,6 +96,7 @@ def evaluate_run_resolver_gate(
         leaf_continuation_fraction=leaf_continuation_fraction,
         max_iterations=max_iterations,
         root_prior_weight=root_prior_weight,
+        leaf_rollouts=leaf_rollouts,
     )
     solver, storage = build_static_evaluation_solver(config, checkpoint_dir=run_dir)
     # The factory carries the OVERRIDDEN config, not the run's. A worker built
@@ -119,6 +125,7 @@ def evaluate_run_resolver_gate(
         "time_budget_ms": time_budget_ms,
         "workers": workers,
         "root_prior_weight": config.resolver.root_prior_weight,
+        "leaf_rollouts": config.resolver.leaf_rollouts,
         "seed": seed,
         "pair_samples_mbb": result.pair_samples_mbb,
         # The arm's identity, recorded WITH the number. Two resolver-gate rows
