@@ -138,7 +138,6 @@ card_abstraction:
   config: production
 training:
   num_iterations: 1000000
-  checkpoint_frequency: 500000
 storage:
   zarr_compression_level: 1   # benchmarked: fastest AND smallest
 ```

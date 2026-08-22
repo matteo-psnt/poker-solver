@@ -26,16 +26,16 @@ card_abstraction:
 
 training:
   num_iterations: 1000000
-  checkpoint_frequency: 500000
 
 storage:
   initial_capacity: 4000000
-  # Spare one checkpoint per 1M iterations from pruning, so a run ends holding a
-  # ladder (1M, 2M, ... ) instead of only its final snapshot -- this is what makes a
-  # within-run exploitability-vs-iterations curve possible (`evaluate --at N`).
-  # Costs a full table copy per rung (~2 GB at 8M iterations), so ~8 rungs per 8M run.
-  # Must stay a multiple of checkpoint_frequency; below it nothing is ever pruned.
-  checkpoint_retain_every: 1000000
+  # Spare one checkpoint per 10M iterations from pruning, so a run ends holding a
+  # ladder (10M, 20M, ...) instead of only its final snapshot -- this is what makes
+  # a within-run exploitability-vs-iterations curve possible (`evaluate --at N`).
+  # Each rung is a full table (~840 MB at production size) PUBLISHED to the share,
+  # and the upload is the wall-clock of a short run. Must stay a multiple of the
+  # chunk size (`--checkpoint-every`, 5M by default); below it nothing is pruned.
+  checkpoint_retain_every: 10000000
 
 system:
   config_name: "production"

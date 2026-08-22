@@ -64,7 +64,6 @@ class TrainingConfig(StrictFrozenModel):
     """Training loop configuration."""
 
     num_iterations: PositiveInt = Field(default=100_000)
-    checkpoint_frequency: PositiveInt = Field(default=50_000)
     verbose: bool = Field(default=True)
     runs_dir: str = Field(default=DEFAULT_RUNS_DIR)
 
@@ -78,8 +77,8 @@ class StorageConfig(StrictFrozenModel):
     # Spare one checkpoint per this many iterations from pruning, so the run ends
     # holding a ladder of snapshots instead of only its last one (0 = keep only the
     # last). Costs a full copy of the table per retained point, so keep it a large
-    # multiple of checkpoint_frequency: below that every checkpoint lands in its own
-    # band and nothing is ever pruned.
+    # multiple of the chunk size (`train-static --checkpoint-every`): below that
+    # every checkpoint lands in its own band and nothing is ever pruned.
     checkpoint_retain_every: NonNegInt = Field(default=0)
 
 

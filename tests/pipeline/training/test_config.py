@@ -19,7 +19,6 @@ class TestDefaultBehavior:
         cfg = Config()
 
         assert cfg.training.num_iterations > 0
-        assert cfg.training.checkpoint_frequency > 0
         assert cfg.training.verbose is True
 
         assert cfg.storage.initial_capacity > 0
