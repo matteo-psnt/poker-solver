@@ -17,7 +17,6 @@ from pydantic import BaseModel
 
 from src.interfaces.cloud import serve_box
 from src.interfaces.commands._base import Command
-from src.interfaces.errors import CommandError
 
 if TYPE_CHECKING:
     import argparse
@@ -105,6 +104,3 @@ COMMAND = Command(
     run=run,
     render=render,
 )
-
-
-__all__ = ["COMMAND", "CommandError"]
