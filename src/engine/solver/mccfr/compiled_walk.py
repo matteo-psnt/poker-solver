@@ -147,6 +147,7 @@ def _deal_edge(
     labels,
     next_label,
     sentinel,
+    river_winner,
     edge_deal,
     street_of_node,
     deck_rank,
@@ -166,7 +167,17 @@ def _deal_edge(
     """
     owed = edge_deal[slot]
     if owed == 0:
-        return board_index, board_len, known, board_row, labels, next_label, sentinel, deal_index
+        return (
+            board_index,
+            board_len,
+            known,
+            board_row,
+            labels,
+            next_label,
+            sentinel,
+            river_winner,
+            deal_index,
+        )
     child_board = np.empty(5, dtype=np.int64)
     for j in range(board_len):
         child_board[j] = board_index[j]
@@ -188,6 +199,9 @@ def _deal_edge(
     )
     if child_row < 0:
         raise ValueError("bucket lookup failed: the board is absent from the abstraction")
+    child_winner = river_winner
+    if child_len == 5:
+        child_winner = np.full(1, -2, dtype=np.int64)
     return (
         child_board,
         child_len,
@@ -196,6 +210,7 @@ def _deal_edge(
         child_labels,
         child_next,
         sentinels[street],
+        child_winner,
         deal_index,
     )
 
@@ -236,6 +251,7 @@ def _terminal_value(
     hole_index,
     board_index,
     board_len,
+    river_winner,
     deck_rank,
     deck_suit,
     deck_mask,
@@ -249,7 +265,13 @@ def _terminal_value(
     terminal_lose,
     terminal_tie,
 ):
-    """What the traverser is paid, dealing the runout an all-in outran."""
+    """What the traverser is paid, dealing the runout an all-in outran.
+
+    ``river_winner`` is the one-slot cache the river deal edge created: every
+    showdown below that board compares the same two hands, and the walk
+    reaches many of them, so the evaluator runs once per river board rather
+    than once per terminal. -2 means not yet evaluated.
+    """
     if terminal_is_fold[terminal] == 1:
         return terminal_fold[terminal, seat], index
 
@@ -261,7 +283,11 @@ def _terminal_value(
         _, index = _draw(deck_mask, known, owed, full, board_len, state, index)
         winner = _showdown_winner(hole_index, full, board_len + owed, deck_rank, deck_suit)
     else:
-        winner = _showdown_winner(hole_index, board_index, board_len, deck_rank, deck_suit)
+        if river_winner[0] == -2:
+            river_winner[0] = _showdown_winner(
+                hole_index, board_index, board_len, deck_rank, deck_suit
+            )
+        winner = river_winner[0]
 
     if winner < 0:
         return terminal_tie[terminal, seat], index
@@ -280,6 +306,7 @@ def walk(
     labels,
     next_label,
     sentinel,
+    river_winner,
     traverser,
     button,
     seat,
@@ -378,6 +405,7 @@ def walk(
                     hole_index,
                     board_index,
                     board_len,
+                    river_winner,
                     deck_rank,
                     deck_suit,
                     deck_mask,
@@ -401,6 +429,7 @@ def walk(
                 child_labels,
                 child_next,
                 child_sentinel,
+                child_winner,
                 deal_index,
             ) = _deal_edge(
                 slot,
@@ -412,6 +441,7 @@ def walk(
                 labels,
                 next_label,
                 sentinel,
+                river_winner,
                 edge_deal,
                 street_of_node,
                 deck_rank,
@@ -432,6 +462,7 @@ def walk(
                 child_labels,
                 child_next,
                 child_sentinel,
+                child_winner,
                 traverser,
                 button,
                 seat,
@@ -535,6 +566,7 @@ def walk(
             hole_index,
             board_index,
             board_len,
+            river_winner,
             deck_rank,
             deck_suit,
             deck_mask,
@@ -559,6 +591,7 @@ def walk(
         child_labels,
         child_next,
         child_sentinel,
+        child_winner,
         deal_index,
     ) = _deal_edge(
         slot,
@@ -570,6 +603,7 @@ def walk(
         labels,
         next_label,
         sentinel,
+        river_winner,
         edge_deal,
         street_of_node,
         deck_rank,
@@ -591,6 +625,7 @@ def walk(
         child_labels,
         child_next,
         child_sentinel,
+        child_winner,
         traverser,
         button,
         seat,
@@ -811,6 +846,8 @@ def walk_many(
     hole_index = np.empty(4, dtype=np.int64)
     root_board = np.zeros(5, dtype=np.int64)
     root_labels = np.zeros(4, dtype=np.int64)
+    # Never read: no showdown happens on a five-card board the root did not deal.
+    root_winner = np.full(1, -2, dtype=np.int64)
     for done, iteration in enumerate(range(first, stop, step)):
         known, deal_index = _draw(deck_mask, 0, 4, hole_index, 0, deal_state, deal_index)
         traverser = iteration % 2
@@ -833,6 +870,7 @@ def walk_many(
             root_labels,
             0,
             0,
+            root_winner,
             traverser,
             button,
             seat,
