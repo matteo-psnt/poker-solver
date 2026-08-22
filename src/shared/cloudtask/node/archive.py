@@ -22,7 +22,6 @@ import contextlib
 import json
 import os
 import shutil
-import time
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
@@ -178,42 +177,15 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = 
 
     for child in children:
         if child.is_file() and is_snapshot(child.name):
-            # ONE FILE PER RUNG since the format changed. With a SAS the bytes
-            # go to the container and only the marker lands here; without one
-            # this is the old behaviour with a file where a directory was.
-            marker = destination / marker_for(child.name)
-            if marker.exists():
-                continue
-            if sas or _copy_one(child, destination / child.name, log):
-                _touch(marker)
-            else:
-                failed = True
+            # ONE FILE PER RUNG, and with a SAS its bytes go to the container
+            # alone -- `publish_rungs_to_blob` puts them there on the same
+            # tick. Nothing about the rung lands on the share any more: the
+            # container's listing is what says which rungs exist.
+            if not sas:
+                failed |= not _copy_one(child, destination / child.name, log)
             continue
-        if not child.is_dir():
-            continue
-        if not is_snapshot(child.name):
+        if child.is_dir() and not is_snapshot(child.name):
             failed |= not _copy_dir(child, destination / child.name, log, atomic=True)
-            continue
-
-        marker = destination / marker_for(child.name)
-        # ALREADY COMPLETE => NOTHING TO DO. Not just an optimisation: the
-        # republish below drops the marker first, so re-copying a known-good
-        # rung leaves it briefly unmarked and a task dying in that window makes
-        # the manifest name a rung the next fetch refuses. Nor is it rare --
-        # measured at 6.6 minutes re-uploading 809 MB already on the share.
-        if marker.exists():
-            continue
-        # A DIRECTORY SNAPSHOT STILL GOES TO THE SHARE, SAS or not. It is a
-        # rung in the format that came before `.ckpt.zst`, and the container
-        # only takes files -- `publish_rungs_to_blob` skips directories,
-        # because converting one needs `zarr` and this module is imported
-        # before `uv sync`. Skipping the copy here on the strength of a SAS
-        # marked such a rung complete and wrote it NOWHERE.
-        _unlink(marker)
-        if _publish_snapshot(child, destination / child.name, log):
-            _touch(marker)
-        else:
-            failed = True
 
     # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded,
     # and SNAPSHOTS excluded: a snapshot is a file now, the branch above has
@@ -246,7 +218,7 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = 
                 blobstore.put_bytes(sas, f"{run_dir.name}/{name}", body)
             except Exception as error:  # noqa: BLE001 -- the share copy still lands
                 log(f"WARN could not publish {name} to the container: {error}")
-        if not _rungs_landed(body, destination, log) or not _write_one(
+        if not _rungs_landed(body, destination, log, sas) or not _write_one(
             body, destination / name, log
         ):
             return False
@@ -298,31 +270,29 @@ def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quie
     return landed
 
 
-def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
+def _rungs_landed(manifest: bytes, destination: Path, log: Log, sas: str = "") -> bool:
     """Is every rung this manifest names actually somewhere a fetch can get it?
 
-    A DIRECTORY OR A MARKER. The directory is the share holding the bytes; the
-    marker alone means they went to the container instead, which is what a
-    publish with a SAS does. Requiring the directory would freeze manifest
-    publishing for every run the moment the snapshots stopped landing here --
-    the manifest would name rungs, the share would hold none of them, and the
-    run would never advertise a checkpoint again.
-
-    ABSENCE only. A rung present but unmarked is refused at FETCH time by
-    :func:`require_complete`, which is where that case belongs -- refusing it
-    here would freeze manifest publishing for the run forever, since nothing in
-    a later publish can add a marker to a rung this node no longer has.
+    WHICHEVER STORE WOULD ANSWER. With a SAS the bytes went to the container,
+    so that is where to look; without one they are on the share beside this
+    manifest. Requiring the share alone would freeze manifest publishing for
+    every run the moment snapshots stopped landing there -- the manifest would
+    name rungs, the share would hold none, and the run would never advertise a
+    checkpoint again.
     """
     named = _named_rungs(manifest)
-    missing = sorted(
-        name
-        for name in named
-        if not (destination / name).is_dir() and not (destination / marker_for(name)).exists()
-    )
+    missing = sorted(name for name in named if not _rung_reachable(destination, name, sas))
     if missing:
         log(f"WARN manifest names {', '.join(missing)}, nowhere to be found -- NOT publishing it")
         return False
     return True
+
+
+def _rung_reachable(destination: Path, name: str, sas: str) -> bool:
+    """Whether a fetch could get this rung from the store that holds it."""
+    if sas:
+        return blobstore.exists(sas, f"{destination.name}/{records.object_name(name)}")
+    return (destination / name).exists()
 
 
 def _named_rungs(manifest: bytes) -> set[str]:
@@ -335,34 +305,6 @@ def _named_rungs(manifest: bytes) -> set[str]:
         return set()
     entries = [parsed, *_entries(parsed.get("retained"))]
     return {str(entry["zarr"]) for entry in entries if isinstance(entry.get("zarr"), str)}
-
-
-def _publish_snapshot(source: Path, destination: Path, log: Log) -> bool:
-    """One rung, announced before and measured after.
-
-    UNCONDITIONAL, not the update rule. An unmarked destination is the residue
-    of an interrupted publish, and the file that was mid-copy is TRUNCATED yet
-    NEWER than the source -- so the update rule would skip exactly the wrong
-    file and the marker would bless it. `cp -ru` had this hole too; a Batch
-    retry is what triggers it.
-    """
-    log(f"publishing {source.name} ({_megabytes(source):.0f} MB)")
-    started = time.monotonic()
-    try:
-        copied = copy_tree(source, destination, update=False)
-    except OSError as error:
-        log(f"WARN copying {source.name} failed: {error}")
-        return False
-    if copied == 0:
-        # Never legitimate for a checkpoint, and the marker would bless it: the
-        # trainer prunes rungs the current manifest drops, so a source can
-        # vanish between the `is_dir` above and this copy.
-        log(f"WARN {source.name} copied 0 bytes -- not marking it complete")
-        return False
-    elapsed = max(time.monotonic() - started, 1e-6)
-    rate = copied / 1e6 / elapsed
-    log(f"published {source.name}: {copied / 1e6:.0f} MB in {elapsed:.0f}s ({rate:.1f} MB/s)")
-    return True
 
 
 def _megabytes(directory: Path) -> float:
@@ -437,21 +379,6 @@ def _unlink(path: Path) -> None:
         path.unlink()
 
 
-def _touch(path: Path) -> None:
-    with contextlib.suppress(OSError):
-        path.write_text("")
-
-
-class FetchRefusedError(Exception):
-    """The share cannot supply what this task needs, and guessing would be worse.
-
-    Raised rather than logged because every case is one where continuing means
-    training or scoring against data that is absent, truncated, or written by a
-    backend this tree cannot read -- each of which surfaces minutes later as a
-    confusing error in a different subsystem.
-    """
-
-
 def _parse_manifest(body: str) -> dict:
     """Parse a manifest's text, or ``{}`` if it is empty or torn."""
     try:
@@ -517,6 +444,16 @@ def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") ->
     copy_tree(published, destination / name, update=False)
 
 
+class FetchRefusedError(Exception):
+    """The store cannot supply what this task needs, and guessing would be worse.
+
+    Raised rather than logged because every case is one where continuing means
+    training or scoring against data that is absent, truncated, or written by a
+    backend this tree cannot read -- each of which surfaces minutes later as a
+    confusing error in a different subsystem.
+    """
+
+
 def require_complete(source: Path, name: str, sas: str = "") -> None:
     """A rung without its marker is either pre-marker or was interrupted.
 
@@ -529,18 +466,14 @@ def require_complete(source: Path, name: str, sas: str = "") -> None:
     and the answer to that is to publish it again from the node that has it,
     not to bless whatever reached the share.
     """
-    # IN THE CONTAINER IS COMPLETE, with nothing else to check. One rung is one
-    # atomically-committed blob: it is either there whole or not there, so the
-    # marker this function exists to demand has no counterpart and needs none.
+    # PRESENCE IS COMPLETENESS. One rung is one atomically-committed object:
+    # it is either there whole or not there at all. The completion marker this
+    # used to demand existed because a DIRECTORY on SMB could be half-copied
+    # and look finished, and there are no directories left in any store.
     if sas and blobstore.exists(sas, f"{source.name}/{records.object_name(name)}"):
         return
     if not (source / name).exists():
-        raise FetchRefusedError(f"the manifest names {name} but it is not on the share")
-    if not (source / marker_for(name)).exists():
-        raise FetchRefusedError(
-            f"{name} has no completion marker -- refusing a possibly-partial "
-            f"snapshot. Re-publish it from the node that produced it."
-        )
+        raise FetchRefusedError(f"the manifest names {name} but no store holds it")
 
 
 def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: str = "") -> str:

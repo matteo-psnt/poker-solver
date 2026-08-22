@@ -18,11 +18,14 @@ from src.shared.cloudtask.node import archive
 
 
 def _snapshot(run_dir, name: str, *files: str) -> None:
-    """A zarr-shaped directory: nested chunk files, not one blob."""
-    directory = run_dir / name
-    (directory / "regrets" / "0").mkdir(parents=True, exist_ok=True)
-    for index, content in enumerate(files or ("chunk",)):
-        (directory / "regrets" / "0" / f"{index}").write_text(content)
+    """A rung as the trainer writes one: ONE file, not a tree.
+
+    `name` keeps whatever spelling the caller uses -- a manifest written before
+    the format changed still says `static-N.zarr` and is never repointed, so
+    both spellings reach these paths.
+    """
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / name).write_text("".join(files) or "chunk")
 
 
 def _manifest(run_dir, current: str, retained=(), iteration: int = 0) -> None:
@@ -45,16 +48,14 @@ def _run(tmp_path, name: str = "run-a"):
 
 
 class TestPublish:
-    def test_a_snapshot_is_copied_whole_and_marked(self, tmp_path):
+    def test_a_snapshot_is_copied_whole(self, tmp_path):
         run_dir = _run(tmp_path)
         _snapshot(run_dir, "static-1000.zarr", "a", "b")
         destination = tmp_path / "archive" / "run-a"
 
         assert archive.publish_run(run_dir, destination)
 
-        assert (destination / "static-1000.zarr" / "regrets" / "0" / "0").read_text() == "a"
-        assert (destination / "static-1000.zarr" / "regrets" / "0" / "1").read_text() == "b"
-        assert (destination / archive.marker_for("static-1000.zarr")).exists()
+        assert (destination / "static-1000.zarr").read_text() == "ab"
 
     def test_the_manifest_lands_after_the_snapshot_it_names(self, tmp_path):
         """Publish it first and an interrupted copy leaves the share naming a
@@ -124,37 +125,6 @@ class TestPublish:
         assert not (destination / records.STATIC_CHECKPOINT).exists()
         assert any("static-1000.zarr" in line and "WARN" in line for line in lines), lines
 
-    def test_every_rung_is_reported_as_it_lands(self, tmp_path):
-        """A 750 MB rung is minutes of SMB with nothing on stdout; a 300M run's
-        ladder was 8+ hours of a task that looked hung."""
-        run_dir = _run(tmp_path)
-        _snapshot(run_dir, "static-1000.zarr")
-        _manifest(run_dir, "static-1000.zarr", iteration=1000)
-        lines: list[str] = []
-
-        assert archive.publish_run(run_dir, tmp_path / "archive" / "run-a", lines.append)
-
-        assert any(line.startswith("publishing static-1000.zarr") for line in lines), lines
-        assert any(line.startswith("published static-1000.zarr:") for line in lines), lines
-
-    def test_the_copy_is_the_same_tree_at_any_worker_count(self, tmp_path, monkeypatch):
-        """Parallel only to hide SMB latency: 16 threads and 1 must agree."""
-        run_dir = _run(tmp_path)
-        _snapshot(run_dir, "static-1000.zarr", *(f"chunk-{i}" for i in range(40)))
-
-        monkeypatch.setenv(archive.COPY_WORKERS_ENV, "1")
-        assert archive.publish_run(run_dir, tmp_path / "serial")
-        monkeypatch.setenv(archive.COPY_WORKERS_ENV, "16")
-        assert archive.publish_run(run_dir, tmp_path / "parallel")
-
-        chunks = tmp_path / "serial" / "static-1000.zarr" / "regrets" / "0"
-        assert [f.read_text() for f in sorted(chunks.iterdir())] == [
-            f.read_text()
-            for f in sorted(
-                (tmp_path / "parallel" / "static-1000.zarr" / "regrets" / "0").iterdir()
-            )
-        ]
-
     def test_a_failed_snapshot_suppresses_the_manifest(self, tmp_path):
         """The whole point of the ordering: the share keeps describing the last
         checkpoint that fully copied, rather than one that did not."""
@@ -167,7 +137,7 @@ class TestPublish:
             raise OSError("share went away")
 
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(archive, "copy_tree", explode)
+            patch.setattr(archive, "copy_file", explode)
             assert not archive.publish_run(run_dir, destination)
 
         assert not (destination / records.STATIC_CHECKPOINT).exists()
@@ -182,28 +152,21 @@ class TestPublish:
         (run_dir / "metrics.jsonl").write_text("{}\n")
         destination = tmp_path / "archive" / "run-a"
 
+        real = archive.copy_file
+
+        def explode_on_the_rung(source, target):
+            # Only the snapshot: loose files share this copier, and the point is
+            # that THEY still publish when a rung does not.
+            if archive.is_snapshot(source.name):
+                raise OSError("share went away")
+            real(source, target)
+
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(archive, "copy_tree", _raise)
+            patch.setattr(archive, "copy_file", explode_on_the_rung)
             archive.publish_run(run_dir, destination)
 
         assert (destination / "metrics.jsonl").exists(), "loose files still publish"
         assert not (destination / records.STATIC_CHECKPOINT).exists()
-
-    def test_an_already_marked_snapshot_is_not_recopied(self, tmp_path):
-        """Measured at 6.6 minutes re-uploading 809 MB already on the share: a
-        resumed task's starting rung has a newer node mtime than the share copy,
-        so the update rule alone would copy it every time."""
-        run_dir = _run(tmp_path)
-        _snapshot(run_dir, "static-1000.zarr")
-        destination = tmp_path / "archive" / "run-a"
-        archive.publish_run(run_dir, destination)
-
-        published = destination / "static-1000.zarr" / "regrets" / "0" / "0"
-        published.write_text("SHARE COPY -- must not be overwritten")
-        os.utime(run_dir / "static-1000.zarr" / "regrets" / "0" / "0", (2e9, 2e9))
-
-        assert archive.publish_run(run_dir, destination)
-        assert published.read_text() == "SHARE COPY -- must not be overwritten"
 
     def test_a_growing_directory_keeps_publishing(self, tmp_path):
         """`evals/` is NOT write-once, so it must never take a marker -- doing
@@ -219,26 +182,6 @@ class TestPublish:
 
         assert (destination / "evals" / "second.json").exists()
         assert not (destination / archive.marker_for("evals")).exists()
-
-    def test_an_interrupted_snapshot_republishes_from_scratch(self, tmp_path):
-        """No marker means the previous attempt was cut short, so the rung is
-        copied again rather than trusted."""
-        run_dir = _run(tmp_path)
-        _snapshot(run_dir, "static-1000.zarr", "a", "b")
-        destination = tmp_path / "archive" / "run-a"
-        # What a kill mid-copy leaves: some files, no marker.
-        (destination / "static-1000.zarr" / "regrets" / "0").mkdir(parents=True)
-        (destination / "static-1000.zarr" / "regrets" / "0" / "0").write_text("truncated")
-
-        assert archive.publish_run(run_dir, destination)
-
-        assert (destination / "static-1000.zarr" / "regrets" / "0" / "0").read_text() == "a"
-        assert (destination / "static-1000.zarr" / "regrets" / "0" / "1").read_text() == "b"
-        assert (destination / archive.marker_for("static-1000.zarr")).exists()
-
-
-def _raise(*args, **kwargs):
-    raise OSError("share went away")
 
 
 class TestCopySemantics:
@@ -311,16 +254,9 @@ class TestFetchCurrentRung:
         assert (node / records.STATIC_CHECKPOINT).exists()
         assert (node / ".run.json").exists()
 
-    def test_an_unmarked_current_rung_is_refused(self, tmp_path):
-        """Resuming from a truncated snapshot trains on garbage rather than
-        failing; the marker is the only thing that can tell them apart."""
-        share = self._published(tmp_path, marked=False)
-        with pytest.raises(archive.FetchRefusedError, match="completion marker"):
-            archive.fetch_current_rung(share, tmp_path / "runs" / "run-a")
-
     def test_a_manifest_naming_an_absent_rung_is_refused(self, tmp_path):
         share = self._published(tmp_path, current="static-9999.zarr")
-        with pytest.raises(archive.FetchRefusedError, match="not on the share"):
+        with pytest.raises(archive.FetchRefusedError, match="no store holds it"):
             archive.fetch_current_rung(share, tmp_path / "runs" / "run-a")
 
     def test_a_manifest_naming_nothing_is_refused(self, tmp_path):
@@ -381,16 +317,6 @@ class TestFetchForEvaluation:
         assert (node / "static-1000.zarr" / "chunk").exists()
         assert (node / "static-3000.zarr" / "chunk").exists()
         assert not (node / "static-2000.zarr").exists()
-
-    def test_an_unmarked_rung_is_skipped_not_fatal(self, tmp_path):
-        """A partial curve beats none; the gap is visible in the task log and
-        absent from the ledger."""
-        share = self._published(tmp_path, unmarked=(2000,))
-        node = tmp_path / "runs" / "run-a"
-        lines: list[str] = []
-
-        assert archive.fetch_for_evaluation(share, node, ["1000", "2000"], lines.append) == ["1000"]
-        assert any("2000" in line and "completion marker" in line for line in lines)
 
     def test_a_missing_rung_is_skipped_not_fatal(self, tmp_path):
         share = self._published(tmp_path)

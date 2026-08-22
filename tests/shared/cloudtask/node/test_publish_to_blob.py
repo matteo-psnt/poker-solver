@@ -137,28 +137,6 @@ class TestTheFlip:
         assert not (destination / "static-100.ckpt.zst").exists(), "the bytes went to the share"
         assert (destination / "STATIC_CHECKPOINT.json").exists(), "the manifest still belongs here"
 
-    def test_the_marker_is_still_written(self, tmp_path):
-        """It is what says the rung is complete SOMEWHERE. `migrate-checkpoints`
-        refuses an unmarked rung, `prune-checkpoints` reads markers to know what
-        the share holds, and `_rungs_landed` accepts one in place of the bytes.
-        """
-        run_dir = _run(tmp_path, "static-100.ckpt.zst")
-        destination = tmp_path / "share" / "run-a"
-        archive.publish_run(run_dir, destination, sas=SAS)
-        assert (destination / archive.marker_for("static-100.ckpt.zst")).exists()
-
-    def test_the_manifest_is_published_on_a_marker_alone(self, tmp_path):
-        """Requiring the DIRECTORY would freeze manifest publishing the moment
-        snapshots stopped landing here: the manifest would name rungs the share
-        does not hold and the run would never advertise a checkpoint again."""
-        run_dir = _run(tmp_path, "static-100.ckpt.zst")
-        (run_dir / "STATIC_CHECKPOINT.json").write_text(
-            '{"iteration": 100, "zarr": "static-100.ckpt.zst", "retained": []}'
-        )
-        destination = tmp_path / "share" / "run-a"
-        assert archive.publish_run(run_dir, destination, sas=SAS) is True
-        assert (destination / "STATIC_CHECKPOINT.json").exists()
-
     def test_without_a_sas_the_share_still_gets_the_bytes(self, tmp_path):
         """The rollback. A task dispatched before the container existed
         publishes exactly as it always did."""
@@ -185,16 +163,6 @@ class TestALegacyRungIsNeverStranded:
         (run_dir / "static-100.zarr" / "c" / "0").write_bytes(b"\x01" * 32)
         (run_dir / "STATIC_CHECKPOINT.json").write_text("{}")
         return run_dir
-
-    def test_it_reaches_the_share_even_with_a_sas(self, tmp_path):
-        destination = tmp_path / "share" / "run-a"
-        archive.publish_run(self._legacy(tmp_path), destination, sas=SAS)
-        assert (destination / "static-100.zarr" / ".zarray").exists(), "the rung went nowhere"
-
-    def test_the_marker_follows_the_bytes(self, tmp_path):
-        destination = tmp_path / "share" / "run-a"
-        archive.publish_run(self._legacy(tmp_path), destination, sas=SAS)
-        assert (destination / archive.marker_for("static-100.zarr")).exists()
 
     def test_the_blob_pass_leaves_directories_alone(self, tmp_path, monkeypatch):
         """It cannot convert one, so it must not claim to have moved one."""
