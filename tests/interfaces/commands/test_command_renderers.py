@@ -553,7 +553,9 @@ PAYLOADS: dict[str, Any] = {
         ],
     ),
     "autoscale-check": AutoscalePayload(
-        pool_id="train", variables=["$TargetDedicatedNodes=0", "pending=0"]
+        pool_id="train",
+        formula="$TargetDedicatedNodes = min(maxNodes, pending);",
+        variables={"$TargetDedicatedNodes": "0", "pending": "0"},
     ),
     "submit": SubmitPayload(
         target_iteration=25_000_000,

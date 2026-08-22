@@ -50,8 +50,3 @@ output "hourly_cost" {
     "standard_d32als_v6" = "$1.376/hr/node"
   }, lower(azurerm_batch_pool.train.vm_size), "see the Azure price list")
 }
-
-output "autoscale_formula" {
-  description = "The live formula, so `just autoscale-check` evaluates exactly what is deployed."
-  value       = azurerm_batch_pool.train.auto_scale[0].formula
-}

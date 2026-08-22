@@ -34,7 +34,16 @@ import type {
   Tasks,
 } from "./types";
 
-/** Cheap reads (~2s) can be frequent; the share reads (~5s) should not be. */
+/**
+ * Cheap reads (~2s) can be frequent; the share reads (~5s) should not be.
+ *
+ * `LIVE` is for the composed views, which the server serves stale-while-
+ * revalidate: every poll answers from its memo at once and refreshes behind
+ * it, so the cadence here costs nothing and the server's own TTL decides how
+ * often Azure is asked. Polling faster only shortens how long a landed refresh
+ * waits to be seen.
+ */
+const LIVE = 5_000;
 const FAST = 15_000;
 const SLOW = 60_000;
 
@@ -55,7 +64,7 @@ export const useNow = () =>
   useQuery<NowView>({
     queryKey: ["view", "now"],
     queryFn: () => get("/api/view/now"),
-    refetchInterval: FAST,
+    refetchInterval: LIVE,
   });
 
 export const useRunsView = () =>

@@ -141,3 +141,49 @@ def outcome_of(exit_code: int | None, result: str | None = None) -> Outcome:
 def exit_meaning(exit_code: int | None) -> str | None:
     """The recurring exit codes explained; ``None`` for anything unfamiliar."""
     return None if exit_code is None else EXIT_MEANING.get(exit_code)
+
+
+class NodePhase(StrEnum):
+    """What a Batch NODE state means, in the same spirit as :class:`Phase`.
+
+    Sixteen states collapse into the five questions a pool screen asks: can it
+    take a task, is it running one, is it still coming up, is it broken, or is
+    it on its way out. `unusable` after a failed mount and `starttaskfailed`
+    are the two that matter operationally, and both read as DOWN.
+    """
+
+    IDLE = "idle"
+    BUSY = "busy"
+    BOOTING = "booting"
+    DOWN = "down"
+    LEAVING = "leaving"
+    UNKNOWN = "unknown"
+
+
+_NODE_PHASE_BY_STATE: dict[str, NodePhase] = {
+    "idle": NodePhase.IDLE,
+    "running": NodePhase.BUSY,
+    "creating": NodePhase.BOOTING,
+    "starting": NodePhase.BOOTING,
+    "waitingforstarttask": NodePhase.BOOTING,
+    "rebooting": NodePhase.BOOTING,
+    "reimaging": NodePhase.BOOTING,
+    "upgradingos": NodePhase.BOOTING,
+    "unusable": NodePhase.DOWN,
+    "starttaskfailed": NodePhase.DOWN,
+    "offline": NodePhase.DOWN,
+    "preempted": NodePhase.DOWN,
+    "leavingpool": NodePhase.LEAVING,
+    "deallocating": NodePhase.LEAVING,
+    "deallocated": NodePhase.LEAVING,
+}
+
+
+def node_phase_of(state: str | None) -> NodePhase:
+    """``BatchNodeState.WAITING_FOR_START_TASK`` -> :attr:`NodePhase.BOOTING`.
+
+    Batch spells the enum with underscores and the wire value without; both
+    reach here, so the word is normalised before lookup.
+    """
+    word = (state or "").rsplit(".", 1)[-1].lower().replace("_", "")
+    return _NODE_PHASE_BY_STATE.get(word, NodePhase.UNKNOWN)

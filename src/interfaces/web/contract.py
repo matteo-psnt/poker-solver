@@ -168,8 +168,6 @@ class NowParts(Payload):
     pool: Part[Pool]
     jobs: Part[Jobs]
     tasks: Part[Tasks]
-    autoscale: Part[Autoscale]
-    cost: Part[Cost]
 
 
 class NowView(View):

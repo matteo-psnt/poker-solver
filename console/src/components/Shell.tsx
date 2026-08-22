@@ -87,7 +87,14 @@ export function Shell() {
               <span className="tnum">/{pool.data.target_dedicated_nodes}</span>
             )}
           </span>
-          {pool.data?.hourly_cost && <span>· {pool.data.hourly_cost}</span>}
+          {/* What it costs NOW, not the per-node list price: the rate is the
+              same every day and the node count is the thing that moves. */}
+          {pool.data?.burn_per_hour != null && (
+            <span title={pool.data.hourly_cost ?? undefined}>
+              · <span className="tnum text-[var(--fg)]">${pool.data.burn_per_hour.toFixed(2)}</span>
+              /hr
+            </span>
+          )}
           <span>
             · <span className="tnum text-[var(--fg)]">{count(live)}</span> running
           </span>

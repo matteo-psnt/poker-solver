@@ -151,7 +151,7 @@ class TestSharedTrees:
     def test_a_second_reader_inside_the_ttl_does_not_rebuild(self):
         builds = []
 
-        def build(root):
+        def build(root, _previous):
             builds.append(root)
             (root / "marker").write_text("x")
 
@@ -167,7 +167,7 @@ class TestSharedTrees:
         started, release = threading.Event(), threading.Event()
         builds = []
 
-        def build(root):
+        def build(root, _previous):
             builds.append(root)
             started.set()
             release.wait(timeout=2)
@@ -196,8 +196,12 @@ class TestSharedTrees:
         """The hazard refcounting exists for: expiry alone pulls the directory
         out from under a reader mid-answer."""
         trees = workspace.SharedTrees(ttl=0.0)  # every lookup is a miss
-        with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as held:
-            with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as fresh:
+        with trees.acquire(
+            "record", lambda root, _previous: (root / "marker").write_text("x")
+        ) as held:
+            with trees.acquire(
+                "record", lambda root, _previous: (root / "marker").write_text("x")
+            ) as fresh:
                 assert fresh != held
             assert (held / "marker").is_file(), "the first reader's tree was deleted under it"
         assert not held.exists(), "a released tree was never cleaned up"
@@ -205,7 +209,9 @@ class TestSharedTrees:
 
     def test_close_removes_what_nobody_holds(self):
         trees = workspace.SharedTrees(ttl=60.0)
-        with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as root:
+        with trees.acquire(
+            "record", lambda root, _previous: (root / "marker").write_text("x")
+        ) as root:
             pass
         assert root.is_dir()
         trees.close()
@@ -214,13 +220,52 @@ class TestSharedTrees:
     def test_a_failed_build_leaves_nothing_and_frees_the_key(self):
         trees = workspace.SharedTrees(ttl=60.0)
 
-        def explode(root):
+        def explode(root, _previous):
             raise RuntimeError("Azure said no")
 
         with pytest.raises(RuntimeError), trees.acquire("record", explode):
             pass
-        with trees.acquire("record", lambda root: (root / "marker").write_text("x")) as root:
+        with trees.acquire(
+            "record", lambda root, _previous: (root / "marker").write_text("x")
+        ) as root:
             assert (root / "marker").is_file()
+        trees.close()
+
+    def test_a_refresh_is_handed_the_expired_tree_and_may_read_it(self):
+        """The incremental sync's contract: the previous tree is still there,
+        intact, for the whole of the build that replaces it."""
+        trees = workspace.SharedTrees(ttl=0.0)  # every lookup is a miss
+        handed: list = []
+
+        def build(root, previous):
+            handed.append(previous)
+            if previous is not None:
+                assert (previous / "marker").read_text() == "x", "the old tree was gone"
+            (root / "marker").write_text("x")
+
+        with trees.acquire("record", build) as first:
+            pass
+        with trees.acquire("record", build) as second:
+            pass
+        assert handed == [None, first]
+        assert second != first
+        assert not first.exists(), "the expired tree outlived its replacement"
+        trees.close()
+
+    def test_a_failed_refresh_keeps_the_expired_tree_for_the_next_attempt(self):
+        trees = workspace.SharedTrees(ttl=0.0)
+        with trees.acquire("record", lambda root, _p: (root / "marker").write_text("x")) as first:
+            pass
+
+        def explode(_root, _previous):
+            raise RuntimeError("Azure said no")
+
+        with pytest.raises(RuntimeError), trees.acquire("record", explode):
+            pass
+        handed: list = []
+        with trees.acquire("record", lambda _root, previous: handed.append(previous)):
+            pass
+        assert handed == [first], "the retry was not offered the tree it could have synced from"
         trees.close()
 
     def test_two_caches_nest_rather_than_refusing(self):

@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from src.interfaces.cloud import credential
 from src.interfaces.cloud.tasks.spec import TaskSpec, daily_job_id, suffixed_job_id, task_command
 from src.shared import task_states
-from src.shared.task_states import Outcome, Phase
+from src.shared.task_states import NodePhase, Outcome, Phase
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,6 +83,41 @@ class ResizeError(BaseModel):
     values: dict[str, str | None] = {}
 
 
+class AutoscaleRun(BaseModel):
+    """The pool's own most recent evaluation of its formula -- what it DECIDED.
+
+    Read off the pool, so it costs nothing beyond `get_pool` and cannot go
+    stale the way a formula cached from `terraform output` can. ``variables``
+    is the formula's result string split into its assignments, `$`-prefixed
+    names included, since those are the identifiers the formula itself uses.
+    """
+
+    evaluated_at: str | None = None
+    interval_seconds: float | None = None
+    variables: dict[str, str] = {}
+    error: ResizeError | None = None
+
+
+class NodeStatus(BaseModel):
+    """One compute node: what state it is in, since when, and what it is running.
+
+    ``since`` is the state's own transition time, which is what answers "how
+    long has this been booting" -- the question a queued task that will not
+    start comes down to. ``tasks`` are the ids Batch reports as running there,
+    the join the console draws a task onto a node by.
+    """
+
+    id: str
+    state: str | None
+    phase: NodePhase
+    since: str | None = None
+    allocated_at: str | None = None
+    tasks: list[str] = []
+    start_task_state: str | None = None
+    start_task_exit_code: int | None = None
+    errors: list[str] = []
+
+
 class PoolStatus(BaseModel):
     """The pool's node counts, and any reason it could not reach them."""
 
@@ -92,10 +127,13 @@ class PoolStatus(BaseModel):
     on, but leaving one raw spelling behind is how the console grew a private
     prefix-stripper in the first place."""
     allocation_state: str | None
+    allocation_since: str | None = None
     current_dedicated_nodes: int | None
     target_dedicated_nodes: int | None
     vm_size: str | None
     resize_errors: list[ResizeError] = []
+    autoscale: AutoscaleRun | None = None
+    nodes: list[NodeStatus] = []
 
 
 class AutoscaleResult(BaseModel):
@@ -108,7 +146,8 @@ class AutoscaleResult(BaseModel):
     stopped scaling.
     """
 
-    variables: list[str] = []
+    formula: str = ""
+    variables: dict[str, str] = {}
     error: ResizeError | None = None
 
 
@@ -269,7 +308,13 @@ def task_record(batch: BatchClient, job_id: str, task_id: str) -> BatchTask | No
 
 
 def pool_status(batch: BatchClient, pool_id: str) -> PoolStatus:
-    """Node counts, and -- the point of the command -- why a resize failed.
+    """The pool and every node in it, and -- the point of the command -- why a
+    resize failed.
+
+    Two round trips, issued together: the pool (counts, allocation state, its
+    last autoscale run) and the node list (what each machine is doing). Neither
+    alone says why a queued task is not running: the pool says seven nodes, the
+    list says two of them are still booting.
 
     Batch reports every allocation problem as a generic ``AllocationFailed``.
     The actual cause (a Gen1-vs-Gen2 image, a policy denial, quota) is escaped
@@ -279,14 +324,65 @@ def pool_status(batch: BatchClient, pool_id: str) -> PoolStatus:
     the ``*Json`` ones, since a cause that arrives under an unfamiliar name is
     exactly the one worth seeing.
     """
-    pool = batch.get_pool(pool_id)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        asked = pool.submit(batch.get_pool, pool_id)
+        listed = pool.submit(lambda: list(batch.list_nodes(pool_id)))
+        found, nodes = asked.result(), listed.result()
     return PoolStatus(
-        pool_id=pool.id,
-        allocation_state=_short(str(pool.allocation_state)) if pool.allocation_state else None,
-        current_dedicated_nodes=pool.current_dedicated_nodes,
-        target_dedicated_nodes=pool.target_dedicated_nodes,
-        vm_size=pool.vm_size,
-        resize_errors=[_resize_error(error) for error in (pool.resize_errors or [])],
+        pool_id=found.id,
+        allocation_state=_short(str(found.allocation_state)) if found.allocation_state else None,
+        allocation_since=_isoformat(found.allocation_state_transition_time),
+        current_dedicated_nodes=found.current_dedicated_nodes,
+        target_dedicated_nodes=found.target_dedicated_nodes,
+        vm_size=found.vm_size,
+        resize_errors=[_resize_error(error) for error in (found.resize_errors or [])],
+        autoscale=_autoscale_run(found),
+        nodes=[_node_status(node) for node in nodes],
+    )
+
+
+def _autoscale_run(pool: Any) -> AutoscaleRun | None:
+    run = pool.auto_scale_run
+    if run is None:
+        return None
+    interval = pool.auto_scale_evaluation_interval
+    return AutoscaleRun(
+        evaluated_at=_isoformat(run.timestamp),
+        interval_seconds=interval.total_seconds() if interval is not None else None,
+        variables=_variables(run.results),
+        error=None if run.error is None else _resize_error(run.error),
+    )
+
+
+def _variables(results: str | None) -> dict[str, str]:
+    """``$TargetDedicatedNodes=7;pending=7`` -> ``{"$TargetDedicatedNodes": "7", ...}``."""
+    found: dict[str, str] = {}
+    for part in (results or "").split(";"):
+        name, sep, value = part.strip().partition("=")
+        if sep and name:
+            found[name.strip()] = value.strip()
+    return found
+
+
+def _node_status(node: Any) -> NodeStatus:
+    start = node.start_task_info
+    return NodeStatus(
+        id=node.id,
+        state=_short(str(node.state)) if node.state else None,
+        phase=task_states.node_phase_of(str(node.state) if node.state else None),
+        since=_isoformat(node.state_transition_time),
+        allocated_at=_isoformat(node.allocation_time),
+        tasks=[
+            info.task_id
+            for info in (node.recent_tasks or [])
+            if info.task_id and task_states.phase_of(str(info.task_state)) is Phase.RUNNING
+        ],
+        start_task_state=_short(str(start.state)) if start is not None and start.state else None,
+        start_task_exit_code=start.exit_code if start is not None else None,
+        errors=[
+            f"{error.code}: {error.message}" if error.message else str(error.code)
+            for error in (node.errors or [])
+        ],
     )
 
 
@@ -298,8 +394,15 @@ def _resize_error(error: Any) -> ResizeError:
     )
 
 
-def evaluate_autoscale(batch: BatchClient, pool_id: str, formula: str) -> AutoscaleResult:
+def evaluate_autoscale(
+    batch: BatchClient, pool_id: str, formula: str | None = None
+) -> AutoscaleResult:
     """Evaluate a formula server-side, returning BOTH its variables and its error.
+
+    The DEPLOYED formula when none is given -- read off the pool itself, which
+    is the only copy that cannot be stale. A console server that had cached
+    `terraform output` at startup went on evaluating a three-day-old ceiling
+    after `max_nodes` changed underneath it.
 
     The error half is the reason this exists. An invalid or throwing formula
     still returns partial ``results``, so reporting results alone makes a broken
@@ -307,11 +410,14 @@ def evaluate_autoscale(batch: BatchClient, pool_id: str, formula: str) -> Autosc
     and a one-argument ``GetSample`` both went unnoticed while the pool quietly
     stopped scaling.
     """
+    if formula is None:
+        formula = batch.get_pool(pool_id).auto_scale_formula or ""
     run = batch.evaluate_pool_auto_scale(
         pool_id, BatchPoolEvaluateAutoScaleOptions(auto_scale_formula=formula)
     )
     return AutoscaleResult(
-        variables=[part.strip() for part in (run.results or "").split(";") if part.strip()],
+        formula=formula,
+        variables=_variables(run.results),
         error=None if run.error is None else _resize_error(run.error),
     )
 

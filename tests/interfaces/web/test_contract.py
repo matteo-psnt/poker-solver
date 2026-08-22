@@ -150,8 +150,6 @@ class TestTheViewEnvelopes:
                     "pool": self._part("pool-status"),
                     "jobs": self._part("jobs"),
                     "tasks": self._part("tasks"),
-                    "autoscale": self._part("autoscale-check"),
-                    "cost": self._part("cost"),
                 },
             }
         )
@@ -171,8 +169,6 @@ class TestTheViewEnvelopes:
                     "pool": {"payload": None, "error": "az login has expired"},
                     "jobs": self._part("jobs"),
                     "tasks": self._part("tasks"),
-                    "autoscale": self._part("autoscale-check"),
-                    "cost": self._part("cost"),
                 },
             }
         )

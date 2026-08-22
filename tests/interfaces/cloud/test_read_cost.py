@@ -62,6 +62,36 @@ class FakeBatch:
         self.get_task_calls.append((job_id, task_id))
         return _task(task_id)
 
+    def get_pool(self, pool_id: str):
+        self.get_pool_calls = getattr(self, "get_pool_calls", 0) + 1
+        return _Obj(
+            id=pool_id,
+            allocation_state="AllocationState.STEADY",
+            allocation_state_transition_time=None,
+            current_dedicated_nodes=1,
+            target_dedicated_nodes=1,
+            vm_size="standard_d16als_v6",
+            resize_errors=[],
+            auto_scale_run=_Obj(
+                timestamp=None, results="$TargetDedicatedNodes=1;pending=1", error=None
+            ),
+            auto_scale_evaluation_interval=dt.timedelta(minutes=5),
+        )
+
+    def list_nodes(self, pool_id: str):
+        self.list_nodes_calls = getattr(self, "list_nodes_calls", 0) + 1
+        return [
+            _Obj(
+                id="tvmps_1",
+                state="BatchNodeState.RUNNING",
+                state_transition_time=None,
+                allocation_time=None,
+                recent_tasks=[_Obj(task_id="t3", task_state="BatchTaskState.RUNNING")],
+                start_task_info=_Obj(state="BatchStartTaskState.COMPLETED", exit_code=0),
+                errors=[],
+            )
+        ]
+
 
 class _Obj:
     def __init__(self, **kwargs: Any):
@@ -123,6 +153,26 @@ class TestReconcileAsksAboutOpenQuestionsOnly:
         assert client.list_tasks_calls == []
         assert record is not None
         assert record.job == "job-live"
+
+
+class TestPoolStatusIsTwoRoundTrips:
+    """The pool and its node list, and nothing per node.
+
+    A per-node `get_node` would scale with the pool -- 30 nodes at the current
+    ceiling -- for what one listing already carries. Pinned at two calls, so a
+    reader that wants a node's detail adds it to the listing rather than looping.
+    """
+
+    def test_one_pool_read_and_one_node_listing(self):
+        client = FakeBatch(ACCOUNT)
+        status = batch.pool_status(_as_client(client), "train")
+
+        assert client.get_pool_calls == 1
+        assert client.list_nodes_calls == 1
+        assert [node.tasks for node in status.nodes] == [["t3"]]
+        assert status.autoscale is not None
+        assert status.autoscale.variables == {"$TargetDedicatedNodes": "1", "pending": "1"}
+        assert status.autoscale.interval_seconds == 300.0
 
 
 class TestDeadKeyTablesAreNotFetched:

@@ -17,6 +17,9 @@ type S = components["schemas"];
 
 /** The pool, and what Batch is running. */
 export type Pool = S["PoolPayload"];
+export type NodeStatus = S["NodeStatus"];
+export type NodePhase = S["NodePhase"];
+export type AutoscaleRun = S["AutoscaleRun"];
 export type Jobs = S["JobsPayload"];
 export type Job = S["Job"];
 export type BatchTask = S["BatchTask"];

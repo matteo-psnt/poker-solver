@@ -186,8 +186,13 @@ class SharedTrees:
     _building: set[str] = field(default_factory=set, repr=False)
 
     @contextmanager
-    def acquire(self, key: str, build: Callable[[Path], None]) -> Iterator[Path]:
-        """The tree for ``key``, built by ``build`` if there is no fresh one."""
+    def acquire(self, key: str, build: Callable[[Path, Path | None], None]) -> Iterator[Path]:
+        """The tree for ``key``, built by ``build`` if there is no fresh one.
+
+        ``build`` is handed the EXPIRED tree's path when there is one -- held
+        for the duration, so a refresh can carry unchanged files across instead
+        of fetching them again. It must treat that tree as read-only.
+        """
         tree = self._checkout(key, build)
         try:
             yield tree.path
@@ -196,40 +201,53 @@ class SharedTrees:
                 tree.holders -= 1
                 self._drop_if_unused(tree)
 
-    def _checkout(self, key: str, build: Callable[[Path], None]) -> _Tree:
+    def _checkout(self, key: str, build: Callable[[Path, Path | None], None]) -> _Tree:
         with self._lock:
             while True:
-                tree = self._trees.get(key)
-                if tree is not None and time.monotonic() - tree.born < self.ttl:
-                    tree.holders += 1
-                    return tree
+                previous = self._trees.get(key)
+                if previous is not None and time.monotonic() - previous.born < self.ttl:
+                    previous.holders += 1
+                    return previous
                 if key in self._building:
                     # Someone else is already paying for this. Waiting costs the
                     # remainder of ONE sweep; racing costs a whole extra one.
                     self._lock.wait()
                     continue
-                self._retire(key)
+                if previous is not None:
+                    previous.holders += 1
                 self._building.add(key)
                 break
 
         path = Path(tempfile.mkdtemp(prefix="poker-share-"))
         try:
-            build(path)
+            build(path, previous.path if previous is not None else None)
         except BaseException:
             # The waiters must be released even on failure, or a single bad
             # credential parks every other request until the server is killed.
+            # The expired tree stays: the next reader retries the refresh from
+            # it rather than from nothing.
             shutil.rmtree(path, ignore_errors=True)
             with self._lock:
                 self._building.discard(key)
+                self._release(previous)
                 self._lock.notify_all()
             raise
 
         with self._lock:
             fresh = _Tree(path=path, born=time.monotonic(), holders=1)
             self._trees[key] = fresh
+            if previous is not None:
+                previous.retired = True
+            self._release(previous)
             self._building.discard(key)
             self._lock.notify_all()
             return fresh
+
+    def _release(self, tree: _Tree | None) -> None:
+        """Let go of the hold a build took on its predecessor. Caller holds the lock."""
+        if tree is not None:
+            tree.holders -= 1
+            self._drop_if_unused(tree)
 
     def _retire(self, key: str) -> None:
         """Give up the cached tree for ``key``. Caller holds the lock."""
@@ -333,7 +351,7 @@ def share_records(*, run: str | None = None) -> Iterator[Path]:
             yield root
         return
 
-    with cache.acquire(RECORD_KEY, lambda root: _materialise(root, run=None)) as root:
+    with cache.acquire(RECORD_KEY, lambda root, _previous: _materialise(root, run=None)) as root:
         if run is not None:
             _require_published(root, run)
         yield root
