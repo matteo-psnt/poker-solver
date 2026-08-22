@@ -88,54 +88,87 @@ def _top_ranks(mask, count, skip):
 
 
 @jit(nopython=True, cache=True)
+def _top_rank(mask):
+    """The highest rank set in ``mask``, or -1."""
+    rank = 12
+    while rank >= 0:
+        if mask >> rank & 1:
+            return rank
+        rank -= 1
+    return -1
+
+
+@jit(nopython=True, cache=True)
 def hand_rank(ranks, suits):
     """Order-equivalent rank of a 7-card hand. Higher is better.
 
     ``ranks`` are 0..12 for 2..A and ``suits`` 0..3, matching eval7's own
-    encoding so callers pass its numbers straight through.
+    encoding so callers pass its numbers straight through. Scalars only: this
+    runs twice per showdown inside the walk, and an allocation here is the
+    whole cost of the call.
     """
-    rank_counts = np.zeros(13, dtype=np.int64)
-    suit_counts = np.zeros(4, dtype=np.int64)
-    suit_masks = np.zeros(4, dtype=np.int64)
+    # Multiplicity as four rank masks: a rank is in `twice` once seen twice, etc.
     mask = 0
+    twice = 0
+    thrice = 0
+    four = 0
+    # Per-suit rank masks and counts, unrolled because a kernel array is a heap alloc.
+    suit0 = 0
+    suit1 = 0
+    suit2 = 0
+    suit3 = 0
+    count0 = 0
+    count1 = 0
+    count2 = 0
+    count3 = 0
 
     for i in range(ranks.shape[0]):
-        rank = ranks[i]
+        bit = 1 << ranks[i]
+        if mask & bit == 0:
+            mask |= bit
+        elif twice & bit == 0:
+            twice |= bit
+        elif thrice & bit == 0:
+            thrice |= bit
+        else:
+            four |= bit
         suit = suits[i]
-        rank_counts[rank] += 1
-        suit_counts[suit] += 1
-        suit_masks[suit] |= 1 << rank
-        mask |= 1 << rank
+        if suit == 0:
+            suit0 |= bit
+            count0 += 1
+        elif suit == 1:
+            suit1 |= bit
+            count1 += 1
+        elif suit == 2:
+            suit2 |= bit
+            count2 += 1
+        else:
+            suit3 |= bit
+            count3 += 1
 
-    for suit in range(4):
-        if suit_counts[suit] >= 5:
-            flush_mask = suit_masks[suit]
-            high = _straight_high(flush_mask, _STRAIGHTS, _STRAIGHT_HIGH)
-            if high >= 0:
-                return (STRAIGHT_FLUSH << 20) | (high << 16)
-            return (FLUSH << 20) | _top_ranks(flush_mask, 5, 0)
+    flush_mask = 0
+    if count0 >= 5:
+        flush_mask = suit0
+    elif count1 >= 5:
+        flush_mask = suit1
+    elif count2 >= 5:
+        flush_mask = suit2
+    elif count3 >= 5:
+        flush_mask = suit3
+    if flush_mask != 0:
+        high = _straight_high(flush_mask, _STRAIGHTS, _STRAIGHT_HIGH)
+        if high >= 0:
+            return (STRAIGHT_FLUSH << 20) | (high << 16)
+        return (FLUSH << 20) | _top_ranks(flush_mask, 5, 0)
 
     # Rank multiplicities, high to low within each class.
-    quad = -1
-    trip = -1
-    trip2 = -1
-    pair = -1
-    pair2 = -1
-    for rank in range(12, -1, -1):
-        count = rank_counts[rank]
-        if count == 4:
-            if quad < 0:
-                quad = rank
-        elif count == 3:
-            if trip < 0:
-                trip = rank
-            elif trip2 < 0:
-                trip2 = rank
-        elif count == 2:
-            if pair < 0:
-                pair = rank
-            elif pair2 < 0:
-                pair2 = rank
+    quad = _top_rank(four)
+    trips = thrice & ~four
+    trip = _top_rank(trips)
+    trip2 = _top_rank(trips & ~(1 << trip)) if trip >= 0 else -1
+    pairs = twice & ~thrice
+    pair = _top_rank(pairs)
+    pair2 = _top_rank(pairs & ~(1 << pair)) if pair >= 0 else -1
 
     if quad >= 0:
         return (QUADS << 20) | (quad << 16) | (_top_ranks(mask, 1, 1 << quad) << 12)
