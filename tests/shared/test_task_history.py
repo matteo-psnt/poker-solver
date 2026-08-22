@@ -505,3 +505,49 @@ class TestOneMalformedDocumentCannotTakeDownEveryReader:
         progress = task_history.read_tasks(tmp_path)[0].progress
         assert progress is not None
         assert progress.unit == ""
+
+
+class TestTheNameCarriesTheAttempt:
+    """MEASURED on the live record, 09-07: every task since the claim moved into
+    the database had TWO half-rows -- an `unresolved` one holding the start and a
+    terminal one holding the exit -- because a start document's body says
+    `attempt: 0` while its filename and its database column say 1.
+
+    `claim_attempt` cannot do better: `MAX(attempt) + 1` is computed inside the
+    INSERT that writes the body, so the number does not exist until the row does.
+    The name is therefore the only place a reader may take it from.
+    """
+
+    def _split_execution(self) -> dict[str, dict]:
+        """One execution as production writes it: a lying body, an honest name."""
+        return {
+            "task-1.1.start.json": task_log.node_record(
+                task_id="task-1", attempt=0, event="started"
+            ),
+            "task-1.1.exit.json": task_log.node_record(
+                task_id="task-1", attempt=1, event="finished", cause="completed", exit_code=0
+            ),
+        }
+
+    def test_one_execution_joins_to_one_row(self):
+        rows = task_history.join_documents(self._split_execution())
+        assert [r.attempt for r in rows] == [1]
+        assert rows[0].cause == "completed", (
+            "believing the body files the start under attempt 0, away from its own exit -- "
+            "leaving a phantom `unresolved` row that no run can ever be closed past"
+        )
+        assert rows[0].started_at, "the start half belongs to this row"
+        assert rows[0].ended_at, "and so does the exit half"
+
+    def test_such_a_task_is_compactable(self, tmp_path):
+        """The same split stopped `compact-legs` sealing anything: it looked for
+        the exit of attempt 0 and found none, so every task read as unsealed."""
+        directory = task_log.tasks_dir(tmp_path)
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, document in self._split_execution().items():
+            suffix = task_log.START_SUFFIX if name.endswith("start.json") else task_log.EXIT_SUFFIX
+            records.write_snapshot(directory / name, document, records.REGISTRY[f"legs/*{suffix}"])
+
+        movable, loose = task_history.compactable(directory)
+        assert sorted(loose) == ["task-1.1.exit.json", "task-1.1.start.json"]
+        assert set(movable) == set(self._split_execution())
