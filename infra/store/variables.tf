@@ -33,9 +33,14 @@ variable "share_name" {
 variable "share_quota_gb" {
   description = <<-EOT
     Provisioned size. Standard shares bill on data actually stored, not on quota,
-    so this is a ceiling rather than a cost. 773 MB of abstractions plus archived
-    runs (a sealed production run is multi-GB) fits comfortably in 512.
+    so this is a ceiling rather than a cost, and headroom is free.
+
+    512 was NOT enough: 56 archived runs filled it exactly, and a full share
+    fails a submit mid-upload with ShareSizeLimitReached rather than at
+    validation, so the dispatch path breaks before the work starts. Stays under
+    the 5 TiB standard ceiling on purpose -- going past it needs
+    large_file_share_enabled, which cannot be turned back off.
   EOT
   type        = number
-  default     = 512
+  default     = 4096
 }

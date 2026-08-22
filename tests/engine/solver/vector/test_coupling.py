@@ -126,7 +126,8 @@ def test_compatible_row_matches_the_blocking_matrix_derive_spends() -> None:
     gate[np.arange(context.num_hands), context.buckets_for(street)] = 1.0
     expected = gate.T @ (~context.blocks).astype(float) @ gate / context.num_hands**2
 
-    got = coupling._compatible_row(context, street, count).toarray().reshape(count, count)
+    buckets = context.buckets_for(street)
+    got = coupling._compatible_row(context, buckets, count).toarray().reshape(count, count)
     assert got == pytest.approx(expected, abs=1e-12)
 
 
@@ -149,3 +150,73 @@ def test_transition_rows_average_to_the_matrix_derive_builds() -> None:
 
     expected = bucket_game.derive(contexts, COUNTS).transitions[step]
     assert marginal == pytest.approx(expected, abs=1e-12)
+
+
+class TestBoardRelativeRelabelling:
+    """The candidate abstraction change, pinned before it is measured on.
+
+    `board_relative` is a claim about bucket IDENTITY, and every way of getting
+    it wrong still produces a plausible-looking number: an off-by-one keeps the
+    ordering, a sort on the wrong axis keeps the count. So the properties are
+    checked directly rather than inferred from the gap moving.
+    """
+
+    def test_it_is_dense_and_zero_based(self) -> None:
+        buckets = np.array([7, 7, 42, 500, 42, 0])
+        assert coupling.board_relative(buckets).tolist() == [1, 1, 2, 3, 2, 0]
+
+    def test_it_preserves_the_strength_order(self) -> None:
+        """The artifact numbers buckets by strength, which is what makes a rank
+        meaningful — so the relabelling must be monotone in the original id."""
+        rng = np.random.default_rng(21)
+        buckets = rng.integers(0, 600, size=400)
+        ranked = coupling.board_relative(buckets)
+        order = np.argsort(buckets, kind="stable")
+        assert np.all(np.diff(ranked[order]) >= 0)
+
+    def test_it_leaves_an_already_dense_board_untouched(self) -> None:
+        dense = np.array([0, 1, 2, 3, 2, 1])
+        assert coupling.board_relative(dense).tolist() == dense.tolist()
+
+    def test_relabelling_changes_what_is_measured(self) -> None:
+        """Guards the arm's power: if the two agreed, the comparison is vacuous.
+
+        Needs MORE buckets than a board has hands, which is the production
+        situation and the whole reason the relabelling exists — ~100 of 600
+        river buckets live on any one board. `ordered_context` spreads ranks
+        across every bucket it is given, so at `COUNTS` occupancy is dense and
+        the relabelling is correctly a no-op.
+        """
+        sparse_counts = {
+            Street.PREFLOP: 169,
+            Street.FLOP: 100,
+            Street.TURN: 200,
+            Street.RIVER: 400,
+        }
+        rng = np.random.default_rng(22)
+        contexts = [ordered_context(rng, sparse_counts, num_cards=14) for _ in range(6)]
+        plain = coupling.accumulate(contexts, sparse_counts, relabel=False)
+        ranked = coupling.accumulate(contexts, sparse_counts, relabel=True)
+        name = "transition:TURN->RIVER"
+        assert (plain[name] - ranked[name]).nnz > 0
+
+    def test_a_dense_board_is_left_alone_end_to_end(self) -> None:
+        """The complement: where every bucket is occupied there is nothing to
+        renumber, so the two accumulations must agree exactly.
+
+        Every street needs FEWER buckets than the board has hands — `COUNTS`
+        would not do, because its 169 preflop classes against 36 live hands are
+        themselves sparse.
+        """
+        dense_counts = {
+            Street.PREFLOP: 7,
+            Street.FLOP: 6,
+            Street.TURN: 5,
+            Street.RIVER: 4,
+        }
+        rng = np.random.default_rng(23)
+        contexts = [ordered_context(rng, dense_counts, num_cards=14) for _ in range(4)]
+        plain = coupling.accumulate(contexts, dense_counts, relabel=False)
+        ranked = coupling.accumulate(contexts, dense_counts, relabel=True)
+        for name, matrix in plain.items():
+            assert (matrix - ranked[name]).nnz == 0, name

@@ -64,6 +64,13 @@ DTYPE = np.float64
 # identically zero and measuring it only adds a row of noise to the report.
 COMPAT_STREETS: tuple[Street, ...] = (Street.FLOP, Street.TURN, Street.RIVER)
 
+# Streets a board-relative relabelling may touch. NOT preflop: its 169 canonical
+# classes are a function of the hand alone, identical on every board, so ranking
+# them within a board would INJECT the board dependence the relabelling exists to
+# remove -- and would make the preflop row of a report answer a different
+# question from the rest of it.
+RELABEL_STREETS: tuple[Street, ...] = (Street.FLOP, Street.TURN, Street.RIVER)
+
 
 @dataclass(frozen=True, slots=True)
 class ErrorGap:
@@ -200,18 +207,17 @@ def _one_hot(buckets: np.ndarray, count: int) -> sparse.csr_matrix:
 
 
 def _transition_row(
-    context: HandContext, step: tuple[Street, Street], shape: tuple[int, int]
+    from_buckets: np.ndarray, to_buckets: np.ndarray, shape: tuple[int, int]
 ) -> sparse.csr_matrix:
     """One board's joint ``P(from bucket, to bucket)`` for a uniformly drawn hand."""
-    from_street, to_street = step
     from_count, to_count = shape
-    flat = context.buckets_for(from_street) * to_count + context.buckets_for(to_street)
+    flat = from_buckets * to_count + to_buckets
     hands = flat.shape[0]
     counts = np.bincount(flat, minlength=from_count * to_count).astype(DTYPE)
     return sparse.csr_matrix(counts / hands)
 
 
-def _compatible_row(context: HandContext, street: Street, count: int) -> sparse.csr_matrix:
+def _compatible_row(context: HandContext, buckets: np.ndarray, count: int) -> sparse.csr_matrix:
     """One board's ``P(both hands live, bucket pair)`` for two hands drawn uniformly.
 
     Card removal is counted off the 52-wide card incidence rather than the
@@ -220,7 +226,6 @@ def _compatible_row(context: HandContext, street: Street, count: int) -> sparse.
     ``D`` the holdings a bucket pair has in common. ``test_coupling.py`` pins it
     against ``gate.T @ ~blocks @ gate``, which is what ``derive`` spends.
     """
-    buckets = context.buckets_for(street)
     gate = _one_hot(buckets, count)
     hands = buckets.shape[0]
 
@@ -240,8 +245,29 @@ def _compatible_row(context: HandContext, street: Street, count: int) -> sparse.
     return sparse.csr_matrix(compatible.ravel() / float(hands * hands))
 
 
+def board_relative(buckets: np.ndarray) -> np.ndarray:
+    """Renumber a board's occupied buckets densely, strongest last, from zero.
+
+    A bucket is a slice of *(hand, board)* space: only ~100 of 600 river buckets
+    exist on any one board, so an artifact bucket id says as much about WHICH
+    board this is as about how strong the hand is. That identity is information
+    the board-free game has thrown away and cannot get back, and no small class
+    count encodes "which 100 of 600".
+
+    Renumbering to within-board rank removes it. Bucket ids become comparable
+    across boards, and what a bucket means is strength RELATIVE to the range this
+    board actually produces -- a different abstraction, not a cheaper encoding of
+    the same one, and it is the artifact's own strength order that makes the rank
+    well defined.
+    """
+    return np.unique(buckets, return_inverse=True)[1]
+
+
 def accumulate(
-    contexts: Iterable[HandContext], buckets_per_street: dict[Street, int]
+    contexts: Iterable[HandContext],
+    buckets_per_street: dict[Street, int],
+    *,
+    relabel: bool = False,
 ) -> dict[str, sparse.csr_matrix]:
     """Stream a universe into one flattened row per board, per averaged constant.
 
@@ -259,13 +285,21 @@ def accumulate(
     }
 
     for context in contexts:
+        held = {
+            street: (
+                board_relative(context.buckets_for(street))
+                if relabel and street in RELABEL_STREETS
+                else context.buckets_for(street)
+            )
+            for street in (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
+        }
         for step, shape in steps:
             rows[f"transition:{step[0].name}->{step[1].name}"].append(
-                _transition_row(context, step, shape)
+                _transition_row(held[step[0]], held[step[1]], shape)
             )
         for street in COMPAT_STREETS:
             rows[f"compatible:{street.name}"].append(
-                _compatible_row(context, street, buckets_per_street[street])
+                _compatible_row(context, held[street], buckets_per_street[street])
             )
 
     return {name: sparse.vstack(parts, format="csr") for name, parts in rows.items()}
@@ -277,9 +311,10 @@ def measure_all(
     class_counts: Sequence[int],
     *,
     seed: int = 0,
+    relabel: bool = False,
 ) -> list[ErrorGap]:
     """Price every averaged constant of the board-free game in one pass."""
-    stacked = accumulate(contexts, buckets_per_street)
+    stacked = accumulate(contexts, buckets_per_street, relabel=relabel)
     return [
         measure(
             name,
@@ -294,8 +329,10 @@ def measure_all(
 
 __all__: Sequence[str] = (
     "COMPAT_STREETS",
+    "RELABEL_STREETS",
     "ErrorGap",
     "accumulate",
+    "board_relative",
     "measure",
     "measure_all",
 )

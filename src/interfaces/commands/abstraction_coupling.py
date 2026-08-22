@@ -68,6 +68,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--seed", type=int, default=7, help="Universe seed.")
     parser.add_argument(
+        "--board-relative",
+        action="store_true",
+        help="Renumber each board's occupied buckets to within-board rank before "
+        "measuring. Prices a DIFFERENT abstraction — one whose bucket ids mean "
+        "the same thing on every board — against the same universe.",
+    )
+    parser.add_argument(
         "--progress-file",
         default="",
         help="Write the result as soon as it exists, so a killed task keeps it.",
@@ -96,6 +103,10 @@ class AbstractionCouplingPayload(BaseModel):
     buckets: dict[str, int] = Field(default_factory=dict)
     boards: int
     seed: int
+    """True when buckets were renumbered to within-board rank: a different
+    abstraction, so its gaps are NOT comparable with an artifact-order run
+    except as the pair they are meant to be read as."""
+    board_relative: bool = False
     accumulate_seconds: float
     measure_seconds: float
     gaps: list[ConstantGap] = Field(default_factory=list)
@@ -123,7 +134,9 @@ def run(args: argparse.Namespace) -> AbstractionCouplingPayload:
 
     rng = np.random.default_rng(args.seed)
     started = time.perf_counter()
-    stacked = coupling.accumulate(iter_universe(abstraction, args.boards, rng=rng), counts)
+    stacked = coupling.accumulate(
+        iter_universe(abstraction, args.boards, rng=rng), counts, relabel=args.board_relative
+    )
     accumulated = time.perf_counter()
 
     gaps = [
@@ -143,6 +156,7 @@ def run(args: argparse.Namespace) -> AbstractionCouplingPayload:
         buckets={street.name.lower(): count for street, count in counts.items()},
         boards=args.boards,
         seed=args.seed,
+        board_relative=bool(args.board_relative),
         accumulate_seconds=round(accumulated - started, 1),
         measure_seconds=round(measured - accumulated, 1),
         gaps=[
@@ -162,7 +176,8 @@ def render(payload: AbstractionCouplingPayload) -> None:
     print(
         f"abstraction-coupling on {payload.abstraction} "
         f"(F{buckets.get('flop')}/T{buckets.get('turn')}/R{buckets.get('river')}, "
-        f"{payload.boards:,} boards, seed {payload.seed})"
+        f"{payload.boards:,} boards, seed {payload.seed}"
+        f"{', board-relative buckets' if payload.board_relative else ''})"
     )
     print(f"  accumulated in {payload.accumulate_seconds}s, measured in {payload.measure_seconds}s")
     if not payload.gaps:

@@ -185,6 +185,18 @@ class SubmitVectorBody(BaseModel):
     checkpoints: str | None = None
     config: str | None = None
     stack: int | None = None
+    board_relative: bool | None = None
+    timeout: str | None = None
+
+
+class SubmitCouplingBody(BaseModel):
+    # Repeatable and required for the same reason as the sweep's: WHICH
+    # abstractions to price against each other is the measurement.
+    abstractions: list[str]
+    boards: int | None = None
+    classes: str | None = None
+    seed: int | None = None
+    board_relative: bool | None = None
     timeout: str | None = None
 
 
