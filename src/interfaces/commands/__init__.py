@@ -104,10 +104,6 @@ COMMANDS: tuple[CommandRef, ...] = (
     CommandRef(
         "vector-sweep", "Exploitability vs iteration for one vector-CFR kernel on one abstraction."
     ),
-    CommandRef(
-        "warm-start",
-        "Seed a scalar run from another kernel's strategy (regrets encode it; average does not).",
-    ),
     CommandRef("precompute", "Precompute a combo abstraction into data/combo_abstraction/."),
     CommandRef("evaluate", "Evaluate a run's exploitability (Local Best Response by default)."),
     CommandRef("ledger", "List recorded evaluations from the eval ledger."),
@@ -125,9 +121,6 @@ COMMANDS: tuple[CommandRef, ...] = (
         "runinfo", "Everything recorded about a run: provenance, curve, scores, tasks, gaps."
     ),
     CommandRef("report", "Score every arm of an experiment, each attributed against its control."),
-    CommandRef(
-        "compare", "Paired (CRN) comparison of two runs' latest evals; refuses mismatched tiers."
-    ),
     CommandRef("promote", "Make a run the new baseline (closes one turn of the base-fork loop)."),
 )
 

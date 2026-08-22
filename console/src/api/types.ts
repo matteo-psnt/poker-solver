@@ -67,7 +67,6 @@ export type Billed = S["BilledPayload"];
 /** Experiments and comparisons. */
 export type Report = S["ReportPayload"];
 export type Arm = S["ArmResult"];
-export type Comparison = S["ComparePayload"];
 
 /** This tool's own behaviour, and the local reads. */
 export type Activity = S["ActivityPayload"];

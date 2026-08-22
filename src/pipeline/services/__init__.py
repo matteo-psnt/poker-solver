@@ -23,7 +23,6 @@ group by concern only:
 from src.pipeline.services.bucketing import precompute_abstraction, sweep_bucket_counts
 from src.pipeline.services.experiments import (
     CONTROL_ARM,
-    DEFAULT_BASELINE_PATH,
     ArmResult,
     Baseline,
     CurveOutput,
@@ -61,17 +60,12 @@ from src.pipeline.services.vector_blueprint import (
     VectorBlueprintOutput,
     train_vector_blueprint,
 )
-from src.pipeline.services.warm_start import (
-    DEFAULT_EFFECTIVE_ITERATIONS,
-    WarmStartOutput,
-    warm_start_run,
-)
+from src.pipeline.services.warm_start import DEFAULT_EFFECTIVE_ITERATIONS
 from src.pipeline.training.run_tracker import ExperimentTag
 
 __all__ = [
     "BLUEPRINT_MATCH_ESTIMATOR_LABEL",
     "CONTROL_ARM",
-    "DEFAULT_BASELINE_PATH",
     "DEFAULT_EFFECTIVE_ITERATIONS",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
@@ -87,7 +81,6 @@ __all__ = [
     "RunSummary",
     "StaticTrainingOutput",
     "VectorBlueprintOutput",
-    "WarmStartOutput",
     "checkpoint_iteration_of",
     "describe_runs",
     "evaluate_and_record",
@@ -107,5 +100,4 @@ __all__ = [
     "sweep_bucket_counts",
     "train_static",
     "train_vector_blueprint",
-    "warm_start_run",
 ]

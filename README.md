@@ -47,7 +47,6 @@ uv run poker-solver submit --config production --to 25000000   # queue a leg
 uv run poker-solver jobs                                       # what is running
 uv run poker-solver score --run <id> --at 10000000,20000000    # one task per rung
 uv run poker-solver ledger                                     # every evaluation, from the share
-uv run poker-solver compare --a <run> --b <run>                # paired comparison with p-value
 ```
 
 **The web console is the one a human reads** — `just console`, then
@@ -177,7 +176,7 @@ The primary quality metric is **exploitability**, measured with **Local Best Res
 - `--opponent blueprint|deployed` — raw strategy table vs. blueprint + runtime resolver
 - `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
 
-Every evaluation is written as its own document under `<run_dir>/evals/`, with git provenance and the pinned abstraction hash. There is no stored index: `poker-solver ledger` DERIVES one from the published documents on every read, which is what makes evaluating from several boxes at once safe. `poker-solver compare` runs a paired statistical comparison and refuses mismatched seeds or tiers.
+Every evaluation is written as its own document under `<run_dir>/evals/`, with git provenance and the pinned abstraction hash. There is no stored index: `poker-solver ledger` DERIVES one from the published documents on every read, which is what makes evaluating from several boxes at once safe.
 
 An older rollout-based estimator (`compute_exploitability`) is retained as a fast smoke test only — it measures a one-ply deviation gain and is not a trustworthy exploitability figure.
 

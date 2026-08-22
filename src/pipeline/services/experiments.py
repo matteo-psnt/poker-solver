@@ -20,7 +20,6 @@ from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared import records, run_events, task_history
-from src.shared.config import DEFAULT_RUNS_DIR
 
 
 class CurvePoint(BaseModel):
@@ -140,9 +139,6 @@ def exploitability_curve(
     )
 
 
-DEFAULT_BASELINE_PATH = Path("data/baseline.json")
-
-
 CONTROL_ARM = "control"
 
 
@@ -155,7 +151,7 @@ class Baseline(BaseModel):
     checkpoint_iteration: int | None = None
 
 
-def load_baseline(path: Path = DEFAULT_BASELINE_PATH) -> Baseline | None:
+def load_baseline(path: Path) -> Baseline | None:
     """Current baseline pointer, or None if none has been promoted."""
     data = records.read_snapshot(path)
     if data is None or "run_id" not in data:
@@ -172,7 +168,7 @@ def promote_baseline(
     run_id: str,
     rationale: str,
     *,
-    path: Path = DEFAULT_BASELINE_PATH,
+    path: Path,
     checkpoint_iteration: int | None = None,
 ) -> Baseline:
     """Point the baseline at ``run_id``, closing one turn of the base-fork loop.
@@ -256,8 +252,8 @@ def experiment_report(
     experiment_id: str,
     *,
     ledger_path: Path,
-    runs_dir: Path = Path(DEFAULT_RUNS_DIR),
-    baseline_path: Path = DEFAULT_BASELINE_PATH,
+    runs_dir: Path,
+    baseline_path: Path,
 ) -> ExperimentReport:
     """Score every arm of an experiment and attribute each variant to its control."""
     records = [

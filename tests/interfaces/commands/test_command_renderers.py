@@ -33,7 +33,6 @@ from src.interfaces.commands.autoscale_check import AutoscalePayload
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.compact_legs import CompactedPayload
-from src.interfaces.commands.compare import ComparePayload, PairedComparison
 from src.interfaces.commands.configs import ConfigKind, ConfigsPayload
 from src.interfaces.commands.cost import CostPayload
 from src.interfaces.commands.curve import CurvePayload
@@ -60,7 +59,6 @@ from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.commands.train_static import StaticTrainingPayload
 from src.interfaces.commands.train_vector import VectorBlueprintPayload
 from src.interfaces.commands.vector_sweep import SweepPoint, VectorSweepPayload
-from src.interfaces.commands.warm_start import WarmStartPayload
 from src.pipeline.services import EvaluationPayload
 from src.pipeline.services.experiments import CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
@@ -147,17 +145,6 @@ PAYLOADS: dict[str, Any] = {
         dtype="float32",
         status="completed",
     ),
-    "warm-start": WarmStartPayload(
-        run_id="warm-a",
-        runs_dir="data/runs",
-        config_name="production",
-        source_run_id="vec-a",
-        effective_iterations=1000,
-        num_rows=32_240_608,
-        seeded_rows=32_240_608,
-        seeded_fraction=1.0,
-        status="seeded",
-    ),
     "precompute": PrecomputePayload(
         abstraction_config="production",
         output_dir="data/combo_abstraction/production",
@@ -233,28 +220,6 @@ PAYLOADS: dict[str, Any] = {
                 results={"exploitability_mbb": 900.0, "std_error_mbb": 12.0, "num_hands": 1000},
             )
         ],
-    ),
-    "compare": ComparePayload(
-        run_a="run-a",
-        run_b="run-b",
-        tier_warnings=["base_seed differs"],
-        comparison=PairedComparison(
-            # `n` and `t_statistic` were absent from this fixture for as long as
-            # it was hand-written, and the real statistic has always returned
-            # both.
-            n=1000,
-            t_statistic=-4.0,
-            mean_a=900.0,
-            mean_b=880.0,
-            mean_diff=-20.0,
-            se_diff=5.0,
-            ci_lower=-30.0,
-            ci_upper=-10.0,
-            p_value=0.01,
-            is_significant=True,
-            correlation=0.8,
-            se_unpaired=9.0,
-        ),
     ),
     "evaluate": EvaluationPayload(
         run_id="run-a",
