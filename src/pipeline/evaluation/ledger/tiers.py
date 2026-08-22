@@ -131,6 +131,9 @@ def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         "leaf_continuation_fraction": results["leaf_continuation_fraction"],
         "resolver_max_iterations": results["resolver_max_iterations"],
         "allin_runouts": results["allin_runouts"],
+        # A prior on the root strategy changes what is PLAYED, exactly as the
+        # leaf valuation does, so it splits the tier for the same reason.
+        "root_prior_weight": results.get("root_prior_weight", 0.0),
     }
 
 
