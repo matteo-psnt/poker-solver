@@ -104,11 +104,11 @@ class PublicBRConfig:
         not picklable. Does NOT change the result: each walk is deterministic and
         the aggregate is a mean over the same four numbers.
 
-    Node count scales ~linearly in num_flops * num_turns * num_rivers, but
-    wall-clock is strongly sublinear -- per-context policy tables and showdown
-    evaluators amortize across boards. Measured on a 6.8M-infoset checkpoint, full
-    4-walk, single-core: 2 board paths -> 1.3M nodes / ~7 min; 16 paths -> 9.7M
-    nodes / ~13.5 min. Run production checkpoints on the pool.
+    Node count scales ~linearly in num_flops * num_turns * num_rivers, and
+    wall-clock with it now that the per-context policy tables are one slice
+    each: 4/2/2 on a 30M production checkpoint is 9.7M nodes in 82 s over four
+    walks on a pool node (08-22; was 239 s). Run production checkpoints on the
+    pool.
     """
 
     num_flops: int = 8

@@ -70,7 +70,7 @@ def train_static(
     config_overrides: dict[str, object] | None = None,
     experiment: ExperimentTag | None = None,
     runs_dir: Path | None = None,
-    checkpoint_every: int = 1_000_000,
+    checkpoint_every: int = 5_000_000,
     run_id: str | None = None,
     warm_start_from: Path | None = None,
     warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
@@ -87,10 +87,10 @@ def train_static(
         num_iterations: ABSOLUTE iteration target. Continuing past it is a
             no-op, so a retried task converges rather than repeating.
         checkpoint_every: Checkpoint every N iterations (0 = only at the end).
-            The bound on what a killed run loses, traded against disk and write
-            time: a full table is written each time. At 250k the writes were
-            ~17% of a 30M run's wall clock and left 120 snapshots on the share;
-            1M costs ~4% and loses at most ~5 minutes of work.
+            The bound on what a killed run loses, traded against a full-table
+            write and a worker respawn per chunk. Measured 08-22 at 16 workers:
+            a 1M chunk is ~18 s and its checkpoint ~2 s, so 1M paid ~20% and
+            5M pays under 5% while losing at most ~90 s of work.
         run_id: Continue an EXISTING run directory instead of creating one. The
             checkpoint there is loaded first and training continues from it.
         warm_start_from: Seed a FRESH run from this run's average strategy
