@@ -134,17 +134,6 @@ class TestTheDispatchingWrites:
         assert client.post("/api/score", json={}).status_code == 422
         assert not invoked
 
-    def test_compacting_defaults_to_the_dry_run(self, client, invoked):
-        """`--delete` is the irreversible half. An empty body must not reach it.
-
-        Not by writing `False` here -- by sending nothing, so argparse's
-        `store_true` default is what answers.
-        """
-        client.post("/api/compact-legs", json={})
-        (_, kwargs) = invoked[0]
-        assert "delete" not in kwargs
-        assert "apply" not in kwargs
-
     def test_a_dispatch_is_never_answered_from_the_memo(self, client, invoked):
         """Two identical submissions are two runs someone wants.
 

@@ -46,7 +46,6 @@ from src.interfaces.commands import (
     arms,
     autoscale_check,
     cancel,
-    compact_legs,
     configs,
     cost,
     curve,
@@ -198,13 +197,6 @@ class PrecomputeBody(BaseModel):
 
 class PushCodeBody(BaseModel):
     root: str | None = None
-
-
-class CompactBody(BaseModel):
-    apply: bool | None = None
-    delete: bool | None = None
-    backup: str | None = None
-    label: str | None = None
 
 
 def _served(
@@ -383,10 +375,6 @@ def create_app() -> FastAPI:
     @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
     def _push_code(body: PushCodeBody) -> JSONResponse:
         return answer(TtlCache(0.0), push_code.COMMAND, **given(body))
-
-    @app.post("/api/compact-legs", response_model=contract.Compacted, responses=ERRORS)
-    def _compact_legs(body: CompactBody) -> JSONResponse:
-        return answer(TtlCache(0.0), compact_legs.COMMAND, **given(body))
 
     # These three ARE commands, so they go through `answer` like the rest -- the
     # button and `poker-solver serve-box` are then the same code path, which is

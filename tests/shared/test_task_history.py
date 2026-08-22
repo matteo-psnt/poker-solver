@@ -21,7 +21,14 @@ def _node(share, task_id, event, cause=None, **kw):
 
 def _observed(share, **kw):
     """What `tasks` writes back once Batch has explained a death."""
-    return task_history.write_observed_document(share, task_history.observed_record(**kw))
+    from src.shared import records
+
+    record = task_history.observed_record(**kw)
+    directory = task_log.tasks_dir(share)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{record['task_id']}{task_history.OBSERVED_SUFFIX}"
+    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{task_history.OBSERVED_SUFFIX}"])
+    return path
 
 
 class TestNodeRecord:

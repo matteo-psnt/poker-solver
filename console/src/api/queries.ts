@@ -14,7 +14,6 @@ import type {
   Box,
   Cancelled,
   Combos,
-  Compacted,
   Configs,
   Cost,
   Dispatched,
@@ -189,22 +188,6 @@ export const usePushCode = () =>
   useMutation<PushedCode, Error, Record<string, unknown>>({
     mutationFn: (body) => send("/api/push-code", body),
   });
-
-/**
- * `compact-legs`, both halves. The dry run and the apply are the same endpoint
- * and differ only in the body, which is why they are one hook: a page that had
- * two could show a preview from one and apply the other.
- */
-export const useCompactLegs = () => {
-  const queryClient = useQueryClient();
-  return useMutation<Compacted, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/compact-legs", body),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["view"] });
-    },
-  });
-};
 
 /**
  * The blueprint server. Polled ONLY while a swap is in flight.

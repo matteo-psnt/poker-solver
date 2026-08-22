@@ -80,7 +80,6 @@ MODELS: dict[str, type[BaseModel]] = {
     "score": contract.ScorePayload,
     "submit-precompute": contract.PrecomputeDispatchPayload,
     "push-code": contract.PushedCode,
-    "compact-legs": contract.Compacted,
     "cancel": contract.Cancelled,
     "serve-box": contract.Box,
 }

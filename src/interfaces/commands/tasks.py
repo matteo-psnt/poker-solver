@@ -16,7 +16,6 @@ explain those.
 from __future__ import annotations
 
 import shutil
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -139,11 +138,6 @@ def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
         _ask_batch(config, open_tasks), open_tasks, queries.observed_legs(engine)
     )
     if fresh:
-        # The share FIRST and the database second, deliberately: the share is
-        # the source of truth, and a record that reached only the database is
-        # one `--verify` reports as a divergence in the direction that means a
-        # bug.
-        _publish_observed(share.share_client(config), config.share_name, fresh)
         observations.record_observations(engine, fresh)
     return _result(rows, len(fresh), args.limit)
 
@@ -198,20 +192,6 @@ def _new_observations(
     return fresh
 
 
-def _publish_observed(service: Any, share_name: str, fresh: dict[str, dict[str, Any]]) -> None:
-    """Write the observer records to the share.
-
-    Through `write_observed_document` rather than a `json.dumps` here: the
-    record is STAMPED like every other one, and an unstamped document would be
-    rejected by the reader's schema check long after whoever wrote it had gone.
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        local = Path(tmp)
-        for document in fresh.values():
-            task_history.write_observed_document(local, document)
-        _upload_observed(service, share_name, local, list(fresh))
-
-
 def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str, Any]]:
     """Ask Batch about exactly the tasks the share could not explain.
 
@@ -238,51 +218,6 @@ def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str,
     with ThreadPoolExecutor(max_workers=min(16, len(pairs) or 1)) as pool:
         fetched = pool.map(lambda pair: batch.task_record(client, *pair), sorted(pairs))
     return [task.model_dump() for task in fetched if task]
-
-
-def download_tasks(service: Any, share_name: str, local: Path, previous: Path | None = None) -> int:
-    """Materialise legs/ into ``local``; returns how many files were fetched.
-
-    Incremental against ``previous``, a tree this function built earlier: a file
-    whose etag is unchanged is hard-linked from there, and only what moved is
-    downloaded. The join needs every record, but a record never changes once
-    written -- so a refresh of 2,252 files is the listing plus a handful of
-    progress files, where pulling them all was 33s.
-
-    Concurrently for what IS fetched: these are tiny JSON files at ~0.195s of
-    round trip each, so latency is the entire cost and the pool is sized
-    against round trips, not bytes.
-    """
-    target = task_log.tasks_dir(local)
-    target.mkdir(parents=True, exist_ok=True)
-    entries = [
-        entry
-        for entry in share.list_entries(service, share_name, task_log.RECORDS_DIRNAME, etags=True)
-        if not entry.is_directory
-    ]
-    known = _etags(previous)
-    source = task_log.tasks_dir(previous) if previous is not None else None
-    fetch = []
-    for entry in entries:
-        held = source / entry.name if source is not None else None
-        if held is not None and held.is_file() and known.get(entry.name) == entry.etag:
-            _link(held, target / entry.name)
-        else:
-            fetch.append(entry.name)
-    if fetch:
-        with ThreadPoolExecutor(max_workers=min(_PARALLEL_SHARE_IO, len(fetch))) as pool:
-            list(
-                pool.map(
-                    lambda name: share.download_file(
-                        service, share_name, f"{task_log.RECORDS_DIRNAME}/{name}", target / name
-                    ),
-                    fetch,
-                )
-            )
-    (local / _ETAGS_NAME).write_text(
-        "".join(f"{entry.etag or ''}\t{entry.name}\n" for entry in entries)
-    )
-    return len(fetch)
 
 
 def _etags(tree: Path | None) -> dict[str, str]:
