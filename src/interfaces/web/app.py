@@ -166,6 +166,9 @@ class SubmitBody(BaseModel):
     warm_start_from: str | None = None
     warm_start_weight: int | None = None
     warm_start_at: int | None = None
+    warm_start_shape: str | None = None
+    equity_prior_weight: int | None = None
+    equity_prior_temperature: float | None = None
 
 
 class ScoreBody(BaseModel):

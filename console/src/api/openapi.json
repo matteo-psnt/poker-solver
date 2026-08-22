@@ -3354,6 +3354,28 @@
             ],
             "title": "Dtype"
           },
+          "equity_prior_temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity Prior Temperature"
+          },
+          "equity_prior_weight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity Prior Weight"
+          },
           "experiment": {
             "anyOf": [
               {
@@ -3470,6 +3492,17 @@
               }
             ],
             "title": "Warm Start From"
+          },
+          "warm_start_shape": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warm Start Shape"
           },
           "warm_start_weight": {
             "anyOf": [
