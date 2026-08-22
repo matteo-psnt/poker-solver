@@ -21,7 +21,7 @@ from azure.core.exceptions import ResourceNotFoundError
 from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
@@ -106,8 +106,7 @@ def run(args: argparse.Namespace) -> LogsPayload:
 
     config = CloudConfig.load()
     if args.list:
-        service = share.share_client(config)
-        return LogsPayload(listing=share.task_log_names(service, config.share_name))
+        return LogsPayload(listing=blob.task_log_names(config))
 
     if args.source == "node":
         try:
@@ -126,7 +125,7 @@ def run(args: argparse.Namespace) -> LogsPayload:
                 f"Read the published copy instead: logs --task {args.task}"
             ) from error
     else:
-        found = share.read_task_log(share.share_client(config), config.share_name, args.task)
+        found = blob.read_task_log(config, args.task)
         if found is None:
             raise CommandError(
                 f"No published log for {args.task}. It may still be running before its "

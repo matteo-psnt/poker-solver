@@ -125,6 +125,21 @@ resource "azurerm_storage_container" "abstractions" {
   }
 }
 
+# WHAT A TASK SAYS ABOUT ITSELF WHILE IT RUNS: its log tail and any profile
+# asked for. Diagnostics, not record -- the account that outlives a task is the
+# `legs` row in Postgres -- so these expire on the policy below rather than
+# accumulating the way `logs/` did on the share (3,454 files and nothing to
+# prune them).
+resource "azurerm_storage_container" "diagnostics" {
+  name                  = var.diagnostics_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # COLD, NOT ARCHIVE, and the distinction is operational rather than thrifty:
 # rehydrating an archived blob takes HOURS, and a rung is exactly the thing a
 # resume or a score reaches for without warning. Cold is milliseconds to read
@@ -150,6 +165,23 @@ resource "azurerm_storage_management_policy" "checkpoints" {
         # so a rung is never chilled while its own experiment is still reading it.
         tier_to_cool_after_days_since_modification_greater_than = 14
         tier_to_cold_after_days_since_modification_greater_than = 90
+      }
+    }
+  }
+
+  # 90 days, not 14: a task log is read when someone asks why a run behaved
+  # oddly, and that question is often weeks old. Long enough to answer it,
+  # bounded so the container does not become the share's `logs/` again.
+  rule {
+    name    = "expire-diagnostics"
+    enabled = true
+    filters {
+      prefix_match = ["${var.diagnostics_container_name}/"]
+      blob_types   = ["blockBlob"]
+    }
+    actions {
+      base_blob {
+        delete_after_days_since_modification_greater_than = 90
       }
     }
   }

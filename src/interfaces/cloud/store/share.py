@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from src.interfaces.cloud.config import CloudConfig
 
 ARCHIVE_DIR = "archive"
-LOGS_DIR = "logs"
 ABSTRACTION_DIR = "combo_abstraction"
 
 
@@ -199,22 +198,6 @@ def walk_files(
             yield from walk_files(service, share, child, skip_dir=skip_dir)
         else:
             yield child, entry.etag
-
-
-def task_log_names(service: ShareServiceClient, share: str) -> list[str]:
-    """Every published task log, oldest first.
-
-    Published logs matter more than node-side ``stdout.txt``: Batch keeps task
-    output on the node, and the pool scales to zero within minutes of a task
-    ending, so the node copy is gone for exactly the failed tasks most worth
-    reading.
-    """
-    return sorted(entry.name for entry in list_entries(service, share, LOGS_DIR))
-
-
-def read_task_log(service: ShareServiceClient, share: str, task_id: str) -> str | None:
-    """Read one published task log by task id."""
-    return read_text(service, share, f"{LOGS_DIR}/{task_id}.log")
 
 
 def download_file(service: ShareServiceClient, share: str, path: str, destination: Path) -> None:

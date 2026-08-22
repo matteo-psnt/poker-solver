@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from src.shared import cache
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, legmirror, progress
+from src.shared.cloudtask.node import archive, blobstore, legmirror, progress
 from src.shared.cloudtask.node.handlers import HANDLERS, publish_own_run
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import (
@@ -88,6 +88,17 @@ def _stage(paths: NodePaths, log: TaskLogger) -> int:
     return run_guarded(
         ["uv", "sync", "--quiet"], cwd=paths.code, timeout=SYNC_TIMEOUT_SECONDS, log=log
     )
+
+
+def _diagnostics_sas() -> str:
+    """Where a task's log tail goes, from the credential it already carries.
+
+    Read from the environment rather than the plan: the logger exists before
+    the plan is parsed, and the very failures worth reading are the ones that
+    happen first.
+    """
+    sas = os.environ.get("POKER_SOLVER_CHECKPOINT_SAS", "")
+    return blobstore.sibling_container(sas, archive.DIAGNOSTICS_CONTAINER) if sas else ""
 
 
 def _install_signal_handlers() -> None:
@@ -284,7 +295,11 @@ def main() -> int:
         )
         return NO_RECORD_EXIT_CODE
     task = os.environ.get("AZ_BATCH_TASK_ID", "local")
-    log = TaskLogger(paths.work / f"task-{task}.log", paths.share)
+    log = TaskLogger(
+        paths.work / f"task-{task}.log",
+        paths.share,
+        _diagnostics_sas(),
+    )
     _install_signal_handlers()
 
     code, outcome = 1, None
