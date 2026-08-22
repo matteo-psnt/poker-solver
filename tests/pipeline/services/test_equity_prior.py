@@ -15,6 +15,7 @@ import pytest
 
 from src.core.game.actions import Action, ActionType
 from src.pipeline.services.equity_prior import (
+    DEFAULT_TEMPERATURE,
     action_aggression,
     bucket_strength,
     strength_policy,
@@ -78,7 +79,11 @@ class TestTheGuessIsPokerShaped:
     def test_a_strong_hand_prefers_aggression(self):
         p = _policy(0.95)
         assert p.argmax() >= 3, p
-        assert p[0] < 0.05, "a strong hand should not be folding"
+        # 0.10, not 0.05: at the MEASURED-best temperature a strong hand still
+        # folds ~5%. The optimum is deliberately less poker-correct than a
+        # sharper prior -- its job is to bias search, not to play well, and
+        # t=0.10 plays far better poker while scoring WORSE than no prior at all.
+        assert p[0] < 0.10, "a strong hand should not be folding often"
 
     def test_a_weak_hand_prefers_folding_or_calling(self):
         p = _policy(0.05)
@@ -192,3 +197,25 @@ class TestTheChannelThatMatters:
 
         played = average_strategy(np.zeros(len(MENU)))
         np.testing.assert_allclose(played, np.full(len(MENU), 1 / len(MENU)))
+
+
+class TestTheMeasuredDefaults:
+    """The temperature default is a MEASURED optimum, not a taste.
+
+    3 training seeds x 6 board seeds at 30M, mbb/g vs a cold control:
+    0.10 +17.9 | 0.25 -80.8 | 0.50 -101.7 | 0.75 -73.3 | 1.50 -57.0 | uniform +18.5.
+    Both extremes lose to not seeding at all, so a drift in either direction
+    turns a 100 mbb gain into a loss.
+    """
+
+    def test_the_default_is_the_measured_peak(self):
+        assert DEFAULT_TEMPERATURE == 0.50
+
+    def test_the_default_is_softer_than_the_sharp_arm_that_lost(self):
+        """t=0.10 scored +17.9 vs cold -- worse than no prior at all."""
+        assert DEFAULT_TEMPERATURE > 0.10
+
+    def test_the_default_still_carries_information(self):
+        """A guess this flat must stay far from uniform, which scored +18.5."""
+        p = strength_policy(0.95, action_aggression(MENU, POT), DEFAULT_TEMPERATURE)
+        assert p.max() > 1.5 / len(MENU), p
