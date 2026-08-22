@@ -100,10 +100,10 @@ def run(args: argparse.Namespace) -> SubmitCouplingPayload:
             for abstraction in args.abstractions
         ]
     )
-    return SubmitCouplingPayload(
+    return payload.extend(
+        SubmitCouplingPayload,
         abstractions=list(args.abstractions),
         boards=args.boards,
-        **payload.model_dump(exclude={"op"}),
     )
 
 

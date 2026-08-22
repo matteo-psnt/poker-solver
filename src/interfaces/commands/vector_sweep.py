@@ -197,6 +197,10 @@ class VectorSweepPayload(BaseModel):
     `in_sample` false is the only reading worth trusting."""
     train_boards: int
     score_boards: int
+    """Which held-out universe scored this arm. Recorded because the
+    board-sampling spread is read ACROSS arms, and inferring the seed from the
+    uniform baseline is a coincidence, not an identifier."""
+    score_seed: int = 0
     in_sample: bool
     stack: int
     nodes: int
@@ -421,7 +425,12 @@ def _payload(
         board_relative=bool(args.board_relative),
         train_boards=args.train_boards or args.score_boards,
         score_boards=args.score_boards,
-        in_sample=not args.train_boards,
+        score_seed=args.score_seed,
+        # Board-free never trains on boards at all -- it derives its chance
+        # layer from --derive-boards under --seed, and scoring draws from
+        # --score-seed, so it is held out by construction however
+        # --train-boards is set. Reporting it in-sample said the opposite.
+        in_sample=args.kernel != BOARD_FREE and not args.train_boards,
         stack=args.stack,
         nodes=compiled.num_nodes,
         infoset_rows=compiled.tree.num_rows,

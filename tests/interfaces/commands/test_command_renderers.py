@@ -152,6 +152,7 @@ PAYLOADS: dict[str, Any] = {
                 abstraction="buckets-F10T20R30-r200-ae5a7e66",
                 kernel="board-free",
                 derive_boards=6000,
+                score_seed=999,
             ),
             VectorArm(
                 abstraction="buckets-F10T20R30-r200-ae5a7e66",

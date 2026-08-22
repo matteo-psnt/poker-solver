@@ -2094,6 +2094,8 @@ export interface components {
             kernels?: string[] | null;
             /** Score Boards */
             score_boards?: number | null;
+            /** Score Seeds */
+            score_seeds?: number[] | null;
             /** Stack */
             stack?: number | null;
             /** Timeout */
@@ -2370,6 +2372,11 @@ export interface components {
             derive_boards: number;
             /** Kernel */
             kernel: string;
+            /**
+             * Score Seed
+             * @default 999
+             */
+            score_seed: number;
         };
     };
     responses: never;

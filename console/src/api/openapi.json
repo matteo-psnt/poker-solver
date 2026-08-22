@@ -3582,6 +3582,20 @@
             ],
             "title": "Score Boards"
           },
+          "score_seeds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Seeds"
+          },
           "stack": {
             "anyOf": [
               {
@@ -4036,6 +4050,11 @@
           "kernel": {
             "title": "Kernel",
             "type": "string"
+          },
+          "score_seed": {
+            "default": 999,
+            "title": "Score Seed",
+            "type": "integer"
           }
         },
         "required": [

@@ -185,6 +185,7 @@ class SubmitVectorBody(BaseModel):
     checkpoints: str | None = None
     config: str | None = None
     stack: int | None = None
+    score_seeds: list[int] | None = None
     board_relative: bool | None = None
     timeout: str | None = None
 
