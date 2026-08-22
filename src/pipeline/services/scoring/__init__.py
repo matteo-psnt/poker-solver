@@ -140,6 +140,7 @@ def evaluate_and_record(
             run_dir,
             config,
             resolver_iterations=resolver_iterations,
+            resolver_root_prior_weight=resolver_root_prior_weight,
             abstraction_hash=abstraction_hash,
             at_iteration=at_iteration,
         )

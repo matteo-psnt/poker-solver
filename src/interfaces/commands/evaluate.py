@@ -76,7 +76,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--resolver-prior-weight",
         type=float,
         default=None,
-        help="[resolver_match] Override resolver.root_prior_weight: the blueprint as a "
+        help="[resolver_match, lbr] Override resolver.root_prior_weight: the blueprint as a "
         "pseudo-count on the root strategy, in units of CFR iterations. 0 is the "
         "shipped behaviour, where a starved solve walks away from UNIFORM rather "
         "than from the blueprint.",
