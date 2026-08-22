@@ -175,15 +175,6 @@ class TestTheJoins:
         assert dict(answers)["jobs"]["limit"] == views.RUN_LIST_JOB_LIMIT
         assert views.RUN_LIST_JOB_LIMIT > views.LIVE_LIMIT
 
-    def test_the_arms_of_one_experiment_are_pinned_to_their_run_records(self, answers):
-        composed = views.experiment("exp-1")
-        assert [row["name"] for row in composed["arm_runs"]] == ["run-a", "run-b"]
-
-    def test_an_untagged_run_is_not_an_arm_of_everything(self, answers):
-        """`experiment_id: None` must not match an experiment id."""
-        composed = views.experiment("exp-2")
-        assert [row["name"] for row in composed["arm_runs"]] == ["run-c"]
-
 
 class TestOnePartCannotTakeOutTheScreen:
     def test_the_other_panels_survive_an_unavailable_one(self, monkeypatch):

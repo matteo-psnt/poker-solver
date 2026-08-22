@@ -44,7 +44,6 @@ MODELS: dict[str, type[BaseModel]] = {
     "ledger": contract.Ledger,
     "logs": contract.LogLines,
     "cost": contract.Cost,
-    "report": contract.Report,
     "activity": contract.Activity,
     "configs": contract.Configs,
     "autoscale-check": contract.Autoscale,
@@ -58,7 +57,6 @@ MODELS: dict[str, type[BaseModel]] = {
     "push-code": contract.PushedCode,
     "push-data": contract.PushedData,
     "compact-legs": contract.Compacted,
-    "promote": contract.Promoted,
     "cancel": contract.Cancelled,
     "serve-box": contract.Box,
 }
@@ -207,19 +205,3 @@ class TestTheViewEnvelopes:
             "a trimmed part must not offer rows — that is the whole point of the type"
         )
         assert view.run_tasks
-
-    def test_the_experiment_view_validates(self):
-        view = contract.ExperimentView.model_validate(
-            {
-                "op": "view-experiment",
-                "at": "2026-08-12T09:00:00+02:00",
-                "elapsed_seconds": 1.2,
-                "parts": {
-                    "report": self._part("report"),
-                    "runs": self._part("runs"),
-                },
-                "arm_runs": [row.model_dump() for row in PAYLOADS["runs"].runs],
-            }
-        )
-        assert view.parts.report.payload is not None
-        assert view.arm_runs

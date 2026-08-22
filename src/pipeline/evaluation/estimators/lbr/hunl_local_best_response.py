@@ -604,11 +604,9 @@ def compute_lbr_exploitability(
     assuming button-symmetrized on-policy value is ~0 -- so the two figures
     are directly comparable — LBR should never report *less*.
 
-    To *compare* two blueprints, run both evals with the same explicit seed and
-    feed the per-hand samples (``result.hand_outcomes``) to
-    :func:`~src.pipeline.evaluation.statistics.compare_paired_samples` — the
-    deals match hand-for-hand, so the paired difference resolves far smaller
-    gaps than two independent confidence intervals.
+    To *compare* two blueprints, run both evals with the same explicit seed:
+    the deals then match hand-for-hand in ``result.hand_outcomes``, so a paired
+    difference resolves far smaller gaps than two independent intervals.
     """
     if config is None:
         config = LBRConfig()

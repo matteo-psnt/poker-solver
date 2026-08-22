@@ -15,7 +15,8 @@ memory is flat in iteration count. The old dynamic backend (hashed `InfoSetKey`)
 is gone, and every checkpoint it wrote is unreadable at HEAD by design. Runs are
 loadable iff they carry `STATIC_CHECKPOINT.json`.
 
-- **Never compare arms across knob tiers.** `report` refuses by design.
+- **Never compare arms across knob tiers.** Nothing enforces this now;
+  check `base_seed` and every tier knob before putting two numbers together.
   Never hand-transcribe scores.
 - **Eval records are per-run files**, not ledger appends: `evaluate` writes the
   complete row into `<run_dir>/evals/<slug>.json`. There is no stored index —
@@ -30,9 +31,9 @@ loadable iff they carry `STATIC_CHECKPOINT.json`.
   that agreement circular while the test still passes. This is an import-linter
   contract and the one that is about correctness rather than tidiness.
 - **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`
-  (`--set k=v` for config overrides). `report --experiment` pins every arm to
-  the control's knob tier and pairs each variant against its control.
-  `curve --run` is the within-run exploitability-vs-iteration artifact.
+  (`--set k=v` for config overrides). The tags are recorded on every eval;
+  `ledger --json` is what reads them back. `curve --run` is the within-run
+  exploitability-vs-iteration artifact.
 - **Prefer explicit, typed interfaces** between solver, training and evaluation.
 - Keep tests deterministic (fixed seeds, no nondeterministic assertions). Mark
   expensive tests `@pytest.mark.slow`; intentionally longer ones get a tight

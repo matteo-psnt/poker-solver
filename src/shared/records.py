@@ -5,7 +5,7 @@ axes -- schema version, tolerance of a torn file, atomicity. There are exactly
 two storage shapes, and this module owns both.
 
 SNAPSHOT is current state: the whole document is rewritten and only the latest
-version matters (``.run.json``, the checkpoint manifest, the baseline).
+version matters (``.run.json``, the checkpoint manifest).
 
 LOG is history: rows are appended and never rewritten, so one file legitimately
 spans code versions as a run is resumed across tasks (``progress.jsonl``, the
@@ -120,15 +120,6 @@ REGISTRY: dict[str, Artifact] = {
         what="a precomputed card abstraction's config, hash and per-street shape",
         where="<abstraction_dir>/metadata.json",
         growth="one per abstraction; rewritten in place",
-    ),
-    "baseline.json": Artifact(
-        name="baseline.json",
-        kind="snapshot",
-        scope="local",
-        version=1,
-        what="which run is the current baseline, and why it was promoted",
-        where="<runs_dir>/../baseline.json",
-        growth="a single pointer, rewritten by promote",
     ),
     "telemetry/invocations.jsonl": Artifact(
         name="telemetry/invocations.jsonl",

@@ -83,10 +83,8 @@ def evaluate_run_lbr(
     wall-clock) so the measured strategy is machine-independent and CRN pairing
     stays valid.
 
-    The results dict carries per-hand records plus the base seed; evaluate two runs
-    with the same explicit ``config.seed`` and feed the per-hand samples to
-    :func:`~src.pipeline.evaluation.statistics.compare_paired_samples` for a paired
-    comparison that resolves far smaller gaps than two independent intervals.
+    The results dict carries per-hand records plus the base seed, so two runs
+    evaluated with the same explicit ``config.seed`` are paired hand-for-hand.
 
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.

@@ -30,7 +30,6 @@ from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
     compute_lbr_exploitability,
 )
 from src.pipeline.evaluation.estimators.lbr.opponent_model import ResolvedOpponent, known_mask
-from src.pipeline.evaluation.statistics import compare_paired_samples
 from src.shared.config import ResolverConfig
 from tests.test_helpers import build_trained_test_solver, skew_preflop_infoset
 
@@ -366,8 +365,12 @@ class TestPerHandRecords:
     # 30s not 5s: coverage instrumentation runs this file ~3.3x slower, and
     # every other expensive test here already carries an explicit mark.
     @pytest.mark.timeout(30)
-    def test_same_seed_yields_identical_records_and_null_paired_diff(self):
-        """CRN foundation: same seed => hand-for-hand identical deals/outcomes."""
+    def test_same_seed_yields_identical_records(self):
+        """CRN foundation: same seed => hand-for-hand identical deals/outcomes.
+
+        Pairing two evaluations is only meaningful if this holds, so it is the
+        property under test rather than any statistic computed from it.
+        """
         solver = _build_solver(3, starting_stack=400)
         cfg = LBRConfig(num_hands=6, equity_runouts=2, seed=99)
         first = compute_lbr_exploitability(solver, cfg)
@@ -376,11 +379,7 @@ class TestPerHandRecords:
 
         samples_a = [(o0.value + o1.value) / 2.0 for o0, o1 in first.hand_outcomes]
         samples_b = [(o0.value + o1.value) / 2.0 for o0, o1 in second.hand_outcomes]
-        comparison = compare_paired_samples(samples_a, samples_b)
-        assert comparison["mean_diff"] == 0.0
-        assert comparison["se_diff"] == 0.0
-        assert comparison["p_value"] == 1.0
-        assert not comparison["is_significant"]
+        assert samples_a == samples_b
 
 
 def _constructed_flop_state(

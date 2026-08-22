@@ -150,20 +150,20 @@ poker-solver score --run <id> --method lbr -- --scorer lookahead --opponent depl
 
 # Read the record back
 poker-solver ledger [--run <id>] [--limit N]
-poker-solver report --experiment <name>
 poker-solver curve --run <id>
 ```
 
-`--method` is `lbr` or `exact_br`. `report` attributes each arm against its
-control and **refuses** mismatched pairings — differing `base_seed`,
-`num_hands`, or any tier knob. Never hand-transcribe scores.
+`--method` is `lbr` or `exact_br`. Arms are tagged with `--experiment`/`--arm`
+at submit and the tags travel onto the eval documents, so `ledger --json` is
+what groups them. Two numbers are only comparable within one tier — matching
+`base_seed`, `num_hands` and every tier knob. Never hand-transcribe scores.
 
 ## Reporting guidelines
 
 1. Report confidence intervals, never bare point estimates.
 2. State the full tier: scorer, opponent, off-tree flag, `num_hands`,
    `equity_runouts`, seed. Numbers from different tiers are not comparable.
-3. Compare only via `report` (same seed and tier).
+3. Compare only within one tier (same seed and knobs).
 4. Say that LBR is a lower bound, not the exact value.
 
 ## Testing

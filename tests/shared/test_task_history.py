@@ -603,4 +603,6 @@ class TestOneMalformedDocumentCannotTakeDownEveryReader:
         (task_log.tasks_dir(tmp_path) / "task-b.progress.json").write_text(
             json.dumps({"task_id": "task-b", "progress": {"done": 1, "total": 2, "unit": None}})
         )
-        assert task_history.read_tasks(tmp_path)[0].progress.unit == ""
+        progress = task_history.read_tasks(tmp_path)[0].progress
+        assert progress is not None
+        assert progress.unit == ""

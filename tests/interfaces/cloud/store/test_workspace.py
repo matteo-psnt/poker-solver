@@ -104,22 +104,6 @@ class TestPullMetadata:
         assert loaded["run_id"] == "run-a"
 
 
-class TestBaseline:
-    def test_round_trips_through_the_share(self, fake):
-        workspace.write_baseline(fake, "s", json.dumps({"run_id": "run-a"}))
-        body = workspace.read_baseline(fake, "s")
-        assert body is not None
-        assert json.loads(body)["run_id"] == "run-a"
-
-    def test_absent_baseline_reads_as_none(self, fake):
-        assert workspace.read_baseline(fake, "s") is None
-
-    def test_it_lands_at_the_share_root_beside_the_archive(self, fake):
-        workspace.write_baseline(fake, "s", "{}")
-        assert workspace.BASELINE_NAME in fake.written
-        assert "/" not in workspace.BASELINE_NAME
-
-
 class TestSourceSeam:
     """There is only one source now: the published record."""
 

@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 
     from azure.storage.fileshare import ShareServiceClient
 
-BASELINE_NAME = "baseline.json"
 
 # `<op>_result.json` -- train, evaluate, resume, train-static. The writer was
 # deleted with the clobbering result file it produced; nothing reads them, and
@@ -118,21 +117,6 @@ def pull_metadata(
         for future in futures:
             future.result()
     return len(wanted)
-
-
-def read_baseline(service: ShareServiceClient, share_name: str) -> str | None:
-    """The published baseline document, or None when none has been promoted."""
-    return share.read_text(service, share_name, BASELINE_NAME)
-
-
-def write_baseline(service: ShareServiceClient, share_name: str, body: str) -> None:
-    """Publish the baseline pointer.
-
-    Small, single-writer, and the conclusion of every experiment: which run the
-    next one forks from. It was the only artifact that never left the machine
-    that wrote it, so a reinstall lost it and two boxes could silently disagree.
-    """
-    share.write_text(service, share_name, BASELINE_NAME, body)
 
 
 @dataclass
@@ -281,9 +265,6 @@ def _materialise(root: Path, *, run: str | None) -> None:
     config = CloudConfig.load()
     service = share.share_client(config)
     pull_metadata(service, config.share_name, root, run=run)
-    baseline = read_baseline(service, config.share_name)
-    if baseline is not None:
-        (root / BASELINE_NAME).write_text(baseline)
 
 
 def _require_published(root: Path, run: str) -> None:
