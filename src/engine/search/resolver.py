@@ -189,6 +189,14 @@ class HUResolver:
             rules=self.rules,
             max_depth=self.config.max_depth,
         )
+        # Built only when it will be used: it is a per-bucket blueprint sweep
+        # over 1326 combos, and at weight 0 the solve is exactly what it was.
+        weight = float(self.config.root_prior_weight)
+        prior = (
+            self._blueprint_strategy_matrix(state, list(tree.root.actions))
+            if weight > 0.0
+            else None
+        )
         solution = solve_subgame(
             tree,
             hero=hero,
@@ -203,6 +211,8 @@ class HUResolver:
                 pot_fraction=self.config.leaf_continuation_fraction,
             ),
             rng=self.rng,
+            root_prior=prior,
+            root_prior_weight=weight,
         )
         return tree.root.actions, solution
 
