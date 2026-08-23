@@ -36,15 +36,12 @@ would be fielded.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import math
-import multiprocessing as mp
-import threading
+import resource
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from itertools import repeat
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -99,10 +96,12 @@ class PublicBRConfig:
         means exact enumeration for that street).
     board_seed: seeds every board draw; identical seeds give identical board
         samples and therefore exactly paired evaluations.
-    num_workers: processes over the four (responder seat, button) walks, which are
-        independent. Above 1 requires a ``blueprint_factory``, since the solver is
-        not picklable. Does NOT change the result: each walk is deterministic and
-        the aggregate is a mean over the same four numbers.
+    num_workers: processes over the flop subtrees (one job per preflop line x
+        sampled flop x walk), a fork-join BELOW the preflop best-response max,
+        where the walk is a plain weighted sum. Above 1 requires a
+        ``blueprint_factory``, since the solver is not picklable. Does NOT
+        change the result: every subtree is deterministic and the join sums in
+        the serial order, so the number is bit-identical at any worker count.
 
     Node count scales ~linearly in num_flops * num_turns * num_rivers, and
     wall-clock with it now that the per-context policy tables are one slice
@@ -192,6 +191,46 @@ class _NodeGain:
     br_mix: np.ndarray = field(default_factory=lambda: np.zeros(0))
     gain_by_br_action: np.ndarray = field(default_factory=lambda: np.zeros(0))
 
+    def absorb(self, other: _NodeGain) -> None:
+        self.gain += other.gain
+        self.mass += other.mass
+        self.blueprint_mix += other.blueprint_mix
+        self.br_mix += other.br_mix
+        self.gain_by_br_action += other.gain_by_br_action
+
+
+@dataclass
+class _Tally:
+    """Everything a walk counts besides its values, summed from zero per subtree.
+
+    A flop job carries one back and the join absorbs it in visit order, so a
+    worker's part and an in-process part are the same arithmetic and the
+    masses round identically at any worker count. ``terms`` is the
+    decomposition's running sum; ``gains`` its per-node entries.
+    """
+
+    nodes: int = 0
+    decision_mass: float = 0.0
+    missing_mass: float = 0.0
+    selfplay_mass: float = 0.0
+    selfplay_missing: float = 0.0
+    terms: float = 0.0
+    gains: dict[tuple[Street, str], _NodeGain] = field(default_factory=dict)
+
+    def absorb(self, other: _Tally) -> None:
+        self.nodes += other.nodes
+        self.decision_mass += other.decision_mass
+        self.missing_mass += other.missing_mass
+        self.selfplay_mass += other.selfplay_mass
+        self.selfplay_missing += other.selfplay_missing
+        self.terms += other.terms
+        for key, entry in other.gains.items():
+            mine = self.gains.get(key)
+            if mine is None:
+                self.gains[key] = entry
+            else:
+                mine.absorb(entry)
+
 
 @dataclass(frozen=True)
 class WalkResult:
@@ -212,6 +251,32 @@ class WalkResult:
     selfplay_missing: float
     branches: int
     gains: dict[tuple[Street, str], _NodeGain] | None
+
+
+@dataclass(frozen=True)
+class _FlopPart:
+    """One flop subtree's values and tally, summed from zero inside the subtree."""
+
+    best: np.ndarray
+    self_play: np.ndarray
+    tally: _Tally
+
+
+@dataclass(frozen=True)
+class _FlopJob:
+    """A flop subtree waiting for a worker: the dealt state and the reaches into it.
+
+    ``key`` is (walk, top-level deal node, flop index) in VISIT order, which is
+    deterministic, so the joining pass finds its part without any other
+    bookkeeping. ``line`` is the preflop sequence the subtree hangs off.
+    """
+
+    key: tuple[int, int, int]
+    br_seat: int
+    state: GameState
+    reach: np.ndarray
+    own_reach: np.ndarray
+    line: str
 
 
 class _BoardPlan:
@@ -305,13 +370,14 @@ class PublicTreeBestResponse:
         self._showdown_cache: dict[tuple, RunoutEvaluator] = {}
         self._policy_cache: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._br_seat = 0
-        self._nodes = 0
-        self._decision_mass = 0.0
-        self._missing_mass = 0.0
-        self._selfplay_mass = 0.0
-        self._selfplay_missing = 0.0
-        self._terms = 0.0
-        self._gains: dict[tuple[Street, str], _NodeGain] = {}
+        self._tally = _Tally()
+        # Fork-join state: a list while the preflop pass RECORDS flop subtrees,
+        # a dict while it JOINS the parts workers returned, None on the serial
+        # path. `_walk` and `_deal` index the jobs in visit order.
+        self._fringe: list[_FlopJob] | None = None
+        self._joined: dict[tuple[int, int, int], _FlopPart] | None = None
+        self._walk_index = 0
+        self._deal = 0
         # Last, because it needs the rules, the action model and the board plan.
         self._branches_per_walk = self._count_flop_deals()
 
@@ -325,28 +391,7 @@ class PublicTreeBestResponse:
         total_missing = 0.0
         walks = [(s, b) for s in (0, 1) for b in (0, 1)]
         if self._config.num_workers > 1 and self._factory is not None:
-            # Independent walks: same tree, disjoint responder/button, no shared
-            # mutable state. Ordered results, so seat_results stays in the same
-            # order the serial path produces.
-            with (
-                _WalkReports(self._on_branch, self.branch_total) as reports,
-                ProcessPoolExecutor(max_workers=min(self._config.num_workers, len(walks))) as pool,
-            ):
-                # `map` yields IN ORDER, which is what keeps the aggregate
-                # identical to the serial path.
-                parts = list(
-                    pool.map(
-                        _walk_worker,
-                        repeat(self._factory),
-                        repeat(self._config),
-                        repeat(self._starting_stack),
-                        [s for s, _ in walks],
-                        [b for _, b in walks],
-                        repeat(reports.queue),
-                        range(len(walks)),
-                    )
-                )
-            self._branches_done = sum(part.branches for part in parts)
+            parts = self._fork_join(walks, self._factory)
         else:
             parts = [self.run_walk(br_seat, button) for br_seat, button in walks]
 
@@ -395,13 +440,7 @@ class PublicTreeBestResponse:
         game; :meth:`evaluate` is the standard entry point.
         """
         self._br_seat = br_seat
-        self._nodes = 0
-        self._decision_mass = 0.0
-        self._missing_mass = 0.0
-        self._selfplay_mass = 0.0
-        self._selfplay_missing = 0.0
-        self._terms = 0.0
-        self._gains = {}
+        self._tally = _Tally()
         root = self._rules.create_initial_state(
             starting_stack=self._starting_stack, hole_cards=self._dummy_holes, button=button
         )
@@ -415,29 +454,88 @@ class PublicTreeBestResponse:
     def run_walk(self, br_seat: int, button: int) -> WalkResult:
         """One walk's values plus the telemetry the aggregate needs.
 
-        Public because a worker process runs exactly this and nothing else, and
-        because returning the raw parts keeps the value/mass arithmetic in ONE
-        place -- the serial and parallel paths then cannot drift.
-
-        The branch count is what lets the PARALLEL path report a bar at all: a
-        walk in another process shares no counter with this one, but it can say
-        what it cost on the way back, and every walk costs the same.
+        Returning the raw parts keeps the value/mass arithmetic in ONE place --
+        the serial and fork-join paths then cannot drift.
         """
+        self._deal = 0
         before = self._branches_done
         best, self_play = self.walk_values(br_seat, button, np.ones(NUM_COMBOS, dtype=np.float64))
         measure = NUM_COMBOS * _NUM_OPP_DEALS
+        tally = self._tally
         return WalkResult(
             chips=float(best.sum()) / measure,
             self_play_chips=float(self_play.sum()) / measure,
-            terms_chips=self._terms / measure,
-            nodes=self._nodes,
-            decision_mass=self._decision_mass,
-            missing_mass=self._missing_mass,
-            selfplay_mass=self._selfplay_mass,
-            selfplay_missing=self._selfplay_missing,
+            terms_chips=tally.terms / measure,
+            nodes=tally.nodes,
+            decision_mass=tally.decision_mass,
+            missing_mass=tally.missing_mass,
+            selfplay_mass=tally.selfplay_mass,
+            selfplay_missing=tally.selfplay_missing,
             branches=self._branches_done - before,
-            gains=self._gains if self._config.decompose else None,
+            gains=tally.gains if self._config.decompose else None,
         )
+
+    def flop_part(self, job: _FlopJob) -> _FlopPart:
+        """One flop subtree from fresh counters -- what a worker process runs."""
+        self._br_seat = job.br_seat
+        return self._flop_part(job.state, job.reach, job.own_reach, job.line)
+
+    def _flop_part(
+        self, state: GameState, reach: np.ndarray, own_reach: np.ndarray, line: str
+    ) -> _FlopPart:
+        saved, self._tally = self._tally, _Tally()
+        best, self_play = self._walk(state, reach, own_reach, line)
+        part = _FlopPart(best, self_play, self._tally)
+        self._tally = saved
+        return part
+
+    def _fork_join(
+        self, walks: list[tuple[int, int]], factory: Callable[[], ScorableBlueprint]
+    ) -> list[WalkResult]:
+        """The four walks with every flop subtree farmed out to a process pool.
+
+        Three passes over the PREFLOP tree, which is cheap: record every flop
+        deal that has reach (the downward reach never depends on the values
+        coming back up), run all of them on the pool at once -- that is what
+        fills sixteen cores when there are only four sampled flops -- then walk
+        again joining the parts in the serial order. The bar counts jobs as
+        they land, in the same branch unit as the serial path.
+        """
+        publish, self._on_branch = self._on_branch, None
+        try:
+            self._fringe = []
+            self._branches_done = 0
+            for walk, (br_seat, button) in enumerate(walks):
+                self._walk_index = walk
+                self.run_walk(br_seat, button)
+            jobs, self._fringe = self._fringe, None
+            # Branches that need no job: no reach, or under an action the
+            # blueprint never takes. The bar starts from them.
+            done = self._branches_done - len(jobs)
+            self._joined = {}
+            if jobs:
+                self._joined, peak = _run_jobs(
+                    jobs,
+                    workers=min(self._config.num_workers, len(jobs)),
+                    init=(factory, self._config, self._starting_stack),
+                    publish=publish,
+                    done=done,
+                    total=self.branch_total,
+                )
+                logger.info(
+                    "public-tree BR fork-join: %d flop jobs, peak worker RSS %.2f GB",
+                    len(jobs),
+                    peak / 2**30,
+                )
+            self._branches_done = 0
+            parts = []
+            for walk, (br_seat, button) in enumerate(walks):
+                self._walk_index = walk
+                parts.append(self.run_walk(br_seat, button))
+            self._joined = None
+            return parts
+        finally:
+            self._on_branch = publish
 
     def _walk(
         self, state: GameState, opp_reach: np.ndarray, own_reach: np.ndarray, line: str
@@ -448,7 +546,7 @@ class PublicTreeBestResponse:
         attribution only. The two returned arrays may be one object at a
         terminal; callers that modify in place apply the same mask to both.
         """
-        self._nodes += 1
+        self._tally.nodes += 1
         if not opp_reach.any():
             return np.zeros(NUM_COMBOS, dtype=np.float64), np.zeros(NUM_COMBOS, dtype=np.float64)
         if state.is_terminal:
@@ -502,9 +600,11 @@ class PublicTreeBestResponse:
         # and while this was tied to `on_branch` it measured zero and taught the
         # next evaluation nothing.
         top_level = not state.board
+        deal = self._deal
         if top_level:
+            self._deal += 1
             line = state.normalized_betting_sequence()
-        for cards, weight in self._plan.deal_options(state.board):
+        for flop, (cards, weight) in enumerate(self._plan.deal_options(state.board)):
             block = blocked_combos(cards)
             child_reach = np.where(block, 0.0, opp_reach) * weight
             # An `if` rather than the `continue` this replaced: a branch with no
@@ -518,11 +618,30 @@ class PublicTreeBestResponse:
                     to_call=0,
                     last_aggressor=None,
                 )
-                child_best, child_self = self._walk(child_state, child_reach, own_reach, line)
-                child_best[block] = 0.0
-                child_self[block] = 0.0
-                best += child_best
-                self_play += child_self
+                if top_level:
+                    key = (self._walk_index, deal, flop)
+                    if self._fringe is not None:
+                        self._fringe.append(
+                            _FlopJob(key, self._br_seat, child_state, child_reach, own_reach, line)
+                        )
+                        part = None
+                    elif self._joined is not None:
+                        part = self._joined[key]
+                    else:
+                        part = self._flop_part(child_state, child_reach, own_reach, line)
+                    if part is not None:
+                        self._tally.absorb(part.tally)
+                        child_best, child_self = part.best, part.self_play
+                        child_best[block] = 0.0
+                        child_self[block] = 0.0
+                        best += child_best
+                        self_play += child_self
+                else:
+                    child_best, child_self = self._walk(child_state, child_reach, own_reach, line)
+                    child_best[block] = 0.0
+                    child_self[block] = 0.0
+                    best += child_best
+                    self_play += child_self
             if top_level:
                 self._branches_done += 1
                 # Silent until the denominator is known -- measured by a walk of
@@ -580,18 +699,19 @@ class PublicTreeBestResponse:
         line: str,
     ) -> tuple[np.ndarray, np.ndarray]:
         sigma, missing = self._policy_matrix(state, legal)
-        self._decision_mass += float(opp_reach.sum())
-        self._missing_mass += float(opp_reach[missing].sum())
+        tally = self._tally
+        tally.decision_mass += float(opp_reach.sum())
+        tally.missing_mass += float(opp_reach[missing].sum())
         if self._config.decompose:
             # The self-play view of the same fallback: what fraction of the
             # opponent decisions the BLUEPRINT actually brings the responder to
             # land on a uniform row. The all-branches figure above counts
             # subtrees the responder explores and the blueprint never enters.
             alive = self._alive(state)
-            self._selfplay_mass += float((own_reach * nonblocking_mass(opp_reach))[alive].sum())
+            tally.selfplay_mass += float((own_reach * nonblocking_mass(opp_reach))[alive].sum())
             if missing.any():
                 fallback = own_reach * nonblocking_mass(np.where(missing, opp_reach, 0.0))
-                self._selfplay_missing += float(fallback[alive].sum())
+                tally.selfplay_missing += float(fallback[alive].sum())
         best = np.zeros(NUM_COMBOS, dtype=np.float64)
         self_play = np.zeros(NUM_COMBOS, dtype=np.float64)
         for a_idx, action in enumerate(legal):
@@ -701,10 +821,11 @@ class PublicTreeBestResponse:
         weight = own_reach * nonblocking_mass(opp_reach)
         weight[~alive] = 0.0
         key = (state.street, state.normalized_betting_sequence())
-        entry = self._gains.get(key)
+        gains = self._tally.gains
+        entry = gains.get(key)
         if entry is None:
             width = len(legal)
-            entry = self._gains[key] = _NodeGain(
+            entry = gains[key] = _NodeGain(
                 tokens=tuple(action.normalize(state.pot) for action in legal),
                 types=tuple(action.type.name for action in legal),
                 line=key[1] if state.street == Street.PREFLOP else line,
@@ -713,7 +834,7 @@ class PublicTreeBestResponse:
                 gain_by_br_action=np.zeros(width),
             )
         total = float(terms.sum())
-        self._terms += total
+        self._tally.terms += total
         entry.gain += total
         entry.mass += float(weight.sum())
         entry.blueprint_mix += weight @ sigma
@@ -941,104 +1062,56 @@ def _summarise_decomposition(
     }
 
 
-"""How long the drainer waits on an empty queue before checking whether the
-walks are done. Not a publish cadence: a message publishes as it arrives, and
-the walks emit one per top-level flop branch."""
-REPORT_INTERVAL_SECONDS = 1.0
+_ENGINE: PublicTreeBestResponse | None = None
 
 
-class _WalkReports:
-    """Totals what the four walks report, while the parent is blocked on them.
-
-    A DRAINING THREAD, because there is nowhere else to do it: the parent spends
-    the whole evaluation inside `pool.map`, and consuming the queue from that
-    loop only lets a count through when a walk has already finished. That is
-    what this replaces -- four steps that all landed within seconds of the end,
-    so a ten-minute score showed 0% for nine and a half minutes of it and a hung
-    one looked identical.
-
-    Nothing here may fail the evaluation: it describes the walk, it is not the
-    walk.
-    """
-
-    def __init__(self, publish: Callable[[int, int], None] | None, total: int) -> None:
-        self._publish = publish
-        self._total = total
-        self._manager = mp.Manager() if publish is not None else None
-        self.queue = self._manager.Queue() if self._manager is not None else None
-        self._done: dict[int, int] = {}
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._drain, name="br-progress", daemon=True)
-
-    def __enter__(self) -> _WalkReports:
-        if self._publish is not None:
-            self._thread.start()
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self._stop.set()
-        if self._thread.is_alive():
-            self._thread.join(timeout=REPORT_INTERVAL_SECONDS * 2)
-        if self._manager is not None:
-            self._manager.shutdown()
-
-    def _drain(self) -> None:
-        publish, inbox = self._publish, self.queue
-        if publish is None or inbox is None:  # the thread is not started without both
-            return
-        while not self._stop.is_set():
-            try:
-                walk, done = inbox.get(timeout=REPORT_INTERVAL_SECONDS)
-            except Exception:  # noqa: BLE001 -- an empty queue is the normal case
-                continue
-            # Each walk reports its own running count, so this is a replace and
-            # never an add: a message that arrives twice cannot inflate the bar.
-            self._done[walk] = done
-            with contextlib.suppress(Exception):
-                publish(min(sum(self._done.values()), self._total), self._total)
-
-
-def _walk_worker(
-    factory: Callable[[], ScorableBlueprint],
-    config: PublicBRConfig,
-    starting_stack: int,
-    br_seat: int,
-    button: int,
-    reports: Any = None,
-    walk: int = 0,
-) -> WalkResult:
-    """One (responder seat, button) walk, in its own process.
-
-    Rebuilds the blueprint rather than receiving it: the solver holds a
-    non-picklable member, which is the same reason parallel LBR takes a factory.
-    Returns the raw parts so the parent aggregates exactly as the serial path
-    does -- deriving the seat value here would duplicate that arithmetic in two
-    places and let the two drift.
-
-    ``reports`` is a MANAGER queue, and that is not incidental: a shared ctypes
-    array -- what the trainer uses -- cannot cross a `ProcessPoolExecutor`,
-    which pickles its arguments (measured: "objects should only be shared
-    between processes through inheritance").
-    """
-    # Spawned: logging config does not inherit, and factory() rebuilds the
-    # blueprint, which logs.
+def _init_worker(
+    factory: Callable[[], ScorableBlueprint], config: PublicBRConfig, starting_stack: int
+) -> None:
+    """Build the engine ONCE per process: the blueprint load is seconds, a job
+    can be milliseconds, and the per-context policy tables amortise across
+    every job the process runs. Rebuilt through the factory rather than
+    received, since the solver is not picklable. Spawned, so logging config
+    does not inherit."""
+    global _ENGINE
     configure_logging()
-    tell = None
-    if reports is not None:
+    _ENGINE = PublicTreeBestResponse(factory(), config, starting_stack=starting_stack)
 
-        def tell(done: int, _total: int) -> None:
-            # The walk's OWN count, keyed by walk. The parent sums the four,
-            # because only it knows there are four.
-            with contextlib.suppress(Exception):
-                reports.put((walk, done))
 
-    engine = PublicTreeBestResponse(
-        factory(),
-        config,
-        starting_stack=starting_stack,
-        on_branch=tell,
-    )
-    return engine.run_walk(br_seat, button)
+def _flop_worker(job: _FlopJob) -> tuple[_FlopPart, int]:
+    assert _ENGINE is not None, "worker used before _init_worker"
+    part = _ENGINE.flop_part(job)
+    return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+
+def _run_jobs(
+    jobs: list[_FlopJob],
+    *,
+    workers: int,
+    init: tuple[Callable[[], ScorableBlueprint], PublicBRConfig, int],
+    publish: Callable[[int, int], None] | None,
+    done: int,
+    total: int,
+) -> tuple[dict[tuple[int, int, int], _FlopPart], int]:
+    """Every flop job on a pool, parts keyed for the join; peak worker RSS in bytes.
+
+    Submitted all at once and collected as they land, so the bar moves from the
+    first finished subtree. ``ru_maxrss`` is kilobytes on Linux and bytes on
+    macOS; the pool runs on Linux and the figure sizes the NEXT tier's worker
+    count, which is the only reason it is collected.
+    """
+    parts: dict[tuple[int, int, int], _FlopPart] = {}
+    peak = 0
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker, initargs=init) as pool:
+        futures = {pool.submit(_flop_worker, job): job for job in jobs}
+        for future in as_completed(futures):
+            part, rss = future.result()
+            parts[futures[future].key] = part
+            peak = max(peak, rss)
+            done += 1
+            if publish is not None:
+                publish(done, total)
+    return parts, peak * 1024
 
 
 def compute_public_tree_br(

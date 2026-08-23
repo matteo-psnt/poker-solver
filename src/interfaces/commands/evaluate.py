@@ -223,8 +223,8 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             num_turns=args.br_turns,
             num_rivers=args.br_rivers,
             board_seed=args.br_board_seed,
-            # --workers is shared with lbr; exact_br splits its four independent
-            # (seat, button) walks over it, so 4 saturates the useful range.
+            # --workers is shared with lbr; exact_br farms flop subtrees over
+            # it, one blueprint per process, so memory caps it before cores do.
             num_workers=args.workers,
             in_abstraction=args.in_abstraction,
             policy_threshold=args.policy_threshold,
