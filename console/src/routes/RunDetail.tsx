@@ -78,7 +78,7 @@ export function RunDetail() {
         staleAfterMs={120_000}
         error={run?.error ?? null}
         loading={view.isLoading}
-        onRefresh={() => view.refetch()}
+        onRefresh={() => view.refresh()}
         refreshing={view.isFetching}
       >
         {runData && (
@@ -215,7 +215,7 @@ function ProgressPanel({ view }: { view: RunViewQuery }) {
       error={progress?.error ?? null}
       loading={view.isLoading}
       empty={progress?.payload && rows.length === 0 ? "No checkpoint history." : null}
-      onRefresh={() => view.refetch()}
+      onRefresh={() => view.refresh()}
       refreshing={view.isFetching}
     >
       {rows.length > 0 && (
@@ -320,7 +320,7 @@ function RunEvals({ view }: { view: RunViewQuery }) {
           ? "Never scored. Older evaluations may be legacy files on the share that the rebuild skips."
           : null
       }
-      onRefresh={() => view.refetch()}
+      onRefresh={() => view.refresh()}
       refreshing={view.isFetching}
     >
       {rows.length > 0 && (
@@ -444,7 +444,7 @@ function RunTasks({ view }: { view: RunViewQuery }) {
       // renders as the error above, because "no tasks" is a claim and "I could
       // not look" is not.
       empty={tasks?.payload && mine.length === 0 ? "No tasks recorded for this run." : null}
-      onRefresh={() => view.refetch()}
+      onRefresh={() => view.refresh()}
       refreshing={view.isFetching}
     >
       {mine.length > 0 && (
