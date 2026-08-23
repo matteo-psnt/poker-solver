@@ -286,10 +286,14 @@ class TestProductionScale:
             Street.TURN: 300,
             Street.RIVER: 600,
         }, "the abstraction config moved; the fingerprint below moved with it"
-        assert production_tree.fingerprint() == "ca50e2d3291fa227"
-        assert len(production_tree.nodes) == 57_604
-        assert production_tree.num_rows == 32_240_608
-        assert production_tree.num_slots == 89_138_455
+        # Re-pinned 2026-08-23: the game gained the big blind's option behind a
+        # limp (`c-x`, `c-b*` lines), a deliberate lineage break -- every
+        # checkpoint written against ca50e2d3291fa227 / 57,604 nodes is
+        # unloadable at HEAD by design.
+        assert production_tree.fingerprint() == "b0367ae018a58a2f"
+        assert len(production_tree.nodes) == 81_518
+        assert production_tree.num_rows == 45_538_298
+        assert production_tree.num_slots == 125_463_187
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)

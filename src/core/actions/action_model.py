@@ -158,7 +158,9 @@ class ActionModel:
                 return "sb_first_in"
             return "bb_vs_limp"
         if aggressive == 1:
-            return "bb_vs_open" if not current_is_sb else "sb_vs_3bet"
+            # The only way the small blind faces one aggression is its own
+            # limp being raised: the big blind's option, not a 3-bet.
+            return "bb_vs_open" if not current_is_sb else "sb_vs_limp_raise"
         if aggressive == 2:
             return "sb_vs_3bet" if current_is_sb else "bb_vs_4bet"
         if aggressive == 3:

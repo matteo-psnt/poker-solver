@@ -100,8 +100,15 @@ class TestTreePolicySource:
         try:
             source = TreePolicySource(solver.tree, solver.storage, solver.card_abstraction)
             state = solver.deal_initial_state()
-            infoset = source.infoset_at(state, preflop_hand_index(state.hole_cards[0]))
-            assert infoset is not None
+            # The dealt class need not be one of the 300 iterations visited;
+            # any touched root row proves the lookup resolves trained rows.
+            touched = [
+                infoset
+                for bucket in range(source.num_buckets(state.street))
+                if (infoset := source.infoset_at(state, bucket)) is not None
+            ]
+            assert touched, "training touched no root row"
+            infoset = touched[0]
             assert len(infoset.regrets) == infoset.num_actions
         finally:
             solver.storage.close()

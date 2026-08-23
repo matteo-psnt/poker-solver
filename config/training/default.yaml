@@ -16,6 +16,8 @@
 #   # Preflop templates by node type (HU-only)
 #   # preflop_templates:
 #   #   sb_first_in: ["fold", "call", 2.0, 2.5]
+#   #   bb_vs_limp: ["check", 2.0, 3.0]          # the BB's option behind a limp
+#   #   sb_vs_limp_raise: ["fold", "call", "2.3x_last", "jam"]
 #   #   bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
 #
 #   # Postflop templates by context

@@ -10,6 +10,10 @@ solver:
 action_model:
   preflop_templates:
     sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
+    # Sizes are chips committed by this action in bb: the BB's 2.0 / 3.0 over
+    # a limp are raises to 3bb / 4bb total.
+    bb_vs_limp: ["check", 2.0, 3.0]
+    sb_vs_limp_raise: ["fold", "call", "2.3x_last", "jam"]
     bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
     sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
   postflop_templates:

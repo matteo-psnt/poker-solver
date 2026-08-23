@@ -36,7 +36,9 @@ def _river_state(
     *,
     to_call: int = 0,
     current_player: int = 0,
-    history: tuple[Action, ...] = (call(), check(), check(), check(), check(), check(), check()),
+    # A check-down to the river with no river action yet: limp, the big
+    # blind's check, then flop and turn check-check.
+    history: tuple[Action, ...] = (call(), check(), check(), check(), check(), check()),
     last_aggressor: int | None = None,
 ) -> GameState:
     return GameState(

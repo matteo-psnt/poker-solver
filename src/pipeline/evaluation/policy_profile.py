@@ -123,10 +123,9 @@ def _preflop_nodes(
     """The first decisions of a hand, as 169-class tables.
 
     Walks the real rules from the root so the node labels (open sizes in bb)
-    come off the action model rather than a guess: SB first in, BB facing each
-    open, and the SB facing the smallest 3-bet. There is no "BB vs limp" node
-    to read: under these rules a preflop call closes the street, so a limp deals
-    the flop and the big blind never acts on it.
+    come off the action model rather than a guess: SB first in, BB facing a
+    limp and each open, the SB facing each raise of its limp, and the SB facing
+    the smallest 3-bet.
     """
     root = rules.create_initial_state(
         starting_stack=starting_stack, hole_cards=_DUMMY_HOLES, button=0
@@ -134,7 +133,15 @@ def _preflop_nodes(
     nodes = [("SB first in", root)]
     for action in rules.get_legal_actions(root, action_model):
         child = rules.apply_action(root, action)
-        if action.type == ActionType.RAISE and child.street == Street.PREFLOP:
+        if child.is_terminal or child.street != Street.PREFLOP:
+            continue
+        if action.type == ActionType.CALL:
+            nodes.append(("BB vs limp", child))
+            for reply in rules.get_legal_actions(child, action_model):
+                raised = rules.apply_action(child, reply)
+                if reply.type in (ActionType.BET, ActionType.RAISE) and not raised.is_terminal:
+                    nodes.append((f"SB limp vs raise {_label(reply, child, rules)}", raised))
+        elif action.type == ActionType.RAISE:
             nodes.append((f"BB vs open {_label(action, root, rules)}", child))
     opens = [(label, state) for label, state in nodes if label.startswith("BB vs open")]
     if opens:
@@ -152,8 +159,8 @@ def _preflop_nodes(
 
 
 def _label(action: Action, state: GameState, rules: GameRules) -> str:
-    """Human label for an action at ``state``: raises as the total in bb."""
-    if action.type == ActionType.RAISE:
+    """Human label for an action at ``state``: chips committed by it, in bb."""
+    if action.type in (ActionType.RAISE, ActionType.BET):
         return f"{(action.amount + state.to_call) / rules.big_blind:g}bb"
     return action.normalize(state.pot)
 

@@ -542,14 +542,16 @@ class TestExploitability:
         a change here means the include_off_tree=False path is no longer inert.
         (Re-pinned after the 2026-07-17 training-speed work changed the solver's
         sampling RNG stream, which shifts the tiny trained blueprint this test
-        evaluates — the eval path itself is unchanged.)"""
+        evaluates — the eval path itself is unchanged. Re-pinned again
+        2026-08-23: the game gained the big blind's option behind a limp, a
+        deliberate lineage break; was 435.1439393939373.)"""
         solver = _build_solver(3, starting_stack=400)
         result = compute_lbr_exploitability(
             solver, LBRConfig(num_hands=8, equity_runouts=2, seed=99)
         )
-        assert result.exploitability_mbb == 435.1439393939373
+        assert result.exploitability_mbb == 307.1060606060593
         assert result.lbr_utility_p0 == 4.054545454545224
-        assert result.lbr_utility_p1 == 82.97424242424223
+        assert result.lbr_utility_p1 == 57.366666666666646
 
     @pytest.mark.timeout(30)
     def test_off_tree_deterministic_under_fixed_seed(self):
