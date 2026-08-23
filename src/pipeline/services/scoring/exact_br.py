@@ -83,6 +83,7 @@ def evaluate_run_exact_br(
         "num_turns": config.num_turns,
         "num_rivers": config.num_rivers,
         "board_seed": config.board_seed,
+        "conditional_chance": config.conditional_chance,
         "elapsed_s": result.elapsed_s,
         "big_blind": metadata.config.game.big_blind,
         "in_abstraction": config.in_abstraction,

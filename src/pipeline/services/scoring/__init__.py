@@ -119,6 +119,7 @@ def evaluate_and_record(
             in_abstraction=br_config.in_abstraction,
             policy_threshold=br_config.policy_threshold,
             purify=br_config.purify,
+            conditional_chance=br_config.conditional_chance,
         )
     elif method == "resolver_match":
         # Not an exploitability estimate at all: a head-to-head chip edge of

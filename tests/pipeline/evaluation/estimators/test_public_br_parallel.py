@@ -8,6 +8,7 @@ that property while still looking plausible.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import partial
 
 import pytest
@@ -57,15 +58,14 @@ class TestForkJoinMatchesSerial:
     def test_same_number_same_telemetry(self, iterations):
         solver = build_trained_test_solver(iterations, starting_stack=STACK)
         factory = partial(build_trained_test_solver, iterations, starting_stack=STACK)
+        tier = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3)
 
-        def tier(workers: int) -> PublicBRConfig:
-            return PublicBRConfig(
-                num_flops=2, num_turns=1, num_rivers=1, board_seed=3, num_workers=workers
-            )
-
-        serial = compute_public_tree_br(solver, tier(1), starting_stack=STACK)
+        serial = compute_public_tree_br(solver, tier, starting_stack=STACK)
         forked = compute_public_tree_br(
-            solver, tier(3), starting_stack=STACK, blueprint_factory=factory
+            solver,
+            replace(tier, num_workers=3),
+            starting_stack=STACK,
+            blueprint_factory=factory,
         )
 
         assert forked.exploitability_mbb == serial.exploitability_mbb
