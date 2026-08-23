@@ -59,6 +59,9 @@ class RunProvenance:
     # `config_name` is not identity (it comes from system.config_name in the YAML),
     # so an override-variant is only distinguishable from its base by this.
     config_hash: str | None = None
+    # Which trainer filled the table. Two runs can share config, abstraction
+    # and tree and still be different lineages by this alone.
+    kernel: str | None = None
     git_branch: str | None = None
     # The tarball the RUN's code came from. Defaulted for the same reason as
     # `git_branch`: every row written before it existed simply has none, and a
@@ -105,6 +108,7 @@ def build_record(
         # routinely identical across arms that differ entirely: a worktree
         # carries its change uncommitted for as long as it is being iterated on.
         "train_git_branch": provenance.git_branch,
+        "train_kernel": provenance.kernel,
         # And the SNAPSHOT of each, which is the only complete answer: a commit
         # plus a dirty bit names some unrecorded changes, the tarball is them.
         # Without it a published snapshot has nothing pointing at it and cannot

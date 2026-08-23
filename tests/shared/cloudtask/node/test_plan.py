@@ -27,6 +27,7 @@ BASE = {
     "RUN_TIMEOUT": "6h",
     "RUN_WORKERS": "16",
     "RUN_CHECKPOINT_EVERY": "1000000",
+    "RUN_RETAIN_EVERY": "",
     "RUN_EVAL_METHOD": "",
     "RUN_EVAL_AT": "",
     "RUN_EVAL_FLAGS_JSON": "[]",
@@ -207,6 +208,7 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "RUN_TIMEOUT": ("90m", 5400),
     "RUN_WORKERS": (16, 16),
     "RUN_CHECKPOINT_EVERY": (500_000, 500_000),
+    "RUN_RETAIN_EVERY": (800, 800),
     "RUN_EVAL_METHOD": ("lbr", "lbr"),
     # One rung at submit; a ladder on the node.
     "RUN_EVAL_AT": ("5000000,10000000", ("5000000", "10000000")),

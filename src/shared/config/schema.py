@@ -328,6 +328,27 @@ class SolverConfig(StrictFrozenModel):
     traversal: Literal["compiled", "tree", "state"] = Field(default="compiled")
 
 
+class PcsConfig(StrictFrozenModel):
+    """Public-chance-sampling trainer knobs. Read by `train-pcs` only.
+
+    Here rather than on the command line so a run's config snapshot records
+    them, and so `--set pcs__alternating=true` reaches a node on the existing
+    wire. Regret weighting and the CFR+ floor come from ``solver`` unchanged.
+    """
+
+    # One player's regrets per iteration (the CFR+/DCFR literature's choice)
+    # instead of both from one pass, which is what the kernel's O(1/T) check ran.
+    alternating: bool = Field(default=False)
+    # Runouts valued beneath ONE sampled flop per iteration, their regret
+    # increments averaged before the discount. 1 is one full board per
+    # iteration; more trades K board-passes for lower variance at flop decisions.
+    runouts_per_flop: PositiveInt = Field(default=1)
+    # O(H) rank-walk showdown instead of the (T x H) @ (H x H) product. Same
+    # values to float rounding; an EPYC core does the product in seconds, the
+    # walk in a fraction of one.
+    showdown: Literal["walk", "matmul"] = Field(default="walk")
+
+
 # ---------------------------------------------------------------------------
 # Root config
 # ---------------------------------------------------------------------------
@@ -347,6 +368,7 @@ class Config(StrictFrozenModel):
     action_model: ActionModelConfig = Field(default_factory=ActionModelConfig)
     resolver: ResolverConfig = Field(default_factory=ResolverConfig)
     solver: SolverConfig = Field(default_factory=SolverConfig)
+    pcs: PcsConfig = Field(default_factory=PcsConfig)
     card_abstraction: CardAbstractionConfig = Field(default_factory=CardAbstractionConfig)
 
     # ------------------------------------------------------------------

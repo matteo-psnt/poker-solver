@@ -176,6 +176,7 @@ def train_vector_blueprint(
             experiment_id=tag.experiment_id,
             arm=tag.arm,
             parent_run_id=tag.parent_run_id,
+            kernel="board-free",
         )
     run_dir.mkdir(parents=True, exist_ok=True)
     tracker.initialize()

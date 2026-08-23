@@ -35,6 +35,7 @@ class RunTracker:
         experiment_id: str | None = None,
         arm: str | None = None,
         parent_run_id: str | None = None,
+        kernel: str | None = None,
     ):
         """Initialize the tracker for one run.
 
@@ -68,6 +69,7 @@ class RunTracker:
                 experiment_id=experiment_id,
                 arm=arm,
                 parent_run_id=parent_run_id,
+                kernel=kernel,
             )
 
     @property

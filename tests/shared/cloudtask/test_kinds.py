@@ -43,6 +43,7 @@ def _plan(**kwargs):
         "train_run_id": "run-a",
         "workers": 16,
         "checkpoint_every": 0,
+        "retain_every": 0,
         "experiment": "",
         "arm": "",
         "parent": "",
@@ -219,7 +220,7 @@ class TestProgress:
         """The manifest is a rung behind by construction. It is the FLOOR --
         for the window before the trainer's writer starts, and for a task whose
         wrapper predates it -- never the answer when a live count exists."""
-        for name in (TaskName.TRAIN, TaskName.TRAIN_VECTOR):
+        for name in (TaskName.TRAIN, TaskName.TRAIN_VECTOR, TaskName.TRAIN_PCS):
             kind = kinds.kind(name)
             live = kind.sample(_plan(to=1000), {"iteration": 200, "done": 450, "total": 1000})
             assert live == Progress(450, 1000, "iterations"), name

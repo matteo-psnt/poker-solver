@@ -47,6 +47,7 @@ class TaskName(StrEnum):
 
     TRAIN = "train"
     TRAIN_VECTOR = "train-vector"
+    TRAIN_PCS = "train-pcs"
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
     VECTOR_SWEEP = "vector-sweep"
@@ -119,6 +120,8 @@ class NodePlan(TaskFields, Protocol):
     def workers(self) -> int: ...
     @property
     def checkpoint_every(self) -> int: ...
+    @property
+    def retain_every(self) -> int: ...
     @property
     def experiment(self) -> str: ...
     @property
@@ -574,6 +577,72 @@ class TrainVectorTask(TaskKind):
         return _iterations_done(plan, state, self.unit)
 
 
+class TrainPcsTask(TaskKind):
+    """Train by public chance sampling: one board per iteration, every hand at once.
+
+    The scalar trainer's contract -- an absolute target, ``--workers`` always
+    passed -- over the vector kernel. Iterations are hundreds to tens of
+    thousands, so ``--checkpoint-every`` and ``--retain-every`` are in boards,
+    and the trainer clamps the worker count to what the node's RAM holds.
+    """
+
+    name = TaskName.TRAIN_PCS
+    unit = "iterations"
+    progress_file = "train-progress.json"
+
+    def validate(self, task: TaskFields) -> None:
+        if not task.config:
+            raise BadTaskError("a training task needs a config, even when continuing a run")
+        if task.to <= 0:
+            raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+
+    def commands(self, plan: NodePlan) -> list[list[str]]:
+        argv = [
+            "train-pcs",
+            "--config",
+            plan.config,
+            "--iterations",
+            str(plan.to),
+            "--run",
+            plan.train_run_id,
+            "--workers",
+            str(plan.workers),
+        ]
+        for flag, value in (
+            ("--checkpoint-every", plan.checkpoint_every),
+            ("--retain-every", plan.retain_every),
+        ):
+            if value:
+                argv += [flag, str(value)]
+        if work := plan.progress_path:
+            argv += ["--progress-file", work]
+        for flag, value in (
+            ("--experiment", plan.experiment),
+            ("--arm", plan.arm),
+            ("--parent", plan.parent),
+        ):
+            if value:
+                argv += [flag, value]
+        for override in plan.sets:
+            argv += ["--set", override]
+        return [argv]
+
+    def label(self, task: Submission) -> str:
+        words = ["pcs", _subject(task)]
+        if task.to:
+            words.append(f"to{compact(task.to)}")
+        if task.arm:
+            words.append(task.arm)
+        return "-".join(word for word in words if word)
+
+    def describe(self, record: Mapping[str, Any]) -> str:
+        target = str(record.get("target_iteration") or "")
+        return f"pcs ->{compact(int(target))}" if target.isdigit() and target != "0" else "pcs"
+
+    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:
+        return _iterations_done(plan, state, self.unit)
+
+
 class EvaluateTask(TaskKind):
     """Score published rungs of an existing run."""
 
@@ -902,6 +971,7 @@ KINDS: dict[str, TaskKind] = {
     for instance in (
         TrainTask(),
         TrainVectorTask(),
+        TrainPcsTask(),
         EvaluateTask(),
         PrecomputeTask(),
         VectorSweepTask(),

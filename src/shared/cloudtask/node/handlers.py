@@ -388,6 +388,7 @@ HANDLERS: dict[str, Handler] = {
     # Same executor: the board-free kernel writes ordinary checkpoints, so
     # the fetch, the ladder watcher and the publish path are identical.
     TaskName.TRAIN_VECTOR: _train,
+    TaskName.TRAIN_PCS: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
     TaskName.VECTOR_SWEEP: _measurement,

@@ -140,6 +140,8 @@ KEYS: tuple[Key, ...] = (
     # `parse_environment` fills a zero in from `os.cpu_count()`.
     Key("RUN_WORKERS", "workers", "workers", lambda v: "" if v is None else str(v), _int),
     Key("RUN_CHECKPOINT_EVERY", "checkpoint_every", "checkpoint_every", str, _int),
+    # Rungs kept addressable by `evaluate --at`; only the sampling trainer reads it.
+    Key("RUN_RETAIN_EVERY", "retain_every", "retain_every", _number, _int),
     Key(
         "RUN_EVAL_METHOD",
         "eval_method",
