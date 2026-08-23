@@ -68,7 +68,10 @@ class TestPublish:
         real = archive.copy_file
 
         def record(source, target):
-            order.append(target.name)
+            # Loose files and manifests arrive via their atomic `.partial`
+            # sibling; the ORDER is what this test pins, so record the final
+            # name the replace will give them.
+            order.append(target.name.removesuffix(".partial"))
             real(source, target)
 
         with pytest.MonkeyPatch.context() as patch:
@@ -376,3 +379,51 @@ class TestLadderState:
 
     def test_a_missing_runs_directory_reads_as_empty(self, tmp_path):
         assert archive.ladder_state(tmp_path / "nothing") == ""
+
+
+class TestLooseFilesPublishAtomically:
+    """A task killed mid-copy must not leave a truncated record on the share.
+
+    Snapshots have completion markers; loose files (`run.jsonl`, results) had
+    nothing, and a kill during their plain overwrite left a 0-byte `run.jsonl`
+    that every later fetch pulled and refused as "no run record" — measured
+    08-23 on two reference runs. The rule: the destination path only ever
+    receives complete content, via a sibling `.partial` and an atomic replace.
+    """
+
+    def test_an_interrupted_loose_copy_leaves_the_published_record_intact(
+        self, tmp_path, monkeypatch
+    ):
+        run_dir = _run(tmp_path)
+        (run_dir / "run.jsonl").write_text("new events\n" * 100)
+        destination = tmp_path / "archive" / "run-a"
+        destination.mkdir(parents=True)
+        (destination / "run.jsonl").write_text("published events\n")
+
+        real = archive.copy_file
+
+        def dies_mid_copy(source, target):
+            if source.name == "run.jsonl":
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("")  # the truncated residue of a kill
+                raise OSError("node recycled mid-copy")
+            real(source, target)
+
+        monkeypatch.setattr(archive, "copy_file", dies_mid_copy)
+        ok = archive.publish_run(run_dir, destination)
+
+        assert not ok
+        assert (destination / "run.jsonl").read_text() == "published events\n", (
+            "the share's record must keep its last complete content"
+        )
+
+    def test_a_completed_loose_copy_replaces_and_leaves_no_partial(self, tmp_path):
+        run_dir = _run(tmp_path)
+        (run_dir / "run.jsonl").write_text("new events\n")
+        destination = tmp_path / "archive" / "run-a"
+        destination.mkdir(parents=True)
+        (destination / "run.jsonl").write_text("old events\n")
+
+        assert archive.publish_run(run_dir, destination)
+        assert (destination / "run.jsonl").read_text() == "new events\n"
+        assert not list(destination.glob("*.partial"))
