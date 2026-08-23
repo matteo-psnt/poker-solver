@@ -117,6 +117,17 @@ class PolicySource(Protocol):
         """
         ...
 
+    def covers(self, state: GameState) -> bool:
+        """Whether a policy lookup at ``state`` can be ADDRESSED at all.
+
+        A cheap, card-independent probe: it asks only whether the public
+        betting line exists in this source, never what the policy there is. It
+        exists so a caller that is EXPLORING hypothetical lines can gate one out
+        instead of provoking the deliberate off-tree raise -- see
+        :class:`TreePolicySource`, where that raise is the design.
+        """
+        ...
+
     def bucket_for(self, state: GameState, player: int) -> int:
         """The card bucket ``player``'s actual hole cards fall in at ``state``.
 
@@ -160,6 +171,13 @@ class TreePolicySource:
 
     def identity(self, state: GameState, player: int) -> Hashable:
         return (self._tree.node_id(state), self.bucket_for(state, player))
+
+    def covers(self, state: GameState) -> bool:
+        try:
+            self._tree.node_id(state)
+        except KeyError:
+            return False
+        return True
 
     def rows_at(self, state: GameState) -> StoredRows:
         node_id = self._tree.node_id(state)
