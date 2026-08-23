@@ -68,7 +68,6 @@ pool installs the interpreter, so there is no old-language floor to code around.
 them before `uv sync`. Ruff enforces formatting and import sorting — don't
 hand-police style. What is *not* enforced by tooling:
 
-- Imports at the top of the file; avoid importing inside a function.
 - **Do not assume backward compatibility is required.** Prefer clean breaks over
   compatibility shims, aliases and legacy import paths.
 - **A docstring says why the code has this shape, not what used to be there.**
