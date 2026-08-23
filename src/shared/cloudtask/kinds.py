@@ -578,6 +578,11 @@ class EvaluateTask(TaskKind):
     """Score published rungs of an existing run."""
 
     name = TaskName.EVALUATE
+    """The SCORED run: the eval writes its ledger document into that run's
+    ``evals/`` on the node, and the exit publish is the only way it reaches the
+    share. Cheap by construction -- the rungs this task fetched came FROM the
+    share, so their completion markers make the checkpoint copies no-ops."""
+    publishes_run = True
     unit = "board branches"
     progress_file = "evaluate-progress.json"
 

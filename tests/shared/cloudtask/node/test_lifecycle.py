@@ -117,17 +117,26 @@ class TestMain:
         assert (paths.archive / "run-a" / ".run.json").exists()
         assert not (paths.archive / "run-fetched-by-an-evaluate").exists()
 
-    def test_an_evaluation_publishes_nothing_at_exit(self, paths, monkeypatch):
-        """Its runs/ holds only checkpoints it fetched from the share."""
+    def test_an_evaluation_publishes_the_scored_runs_record_and_nothing_else(
+        self, paths, monkeypatch
+    ):
+        """The eval document lands in the SCORED run's evals/ on the node and
+        the exit publish is its only ride to the share -- the first fix here
+        dropped it, and seven clean-exit scores recorded nothing. Neighbouring
+        runs stay untouched, which is the waste the fix removed."""
         monkeypatch.setenv("RUN_OP", str(TaskName.EVALUATE))
         monkeypatch.setenv("RUN_ID", "run-scored")
-        (paths.runs / "run-scored").mkdir(parents=True)
-        (paths.runs / "run-scored" / ".run.json").write_text("{}")
+        scored = paths.runs / "run-scored"
+        (scored / "evals").mkdir(parents=True)
+        (scored / "evals" / "x.json").write_text("{}")
+        (paths.runs / "run-neighbour").mkdir()
+        (paths.runs / "run-neighbour" / ".run.json").write_text("{}")
         monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 0)
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.EVALUATE, lambda *a: (0, None))
 
         lifecycle.main()
-        assert not (paths.archive / "run-scored").exists()
+        assert (paths.archive / "run-scored" / "evals" / "x.json").exists()
+        assert not (paths.archive / "run-neighbour").exists()
 
 
 def _signalled(plan, paths, log):
