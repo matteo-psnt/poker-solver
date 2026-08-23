@@ -427,3 +427,16 @@ class TestLooseFilesPublishAtomically:
         assert archive.publish_run(run_dir, destination)
         assert (destination / "run.jsonl").read_text() == "new events\n"
         assert not list(destination.glob("*.partial"))
+
+    def test_an_empty_loose_file_is_never_published_over_content(self, tmp_path):
+        """A fetch that pulled a zeroed record must not spread it: the local
+        0-byte run.jsonl is residue, not content, and the published copy —
+        possibly just restored — keeps what it has."""
+        run_dir = _run(tmp_path)
+        (run_dir / "run.jsonl").write_text("")
+        destination = tmp_path / "archive" / "run-a"
+        destination.mkdir(parents=True)
+        (destination / "run.jsonl").write_text("restored events\n")
+
+        assert archive.publish_run(run_dir, destination)
+        assert (destination / "run.jsonl").read_text() == "restored events\n"
