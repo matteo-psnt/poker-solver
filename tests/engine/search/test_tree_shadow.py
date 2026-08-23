@@ -174,3 +174,55 @@ class TestEveryDriverAdvancesTheShadow:
         agent.observe(state, off)
         assert agent.resolver is not None
         assert agent.resolver._shadow.diverged
+
+
+class TestTheShadowIsHandScoped:
+    """A reused resolver must not carry one hand's shadow into the next.
+
+    MEASURED risk: `ResolvedOpponent` builds ONE `HUResolver` in `__init__` and
+    keeps it for the whole evaluation, resetting only ranges per hand. The
+    shadow starts lazily on the first observed action, so without an explicit
+    per-hand restart it holds hand N-1's betting during hand N, breaks on the
+    mismatch, and -- since `broken` is sticky -- stays broken for every
+    remaining hand. Across 4,000 hands that is the fix doing nothing while every
+    unit test still passes.
+    """
+
+    @pytest.fixture(scope="class")
+    def solver(self):
+        return build_trained_test_solver(400)
+
+    def _model(self, solver):
+        from src.pipeline.evaluation.estimators.lbr.opponent_model import ResolvedOpponent
+
+        return ResolvedOpponent(
+            solver,
+            solver.config.resolver.model_copy(
+                update={"max_iterations": 8, "root_prior_weight": 50.0}
+            ),
+            rng=np.random.default_rng(11),
+        )
+
+    def test_a_new_hand_starts_from_a_clean_shadow(self, solver):
+        state = _flop_node(solver)
+        model = self._model(solver)
+        model.reset(state, state.current_player)
+        model.observe(state, _off_menu_bet(solver, state))
+        assert model._resolver._shadow.diverged
+
+        fresh = solver.deal_initial_state()
+        model.reset(fresh, fresh.current_player)
+        assert not model._resolver._shadow.diverged, "hand N-1's divergence leaked into hand N"
+        assert not model._resolver._shadow.broken
+        assert model._resolver._shadow.state_for(fresh) is fresh
+
+    def test_a_broken_shadow_does_not_persist_across_hands(self, solver):
+        """`broken` is sticky WITHIN a hand by design; it must not outlive one."""
+        state = _flop_node(solver)
+        model = self._model(solver)
+        model.reset(state, state.current_player)
+        model._resolver._shadow._broken = True
+
+        fresh = solver.deal_initial_state()
+        model.reset(fresh, fresh.current_player)
+        assert not model._resolver._shadow.broken

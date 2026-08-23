@@ -291,6 +291,9 @@ class ResolvedOpponent:
         # (which can precede the first action_matrix call).
         self._ranges = infer_ranges(initial_state, self.blueprint)
         self._seat = actor
+        # One resolver serves the whole eval, so its shadow is hand-scoped state
+        # that only this call can clear.
+        self._resolver.start_hand(initial_state)
 
     def reseed(self, seed: int) -> None:
         # The resolver's generator drives leaf-runout sampling inside

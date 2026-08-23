@@ -97,6 +97,18 @@ class HUResolver:
         self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
         self.observe_public(state, action)
 
+    def start_hand(self, state: GameState) -> None:
+        """Begin a new hand: the on-tree shadow restarts from ``state``.
+
+        A driver that REUSES one resolver across hands must call this.
+        `resolver_match` builds a fresh `BlueprintAgent` per hand so it never
+        needed to, but `ResolvedOpponent` keeps one resolver for the whole
+        evaluation -- without this the shadow carries hand N-1's betting into
+        hand N, breaks on the mismatch, and stays broken for every hand after,
+        which is the fix quietly doing nothing.
+        """
+        self._shadow.start(state)
+
     def observe_public(self, state: GameState, action: Action) -> None:
         """Advance the on-tree shadow for a realized action, and nothing else.
 
