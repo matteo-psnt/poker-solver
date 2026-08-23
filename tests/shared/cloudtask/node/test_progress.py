@@ -16,7 +16,7 @@ from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import plan as node_plan
 from src.shared.cloudtask.node import progress
-from tests.shared.cloudtask.node.conftest import eventually
+from tests.shared.cloudtask.node.conftest import SAS, eventually
 
 
 @pytest.fixture(autouse=True)
@@ -36,41 +36,53 @@ def recorded(monkeypatch):
     return rows
 
 
-class TestLadderWatcher:
-    def test_it_publishes_when_the_ladder_moves(self, paths, tmp_path, log):
-        run_dir = paths.runs / "run-a"
-        run_dir.mkdir(parents=True)
-        (run_dir / "static-10.zarr").write_text("data")
-        (run_dir / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-10.zarr", "iteration": 10, "retained": []}'
-        )
+def _plan_with_sas() -> node_plan.TaskPlan:
+    """The watcher publishes only with a SAS -- without one there is no second
+    store left to fall back to, so it deliberately does nothing."""
+    return node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, checkpoint_sas=SAS)
 
-        watcher = progress.LadderWatcher(paths, log, run_dir=run_dir, interval=0.01)
+
+class TestLadderWatcher:
+    @staticmethod
+    def _run(paths, name, body="data"):
+        """A run whose ladder names one rung, written as the FILE the trainer
+        produces -- the container takes no directory."""
+        run_dir = paths.runs / name
+        run_dir.mkdir(parents=True)
+        (run_dir / "static-10.ckpt.zst").write_text(body)
+        (run_dir / "STATIC_CHECKPOINT.json").write_text(
+            '{"zarr": "static-10.ckpt.zst", "iteration": 10, "retained": []}'
+        )
+        return run_dir
+
+    def test_it_publishes_when_the_ladder_moves(self, paths, log, container):
+        run_dir = self._run(paths, "run-a")
+        watcher = progress.LadderWatcher(
+            paths, log, run_dir=run_dir, interval=0.01, plan=_plan_with_sas()
+        )
         watcher.start()
         try:
-            eventually(lambda: (paths.archive / "run-a" / "static-10.zarr").is_file())
+            eventually(lambda: "run-a/static-10.ckpt.zst" in container)
         finally:
             watcher.stop()
-        assert (paths.archive / "run-a" / "static-10.zarr").read_text() == "data"
+        assert container["run-a/static-10.ckpt.zst"] == b"data"
+        assert "run-a/STATIC_CHECKPOINT.json" in container, "the ladder is advertised too"
 
-    def test_it_leaves_other_runs_on_the_node_alone(self, paths, log):
+    def test_it_leaves_other_runs_on_the_node_alone(self, paths, log, container):
         """A node is reused. An evaluate task before this one fetched a 300M
         ladder under runs/, and the watcher re-uploaded it on every tick --
         thirty minutes per training task."""
         for name in ("run-mine", "run-theirs"):
-            run_dir = paths.runs / name
-            run_dir.mkdir(parents=True)
-            (run_dir / "static-10.zarr").write_text(name)
-            (run_dir / "STATIC_CHECKPOINT.json").write_text(
-                '{"zarr": "static-10.zarr", "iteration": 10, "retained": []}'
-            )
-        watcher = progress.LadderWatcher(paths, log, run_dir=paths.runs / "run-mine", interval=0.01)
+            self._run(paths, name, body=name)
+        watcher = progress.LadderWatcher(
+            paths, log, run_dir=paths.runs / "run-mine", interval=0.01, plan=_plan_with_sas()
+        )
         watcher.start()
         try:
-            eventually(lambda: (paths.archive / "run-mine" / "static-10.zarr").is_file())
+            eventually(lambda: "run-mine/static-10.ckpt.zst" in container)
         finally:
             watcher.stop()
-        assert not (paths.archive / "run-theirs").exists()
+        assert not any(name.startswith("run-theirs/") for name in container), sorted(container)
 
     def test_stop_joins_the_thread(self, paths, log):
         """Not merely signalled: publishing removes a marker, copies, rewrites

@@ -99,7 +99,7 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef("score", "Evaluate a published run on the pool, one task per ladder rung."),
             CommandRef(
                 "submit-precompute",
-                "Build a card abstraction on a node and publish it to the share.",
+                "Build a card abstraction on a node and publish it to the container.",
             ),
             CommandRef(
                 "jobs", "Every queued/running task on the pool (--all includes finished jobs)."

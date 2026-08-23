@@ -467,13 +467,21 @@ def _ladder_gaps(run_dir: Path) -> list[str]:
     """What the published ladder cannot supply, said here instead of on a node.
 
     Answered off the completion MARKERS, which `pull_metadata` recreates from
-    the share's own listing: a marker is written only once a rung has fully
-    landed, so its absence is exactly what a fetch refuses on. Without this a
-    run reads `completed` and every score of it dies minutes into a task with
-    no diagnostic anywhere (gamma3-s103). A local run has no markers and no
-    share, so it reports nothing.
+    the CONTAINER's own listing: one rung is one atomically-committed object, so
+    its presence is exactly what a fetch succeeds on. Without this a run reads
+    `completed` and every score of it dies minutes into a task with no
+    diagnostic anywhere (gamma3-s103). A local run has no markers, so it reports
+    nothing.
+
+    BOTH SIDES ARE NORMALISED THROUGH `records.object_name`. A marker names the
+    object (`static-N.ckpt.zst`); a manifest still spells the rung the way the
+    directory format did (`static-N.zarr`). Compared raw, the difference is
+    every rung -- `runinfo` told a run holding three usable rungs that the store
+    could supply none of them.
     """
-    published = {name[len(archive.MARKER_PREFIX) :] for name in _marker_names(run_dir)}
+    published = {
+        records.object_name(name[len(archive.MARKER_PREFIX) :]) for name in _marker_names(run_dir)
+    }
     if not published:
         return []
     # `archive.read_manifest`, not `StaticCheckpointManifest.read`: a torn
@@ -487,15 +495,15 @@ def _ladder_gaps(run_dir: Path) -> list[str]:
             )
         ]
     entries = [manifest, *(e for e in manifest.get("retained") or [] if isinstance(e, dict))]
-    named = {str(e["zarr"]) for e in entries if isinstance(e.get("zarr"), str)}
+    named = {records.object_name(str(e["zarr"])) for e in entries if isinstance(e.get("zarr"), str)}
     unusable = sorted(named - published)
     if not unusable:
         return []
     return [
         (
-            f"the manifest names {', '.join(unusable)}, which the share cannot supply "
-            f"(no completion marker) — scoring those rungs will be refused. Re-publish "
-            f"from the node that trained them."
+            f"the manifest names {', '.join(unusable)}, which the store does not hold "
+            f"— scoring those rungs will be refused. They were pruned, or never "
+            f"published from the node that trained them."
         )
     ]
 

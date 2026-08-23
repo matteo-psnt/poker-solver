@@ -44,7 +44,7 @@ def _reporting(plan: TaskPlan, paths: NodePaths) -> TaskPlan:
 
 
 def _refresh_abstractions(paths: NodePaths, log: TaskLogger, sas: str = "") -> None:
-    """Merge the share's abstractions onto this node before training.
+    """Merge the container's abstractions onto this node before training.
 
     `infra/main.tf`'s START TASK is the only other thing that does this, and it
     runs once per node BOOT -- so a node that came up before an abstraction was
@@ -52,32 +52,22 @@ def _refresh_abstractions(paths: NodePaths, log: TaskLogger, sas: str = "") -> N
     minutes deep, after `uv sync`. That is a trap for exactly the case the
     precompute path exists to serve: build a new abstraction, then train on it.
     Merging here makes the two orderings equivalent.
-    """
-    if sas:
-        # THE CONTAINER FIRST, and the share only while it still holds them.
-        # Same order, and for the same reason, as a rung's fetch.
-        try:
-            fetched = archive.fetch_abstractions(
-                blobstore.sibling_container(sas, archive.ABSTRACTIONS_CONTAINER),
-                paths.data / "combo_abstraction",
-                log,
-            )
-            if fetched:
-                log(f"fetched {fetched} abstraction(s) from the container")
-        except Exception as error:  # noqa: BLE001 -- the share may still answer
-            log(f"WARN could not read the abstractions container: {error}")
 
-    source = paths.share / "combo_abstraction"
-    if not source.is_dir():
+    Not fatal on failure: the node may already hold the abstraction this task
+    wants, and the resolver says so precisely if it does not.
+    """
+    if not sas:
         return
     try:
-        # update=True is `cp -u`: an abstraction already on the node is not
-        # recopied, so the steady-state cost is a directory walk, not 400 MB.
-        archive.copy_tree(source, paths.data / "combo_abstraction", update=True)
-    except OSError as error:
-        # Not fatal. The node may already hold the abstraction this task wants,
-        # and the resolver says so precisely if it does not.
-        log(f"WARN could not refresh abstractions from the share ({error})")
+        fetched = archive.fetch_abstractions(
+            blobstore.sibling_container(sas, archive.ABSTRACTIONS_CONTAINER),
+            paths.data / "combo_abstraction",
+            log,
+        )
+        if fetched:
+            log(f"fetched {fetched} abstraction(s) from the container")
+    except Exception as error:  # noqa: BLE001 -- see the docstring
+        log(f"WARN could not read the abstractions container: {error}")
 
 
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
@@ -334,7 +324,7 @@ def _retained_ladder(destination: Path) -> list[int]:
 def _publish_abstraction(plan: TaskPlan, output: Path, log: TaskLogger) -> int:
     """Pack the built abstraction and put it in the container. 0 when it landed.
 
-    REFUSES TO REPLACE, as the share publish does and for the same reason:
+    REFUSES TO REPLACE. The reason is the one invariant here that matters:
     bucket ASSIGNMENT is not pinned by `card_abstraction_hash`, so republishing
     under a name that exists would silently change which bucket a hand lands in
     for every run already trained against it.
@@ -350,7 +340,7 @@ def _publish_abstraction(plan: TaskPlan, output: Path, log: TaskLogger) -> int:
         size = archive.pack_abstraction(output, packed)
         blobstore.put_object(sas, name, packed)
         log(f"published {name} ({size / 1024**2:.0f} MiB) to the container")
-    except Exception as error:  # noqa: BLE001 -- the share publish below still runs
+    except Exception as error:  # noqa: BLE001 -- reported, not raised into a live task
         log(f"FATAL could not publish {name}: {error}")
         return 1
     finally:
@@ -397,29 +387,17 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
         log(f"FATAL precompute wrote no usable output_dir: {error}")
         return 1, None
     log(f"precomputed {output.name} -> {output}")
-    if plan.checkpoint_sas:
-        code = _publish_abstraction(plan, output, log)
-        if code:
-            return code, None
-
-    destination = paths.share / "combo_abstraction" / output.name
-    if destination.is_dir() and not plan.force_publish:
-        log(f"REFUSING to republish: {output.name} already exists on the share.")
-        log("  Bucket assignment is not pinned by the abstraction hash, so replacing")
-        log("  it would silently invalidate every run trained against the old copy.")
-        log("  Set RUN_FORCE_PUBLISH=1 only if no such run matters.")
+    if not plan.checkpoint_sas:
+        # A precompute with nowhere to publish has burned the whole build for
+        # nothing. It used to fall through to the share; there is no second
+        # store to fall through to now, so say it here rather than exit 0 on a
+        # task that produced no abstraction anyone can reach.
+        log("FATAL no checkpoint SAS: the abstraction was built and cannot be published.")
         return 1, None
+    code = _publish_abstraction(plan, output, log)
+    if code:
+        return code, None
 
-    try:
-        # UNCONDITIONAL. Either the name is new or RUN_FORCE_PUBLISH asked to
-        # replace it, and the update rule would skip every file the existing
-        # copy has newer -- which is all of them. `cp -ru` had the same hole:
-        # "force" left the old abstraction in place.
-        archive.copy_tree(output, destination, update=False)
-    except OSError as error:
-        log(f"FATAL publish failed: {error}")
-        return 1, None
-    log(f"published {output.name} to the share")
     return 0, None
 
 
@@ -440,12 +418,7 @@ def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
         return
     run_dir = paths.runs / plan.train_run_id
     if run_dir.is_dir():
-        archive.publish_run(run_dir, paths.archive / run_dir.name, log, plan.checkpoint_sas)
-        # BOTH STORES, while there are two. The container is where rungs are
-        # going; the share is what still answers every fetch. Publishing to one
-        # and reading from the other is the state this migration passes through,
-        # not one it stops in.
-        archive.publish_rungs_to_blob(run_dir, run_dir.name, plan.checkpoint_sas, log)
+        archive.publish_run(run_dir, run_dir.name, plan.checkpoint_sas, log)
 
 
 HANDLERS: dict[str, Handler] = {

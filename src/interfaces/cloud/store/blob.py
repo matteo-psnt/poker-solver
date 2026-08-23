@@ -25,6 +25,7 @@ from typing import Any
 
 from src.shared import records
 from src.shared.cloudtask.kinds import TaskName
+from src.shared.cloudtask.node import archive
 
 CONTAINER = "checkpoints"
 
@@ -295,6 +296,29 @@ def _diagnostics(config: Any) -> Any:
         account_url=f"https://{config.storage_account}.blob.core.windows.net",
         credential=config.share_key,
     ).get_container_client(DIAGNOSTICS)
+
+
+def published_abstractions(config: Any) -> list[str]:
+    """Every abstraction the container holds, by DIRECTORY name, sorted.
+
+    The collision guard `submit-precompute` runs before it allocates a node.
+    It asked the share until the share stopped holding abstractions, and then
+    returned an empty list every time -- a guard that cannot refuse, in front
+    of the one invariant here that matters: bucket ASSIGNMENT is not pinned by
+    the abstraction hash, so republishing over a name silently rebuckets every
+    run already trained against it.
+    """
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+    container = BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    ).get_container_client(ABSTRACTIONS)
+    return sorted(
+        entry.name.removesuffix(archive.ABSTRACTION_SUFFIX)
+        for entry in container.list_blobs()
+        if entry.name.endswith(archive.ABSTRACTION_SUFFIX)
+    )
 
 
 def published_record(config: Any) -> dict[str, dict[str, Any]]:

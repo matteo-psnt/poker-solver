@@ -103,8 +103,8 @@ def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: b
     Merging rather than replacing is what makes an interrupted publish
     resumable. ``update=False`` copies unconditionally, for the fetch
     direction -- where a file already on the node is not evidence of a complete
-    copy but of a cancelled task. ``atomic`` gives every file the ``.partial``
-    dance :func:`_copy_one` does, for trees a reader fetches back (``evals/``).
+    copy but of a cancelled task. ``atomic`` gives every file a ``.partial``
+    staging name and one rename, for trees a reader fetches back (``evals/``).
     """
     destination.mkdir(parents=True, exist_ok=True)
     files = []
@@ -148,151 +148,132 @@ def _partial_path(destination: Path) -> Path:
     return destination.with_name(f"{destination.name}.{os.getpid()}-{uuid4().hex[:8]}.partial")
 
 
-def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = "") -> bool:
-    """Copy one run directory to the share. Returns False if anything failed.
+def publish_run(run_dir: Path, run_id: str, sas: str, log: Log = _quiet) -> bool:
+    """Put one run's snapshots, metadata and manifests in the container.
 
     Idempotent and safe to call while training continues, which is what lets
     the mid-run watcher use it. Never raises: a failed publish must not kill a
     task that is still making progress on local disk.
 
-    WITH A SAS, THE SNAPSHOTS DO NOT GO TO THE SHARE. They go to the container
-    instead -- `publish_rungs_to_blob` puts them there on the same tick -- and
-    what stays here is the metadata: the manifests, `.run.json`, the loose
-    result files. Those are kilobytes; the snapshots were 831 GiB.
+    THE ORDER IS THE CONTRACT. Rungs, then loose metadata, then the manifests
+    that name them -- because a manifest which lands before its snapshot
+    advertises a rung nothing can fetch. This used to be two passes, a share
+    copy that published the manifest and a separate Blob pass that uploaded the
+    rungs, and they ran in that order: every tick of every training task PUT a
+    container manifest naming a rung the container did not yet hold, then
+    logged `manifest names static-N.ckpt.zst, nowhere to be found` because it
+    checked before the upload it was racing. One pass cannot invert its own
+    ordering.
 
-    The marker still gets written for a rung that lands in the container, and
-    that is not vestigial: `migrate-checkpoints` refuses to upload an unmarked
-    rung, `prune-checkpoints` reads markers to know what the share holds, and a
-    node fetching from a share that predates the container still needs them.
+    Existence is a HEAD against the object itself rather than a marker beside
+    it: one rung is one atomically-committed blob, so there is no half-written
+    state to guard against and nothing to keep in step.
     """
-    destination.mkdir(parents=True, exist_ok=True)
-    # READ BEFORE THE LADDER, published after it. A rung takes minutes over SMB
-    # and the trainer commits new ones meanwhile, so a manifest read at the END
-    # names rungs this pass never saw and the share advertises a rung it does
-    # not hold. The snapshot always predates the manifest that names it, so a
-    # manifest read first can only name rungs `children` below already has.
+    if not sas:
+        return False
+    # READ BEFORE THE LADDER, published after it. The trainer commits new rungs
+    # while this runs, so a manifest read at the END names rungs this pass never
+    # uploaded. A snapshot always predates the manifest naming it, so a manifest
+    # read first can only name rungs the pass below has already considered.
     manifests = {name: _read_bytes(run_dir / name) for name in MANIFESTS}
     children = sorted(run_dir.iterdir())
     failed = False
 
     for child in children:
-        if child.is_file() and is_snapshot(child.name):
-            # ONE FILE PER RUNG, and with a SAS its bytes go to the container
-            # alone -- `publish_rungs_to_blob` puts them there on the same
-            # tick. Nothing about the rung lands on the share any more: the
-            # container's listing is what says which rungs exist.
-            if not sas:
-                failed |= not _copy_one(child, destination / child.name, log)
+        # A snapshot is a FILE now -- the `.ckpt.zst` the trainer wrote. The
+        # directory form is a rung published before the format changed, and the
+        # node never produces one, so it is not uploaded: `migrate-checkpoints`
+        # converted those, because converting needs zarr and this module is
+        # imported before `uv sync`.
+        if not child.is_file() or not is_snapshot(child.name):
             continue
-        if child.is_dir() and not is_snapshot(child.name):
-            failed |= not _copy_dir(child, destination / child.name, log, atomic=True)
+        if not _put_object(f"{run_id}/{child.name}", child, sas, log):
+            failed = True
 
-    # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded,
-    # and SNAPSHOTS excluded: a snapshot is a file now, the branch above has
-    # already decided where its bytes go, and this pass would copy it to the
-    # share regardless of that decision.
+    # Loose files -- .run.json, metrics.jsonl, progress.jsonl -- manifests and
+    # snapshots excluded, both already placed above. Kilobytes, and rewritten
+    # each tick, so they are PUT unconditionally rather than skipped on
+    # existence the way an immutable rung is.
     for child in children:
-        if child.is_file() and child.name not in MANIFESTS and not is_snapshot(child.name):
-            failed |= not _copy_one(child, destination / child.name, log)
+        if (
+            child.is_file()
+            and child.name not in MANIFESTS
+            and not is_snapshot(child.name)
+            and not _put_object(f"{run_id}/{child.name}", child, sas, log, overwrite=True)
+        ):
+            failed = True
 
     if failed:
-        # Reported, never swallowed: a publish that silently fails every time
-        # turns "a killed task loses one rung" into "a killed task loses
-        # everything".
-        log(f"WARN publish incomplete for {run_dir.name} -- manifest NOT updated, so the")
-        log("     share still describes the last fully-copied checkpoint.")
+        # Reported, never swallowed, and the manifest is withheld: a publish
+        # that silently fails every time turns "a killed task loses one rung"
+        # into "a killed task loses everything".
+        log(f"WARN publish incomplete for {run_id} -- manifest NOT updated, so the")
+        log("     container still describes the last fully-published checkpoint.")
         return False
 
-    # BOTH manifest names, and only now. The static backend's was once copied
-    # by the unguarded loose-file pass above, so it was published even when a
-    # snapshot copy had failed -- a manifest naming a half-copied rung, exactly
-    # what publishing the manifest last exists to prevent.
     for name, body in manifests.items():
         if body is None:
             continue
-        if sas and name == records.STATIC_CHECKPOINT:
-            # BESIDE THE RUNGS IT NAMES, and after them for the same reason the
-            # share copy is written last: a manifest that lands before the
-            # snapshot it points at advertises a rung nothing can fetch.
-            try:
-                blobstore.put_bytes(sas, f"{run_dir.name}/{name}", body)
-            except Exception as error:  # noqa: BLE001 -- the share copy still lands
-                log(f"WARN could not publish {name} to the container: {error}")
-        if not _rungs_landed(body, destination, log, sas) or not _write_one(
-            body, destination / name, log
-        ):
+        if not _rungs_landed(body, run_id, sas, log):
             return False
-    log(f"published {run_dir.name}")
+        try:
+            blobstore.put_bytes(sas, f"{run_id}/{name}", body)
+        except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
+            log(f"WARN could not publish {name}: {type(error).__name__}: {error}")
+            return False
+    log(f"published {run_id}")
     return True
 
 
-def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quiet) -> int:
-    """PUT every snapshot this run holds that the container does not. Never raises.
+def _put_object(name: str, source: Path, sas: str, log: Log, *, overwrite: bool = False) -> bool:
+    """PUT one file unless the container already has it. False only on failure.
 
-    A SEPARATE PASS from `publish_run`, deliberately, though both run on the
-    same tick. The share's short-circuit is its completion MARKER, and a rung
-    already marked there is skipped -- so a Blob publish riding inside that loop
-    would never upload the rungs that landed before the container existed. The
-    two stores answer "do you have this rung" independently, which is also what
-    lets one of them go away.
+    A rung is immutable, so an existing object is the same bytes and the upload
+    is skipped -- that skip is the whole reason a resumed task does not re-send
+    a ladder. Metadata is rewritten as a run progresses, so it passes
+    ``overwrite`` and always goes.
 
-    Existence is a HEAD against the object itself rather than a marker beside
-    it: one rung is one atomically-committed blob, so there is no half-written
-    state to guard against and nothing to keep in step.
-
-    Returns how many rungs it uploaded. An empty `sas` uploads nothing and
-    returns 0, which is the rollout and the rollback.
+    AN EMPTY FILE IS NEVER PUBLISHED. It is the residue of a truncating write,
+    and uploading it spreads the zeroing to every later fetch of the run:
+    measured 08-23, two reference runs' records were zeroed under retrying
+    evaluate tasks and a restored copy was re-zeroed within minutes by tasks
+    holding poisoned fetches. Skipping is SUCCESS -- the store keeps what it
+    has, and a rung that never lands still withholds the manifest naming it.
     """
-    if not sas:
-        return 0
-    landed = 0
-    for child in sorted(run_dir.iterdir()):
-        # A snapshot is a FILE now -- the `.ckpt.zst` the trainer wrote. The
-        # directory form is a rung published before the format changed, and the
-        # node never produces one, so it is not uploaded here: `migrate-
-        # checkpoints` converts those, because converting needs zarr and this
-        # module is imported before `uv sync`.
-        if not child.is_file() or not is_snapshot(child.name):
-            continue
-        try:
-            if blobstore.exists(sas, f"{run_id}/{child.name}"):
-                continue
-            size = blobstore.put_object(sas, f"{run_id}/{child.name}", child)
-        except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
-            # LOUD, because the alternative is the failure shape this project
-            # keeps paying for: a write that reports success and lands nowhere.
-            # The share still has the rung today, so this costs a copy and not
-            # the run -- which stops being true the moment the share does.
-            log(f"WARN rung {child.name} NOT in the container: {type(error).__name__}: {error}")
-            continue
-        landed += 1
-        log(f"blob {run_id}/{child.name} <- {size:,} bytes")
-    return landed
+    try:
+        if source.stat().st_size == 0:
+            log(f"skip publishing empty {source.name} (a record is never 0 bytes)")
+            return True
+        if not overwrite and blobstore.exists(sas, name):
+            return True
+        size = blobstore.put_object(sas, name, source)
+    except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
+        # LOUD, because the alternative is the failure shape this project keeps
+        # paying for: a write that reports success and lands nowhere.
+        log(f"WARN {name} NOT in the container: {type(error).__name__}: {error}")
+        return False
+    log(f"blob {name} <- {size:,} bytes")
+    return True
 
 
-def _rungs_landed(manifest: bytes, destination: Path, log: Log, sas: str = "") -> bool:
-    """Is every rung this manifest names actually somewhere a fetch can get it?
+def _rungs_landed(manifest: bytes, run_id: str, sas: str, log: Log) -> bool:
+    """Is every rung this manifest names actually in the container?
 
-    WHICHEVER STORE WOULD ANSWER. With a SAS the bytes went to the container,
-    so that is where to look; without one they are on the share beside this
-    manifest. Requiring the share alone would freeze manifest publishing for
-    every run the moment snapshots stopped landing there -- the manifest would
-    name rungs, the share would hold none, and the run would never advertise a
-    checkpoint again.
+    The manifest is the last thing published for exactly this check: it must
+    never advertise a rung a fetch would then fail on. A rung the manifest names
+    and the container lacks was PRUNED -- the ladder is deliberately not
+    rewritten when a rung is dropped -- so this refuses to move the pointer
+    rather than treating the gap as a publish failure.
     """
-    named = _named_rungs(manifest)
-    missing = sorted(name for name in named if not _rung_reachable(destination, name, sas))
+    missing = sorted(
+        name
+        for name in _named_rungs(manifest)
+        if not blobstore.exists(sas, f"{run_id}/{records.object_name(name)}")
+    )
     if missing:
-        log(f"WARN manifest names {', '.join(missing)}, nowhere to be found -- NOT publishing it")
+        log(f"WARN manifest names {', '.join(missing)}, not in the container -- NOT publishing it")
         return False
     return True
-
-
-def _rung_reachable(destination: Path, name: str, sas: str) -> bool:
-    """Whether a fetch could get this rung from the store that holds it."""
-    if sas:
-        return blobstore.exists(sas, f"{destination.name}/{records.object_name(name)}")
-    return (destination / name).exists()
 
 
 def _named_rungs(manifest: bytes) -> set[str]:
@@ -314,43 +295,6 @@ def _megabytes(directory: Path) -> float:
     return 0.0
 
 
-def _copy_dir(source: Path, destination: Path, log: Log, *, atomic: bool = False) -> bool:
-    try:
-        copy_tree(source, destination, atomic=atomic)
-    except OSError as error:
-        log(f"WARN copying {source.name} failed: {error}")
-        return False
-    return True
-
-
-def _copy_one(source: Path, destination: Path, log: Log) -> bool:
-    """A loose file, published atomically: a task killed mid-copy must not
-    leave a 0-byte ``run.jsonl`` on the share, which every later fetch of the
-    run pulls and then refuses as "no run record". Snapshots have their
-    completion markers for this; loose files had nothing (measured 08-23: two
-    reference runs' records zeroed under retrying evaluate tasks)."""
-    # An empty loose file is never content: it is the residue of a truncating
-    # publish, fetched back by a later task. Publishing it would spread the
-    # zeroing to every copy of the run (measured 08-23: a restored record was
-    # re-zeroed within minutes by tasks holding poisoned fetches). Skipping is
-    # success -- the share keeps what it has.
-    try:
-        if source.stat().st_size == 0:
-            log(f"skip publishing empty {source.name} (a record is never 0 bytes)")
-            return True
-    except OSError:
-        return True
-    partial = _partial_path(destination)
-    try:
-        copy_file(source, partial)
-        partial.replace(destination)
-    except OSError as error:
-        log(f"WARN copying {source.name} failed: {error}")
-        _unlink(partial)
-        return False
-    return True
-
-
 def _read_bytes(path: Path) -> bytes | None:
     """A file's bytes, or None when it is absent, unreadable or empty."""
     try:
@@ -358,25 +302,6 @@ def _read_bytes(path: Path) -> bytes | None:
     except OSError:
         return None
     return body or None
-
-
-def _write_one(body: bytes, destination: Path, log: Log) -> bool:
-    """:func:`_copy_one` for bytes already in hand -- the captured manifest."""
-    partial = _partial_path(destination)
-    try:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        partial.write_bytes(body)
-        partial.replace(destination)
-    except OSError as error:
-        log(f"WARN writing {destination.name} failed: {error}")
-        _unlink(partial)
-        return False
-    return True
-
-
-def _unlink(path: Path) -> None:
-    with contextlib.suppress(OSError):
-        path.unlink()
 
 
 def _parse_manifest(body: str) -> dict:

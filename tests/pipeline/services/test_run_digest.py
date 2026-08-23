@@ -186,15 +186,21 @@ class TestPhantomRungs:
             )
         )
 
-    def test_a_rung_with_no_marker_is_named(self, tmp_path, record):
+    def test_a_rung_the_store_does_not_hold_is_named(self, tmp_path, record):
+        """THE MARKER CARRIES THE OBJECT NAME. `pull_metadata` recreates markers
+        from the container's listing, so a marker is `.complete-static-N.ckpt.zst`
+        while the manifest still spells the rung `static-N.zarr`. This fixture
+        used the manifest's spelling on both sides, which is why it stayed green
+        while `runinfo` told a run holding three usable rungs that the store
+        could supply none of them."""
         run_dir = _run(tmp_path, record)
         self._ladder(run_dir)
-        (run_dir / ".complete-static-1000.zarr").touch()
+        (run_dir / ".complete-static-1000.ckpt.zst").touch()
 
         gaps = _digest(run_dir, tmp_path, record).gaps
 
-        assert any("static-2000.zarr" in g and "cannot supply" in g for g in gaps), gaps
-        assert not any("static-1000.zarr" in g for g in gaps), gaps
+        assert any("static-2000.ckpt.zst" in g and "does not hold" in g for g in gaps), gaps
+        assert not any("static-1000" in g for g in gaps), gaps
 
     def test_a_run_with_no_markers_at_all_says_nothing(self, tmp_path, record):
         """A local run, or a share read that never listed markers -- absence of

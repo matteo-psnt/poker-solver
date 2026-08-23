@@ -9,6 +9,7 @@ from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, handlers
 from src.shared.cloudtask.node import plan as node_plan
+from tests.shared.cloudtask.node.conftest import SAS
 
 
 class TestEvaluateFetch:
@@ -247,22 +248,43 @@ class TestTrain:
 class TestAbstractionRefresh:
     """A node that booted before an abstraction was precomputed must still see it.
 
-    `infra/main.tf`'s start task copies the share's abstractions once per BOOT, so
-    before this the precompute-then-train ordering could not work on a warm pool:
-    the task died in the resolver minutes deep, after `uv sync`. Three abstractions
-    sat published-but-unused on the share.
+    `infra/main.tf`'s start task copies the abstractions once per BOOT, so before
+    this the precompute-then-train ordering could not work on a warm pool: the
+    task died in the resolver minutes deep, after `uv sync`. Three abstractions
+    sat published-but-unused.
     """
 
-    def _published_abstraction(self, paths, name="buckets-F400T1200R600-rexact-e5c873dc"):
-        directory = paths.share / "combo_abstraction" / name
-        directory.mkdir(parents=True)
-        (directory / "metadata.json").write_text('{"config_hash": "e5c873dc4eabc925"}')
-        return directory
+    def _published_abstraction(
+        self, tmp_path, monkeypatch, name="buckets-F400T1200R600-rexact-e5c873dc"
+    ):
+        """One abstraction in the container, packed the way the node published
+        it -- a real `.tar.zst`, so the fetch exercises its own unpack."""
+        source = tmp_path / "built" / name
+        source.mkdir(parents=True)
+        (source / "metadata.json").write_text('{"config_hash": "e5c873dc4eabc925"}')
+        packed = tmp_path / archive.abstraction_object(name)
+        archive.pack_abstraction(source, packed)
+        body = packed.read_bytes()
 
-    def test_training_pulls_an_abstraction_the_node_has_never_seen(self, paths, log, monkeypatch):
-        self._published_abstraction(paths)
+        def _get(_sas, asked, into):
+            if asked != packed.name:
+                return False
+            into.mkdir(parents=True, exist_ok=True)
+            (into / asked).write_bytes(body)
+            return True
+
+        monkeypatch.setattr(archive.blobstore, "list_container", lambda _s: [packed.name])
+        monkeypatch.setattr(archive.blobstore, "get_object", _get)
+        return name
+
+    def test_training_pulls_an_abstraction_the_node_has_never_seen(
+        self, paths, tmp_path, log, monkeypatch
+    ):
+        self._published_abstraction(tmp_path, monkeypatch)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
+        task = node_plan.TaskPlan(
+            op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a", checkpoint_sas=SAS
+        )
 
         handlers._train(task, paths, log)
 
@@ -274,25 +296,25 @@ class TestAbstractionRefresh:
         )
         assert landed.exists()
 
-    def test_evaluation_pulls_it_too(self, paths, log, monkeypatch):
+    def test_evaluation_pulls_it_too(self, paths, tmp_path, log, monkeypatch, container):
         """Scoring resolves the abstraction the checkpoint is PINNED to, so the
         same boot order breaks evaluation and not only training."""
-        self._published_abstraction(paths)
-        share = paths.archive / "run-a"
-        (share / "static-2000.zarr").mkdir(parents=True)
-        (share / "static-2000.zarr" / "chunk").write_text("data")
-        (share / ".complete-static-2000.zarr").write_text("")
-        (share / "STATIC_CHECKPOINT.json").write_text(
+        self._published_abstraction(tmp_path, monkeypatch)
+        published = paths.archive / "run-a"
+        (published / "static-2000.zarr").mkdir(parents=True)
+        (published / "static-2000.zarr" / "chunk").write_text("data")
+        (published / ".complete-static-2000.zarr").write_text("")
+        (published / "STATIC_CHECKPOINT.json").write_text(
             '{"zarr": "static-2000.zarr", "iteration": 2000, "retained": []}'
         )
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", checkpoint_sas=SAS)
 
         handlers._evaluate(task, paths, log)
 
         assert (paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc").is_dir()
 
-    def test_neither_store_holding_one_is_not_a_failure(self, paths, log, monkeypatch):
+    def test_the_container_holding_none_is_not_a_failure(self, paths, log, monkeypatch):
         """The node may already hold what this task needs, and the resolver says
         so precisely if it does not -- refusing here would only move the error."""
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
@@ -300,9 +322,10 @@ class TestAbstractionRefresh:
 
         assert handlers._train(task, paths, log)[0] == 0
 
-    def test_the_container_is_read_before_the_share(self, paths, log, monkeypatch):
-        """Same order, and the same reason, as a rung's fetch: the share is the
-        store being left, so it is the fallback and never the first answer."""
+    def test_the_abstractions_container_is_the_one_asked(self, paths, log, monkeypatch):
+        """One ACCOUNT SAS, with `sibling_container` swapping the path. Asking
+        the checkpoint container for an abstraction lists 1,681 rungs and
+        matches none of them."""
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         seen: list[str] = []
         monkeypatch.setattr(
@@ -323,15 +346,20 @@ class TestAbstractionRefresh:
         assert seen, "the container was never consulted"
         assert seen[0].partition("?")[0].endswith("/abstractions")
 
-    def test_an_abstraction_already_on_the_node_is_not_recopied(self, paths, log, monkeypatch):
-        """`update=True` is the whole reason the steady-state cost is a directory
-        walk rather than 400 MB per task on a busy pool."""
-        self._published_abstraction(paths)
+    def test_an_abstraction_already_on_the_node_is_not_recopied(
+        self, paths, tmp_path, log, monkeypatch
+    ):
+        """A directory already present is skipped before the object is even
+        fetched, which is why the steady-state cost is one HEAD each rather
+        than 2.83 GiB per task on a busy pool."""
+        self._published_abstraction(tmp_path, monkeypatch)
         landed = paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc"
         landed.mkdir(parents=True)
         (landed / "metadata.json").write_text("newer-on-the-node")
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a")
+        task = node_plan.TaskPlan(
+            op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a", checkpoint_sas=SAS
+        )
 
         handlers._train(task, paths, log)
 
@@ -350,49 +378,61 @@ class TestPrecompute:
         (paths.work / "precompute.json").write_text(json.dumps({"output_dir": str(output)}))
         return output
 
-    def test_a_fresh_abstraction_is_published(self, paths, log, monkeypatch):
+    def test_a_fresh_abstraction_is_published(self, paths, log, monkeypatch, container):
         self._wrote(paths)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production", checkpoint_sas=SAS)
 
         assert handlers._precompute(task, paths, log) == (0, None)
-        published = paths.share / "combo_abstraction" / "production" / "buckets.npy"
-        assert published.read_text() == "buckets"
+        assert archive.abstraction_object("production") in container, sorted(container)
 
-    def test_republishing_over_an_existing_name_is_refused(self, paths, log, monkeypatch):
+    def test_republishing_over_an_existing_name_is_refused(
+        self, paths, log, monkeypatch, container
+    ):
         """Bucket ASSIGNMENT is not pinned by card_abstraction_hash, so
         replacing it silently changes which bucket a hand lands in while every
         run trained against the old copy keeps a provenance check that still
         passes. This guard is what makes precompute-in-the-cloud as safe as on
         a laptop."""
         self._wrote(paths)
-        existing = paths.share / "combo_abstraction" / "production"
-        existing.mkdir(parents=True)
-        (existing / "buckets.npy").write_text("THE ORIGINAL")
+        name = archive.abstraction_object("production")
+        container[name] = b"THE ORIGINAL"
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production", checkpoint_sas=SAS)
+
+        assert handlers._precompute(task, paths, log) == (1, None)
+        assert container[name] == b"THE ORIGINAL"
+        assert "REFUSING to republish" in log.path.read_text()
+
+    def test_force_publish_overrides_it(self, paths, log, monkeypatch, container):
+        self._wrote(paths)
+        name = archive.abstraction_object("production")
+        container[name] = b"THE ORIGINAL"
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.PRECOMPUTE, config="production", force_publish=True, checkpoint_sas=SAS
+        )
+
+        assert handlers._precompute(task, paths, log) == (0, None)
+        assert container[name] != b"THE ORIGINAL"
+
+    def test_with_nowhere_to_publish_it_fails_loudly(self, paths, log, monkeypatch):
+        """A precompute is hours of node time. Without a SAS there is no second
+        store to fall through to any more, so exiting 0 would report success on
+        a task whose whole output is unreachable."""
+        self._wrote(paths)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
 
         assert handlers._precompute(task, paths, log) == (1, None)
-        assert (existing / "buckets.npy").read_text() == "THE ORIGINAL"
-        assert "REFUSING to republish" in log.path.read_text()
+        assert "cannot be published" in log.path.read_text()
 
-    def test_force_publish_overrides_it(self, paths, log, monkeypatch):
-        self._wrote(paths)
-        existing = paths.share / "combo_abstraction" / "production"
-        existing.mkdir(parents=True)
-        (existing / "buckets.npy").write_text("THE ORIGINAL")
-        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production", force_publish=True)
-
-        assert handlers._precompute(task, paths, log) == (0, None)
-        assert (existing / "buckets.npy").read_text() == "buckets"
-
-    def test_a_failed_build_publishes_nothing(self, paths, log, monkeypatch):
+    def test_a_failed_build_publishes_nothing(self, paths, log, monkeypatch, container):
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 2)
-        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production")
+        task = node_plan.TaskPlan(op=TaskName.PRECOMPUTE, config="production", checkpoint_sas=SAS)
 
         assert handlers._precompute(task, paths, log) == (2, None)
-        assert not (paths.share / "combo_abstraction").exists()
+        assert not container
 
     def test_an_unreadable_payload_is_not_a_traceback(self, paths, log, monkeypatch):
         """The command REPORTS where it wrote; the directory name is never

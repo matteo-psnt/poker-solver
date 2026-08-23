@@ -116,9 +116,15 @@ class TestDispatchResolvesTheFragmentToo:
     )
 
     @staticmethod
-    def _share(monkeypatch, names):
+    def _published(monkeypatch, names):
+        """The CONTAINER's listing, which is what dispatch resolves against.
+
+        It asked the share until the share stopped holding rungs, and then
+        matched nothing: `score --run <anything>` refused a run whose whole
+        ladder was present, because the gate read the store that no longer
+        answers."""
         from src.interfaces.cloud.config import CloudConfig
-        from src.interfaces.cloud.store import share, workspace
+        from src.interfaces.cloud.store import blob, workspace
 
         monkeypatch.setattr(
             CloudConfig,
@@ -127,32 +133,29 @@ class TestDispatchResolvesTheFragmentToo:
                 lambda cls: SimpleNamespace(storage_account="a", share_name="s", share_key="k")
             ),
         )
-        monkeypatch.setattr(share, "share_client", lambda config: object())
         monkeypatch.setattr(
-            share,
-            "list_entries",
-            lambda service, share_name, path: [
-                SimpleNamespace(name=name, is_directory=True) for name in names
-            ],
+            blob,
+            "published_rungs",
+            lambda config: {name: {"static-100.ckpt.zst"} for name in names},
         )
         return workspace
 
     def test_a_fragment_becomes_the_full_id_before_dispatch(self, monkeypatch):
-        workspace = self._share(monkeypatch, self.PUBLISHED)
+        workspace = self._published(monkeypatch, self.PUBLISHED)
         assert workspace.resolve_published_run("15261") == self.PUBLISHED[0]
 
     def test_an_exact_id_is_returned_unchanged(self, monkeypatch):
-        workspace = self._share(monkeypatch, self.PUBLISHED)
+        workspace = self._published(monkeypatch, self.PUBLISHED)
         assert workspace.resolve_published_run(self.PUBLISHED[1]) == self.PUBLISHED[1]
 
     def test_an_ambiguous_fragment_is_refused_here_not_on_a_node(self, monkeypatch):
         """The whole point: fail in the terminal, not after a pool spin-up."""
-        workspace = self._share(monkeypatch, self.PUBLISHED)
+        workspace = self._published(monkeypatch, self.PUBLISHED)
         with pytest.raises(CommandError, match="matches 2 runs"):
             workspace.resolve_published_run("to30M")
 
     def test_an_unpublished_run_names_what_is_published(self, monkeypatch):
-        workspace = self._share(monkeypatch, self.PUBLISHED)
+        workspace = self._published(monkeypatch, self.PUBLISHED)
         with pytest.raises(CommandError, match="is not published"):
             workspace.resolve_published_run("no-such-run")
 
@@ -163,7 +166,7 @@ class TestDispatchResolvesTheFragmentToo:
         from src.interfaces.cloud.tasks import dispatch
         from src.interfaces.commands import score
 
-        self._share(monkeypatch, self.PUBLISHED)
+        self._published(monkeypatch, self.PUBLISHED)
         queued: list = []
 
         def fake(make_tasks, **_):
