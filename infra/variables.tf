@@ -55,8 +55,9 @@ variable "max_nodes" {
       4 x D16als_v6  ~$3.20/hr   ~$77/day
      16 x D16als_v6 ~$12.80/hr  ~$307/day
      30 x D16als_v6 ~$24.00/hr  ~$576/day
+     60 x D16als_v6 ~$48.00/hr ~$1152/day
 
-    Quota went 256 -> 512 on 2026-08-22. One `az quota update` on
+    Quota went 256 -> 512 and then 512 -> 1024 on 2026-08-22. One `az quota update` on
     `standardDalv6Family` moved `cores` (Total Regional vCPUs) with it, so the
     pair does not need requesting separately, and Batch is in UserSubscription
     mode -- `dedicatedCoreQuota` is null, so there is no second Batch-side
@@ -72,14 +73,15 @@ variable "max_nodes" {
     like a live fault. Do not size this to consume the quota exactly.
 
     `infra/credit_watch.py --daily-burn` is the other half and is NOT derived
-    from here -- 576.00 accompanies a 30 here. WHAT 30 COSTS: ~$576/day
-    worst-case against a ~$9.0k remaining balance is ~16 days of runway, which
-    puts `--warn-days 30` permanently in alarm. That is a real trade and wants
-    a deliberate answer, not a default; 20 nodes (~$384/day, ~23 days) keeps
-    the alert closer to its intended meaning.
+    from here -- 1152.00 accompanies a 60 here. WHAT 60 COSTS: ~$1152/day
+    worst-case against a ~$9.0k remaining balance is ~8 days of runway, which
+    puts `--warn-days 30` permanently in alarm. 60 was chosen on 2026-08-23
+    for the exploitability programme's queue (367 tasks behind 30 nodes); the
+    pool scales to zero at rest, so the figure bounds a runaway, not a day.
+    Drop it back to 20-30 when the programme ends.
   EOT
   type        = number
-  default     = 30
+  default     = 60
 }
 
 variable "data_disk_gb" {

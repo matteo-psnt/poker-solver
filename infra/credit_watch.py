@@ -512,7 +512,7 @@ def main() -> int:
     parser.add_argument(
         "--daily-burn",
         type=float,
-        default=576.00,
+        default=1152.00,
         help="worst-case $/day: max_nodes x per-node rate. Raise this whenever "
         "max_nodes or pool_vm_size goes up.",
     )
@@ -524,7 +524,8 @@ def main() -> int:
     # ride along on top.
     #
     # 76.80 at max_nodes=4; 307.20 at 16 (2026-08-15); 576.00 at 30 (2026-08-22,
-    # with the quota raise 256 -> 512). THIS IS NOT DERIVED FROM TERRAFORM and
+    # with the quota raise 256 -> 512); 1152.00 at 60 (2026-08-23, quota 512 ->
+    # 1024). THIS IS NOT DERIVED FROM TERRAFORM and
     # nothing fails if the two drift -- the runway number simply becomes
     # optimistic, which is the one direction that matters. At this burn a ~$9.0k
     # balance is ~16 days, so `--warn-days 30` now fires: the ceiling was chosen
