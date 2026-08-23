@@ -297,6 +297,10 @@ class TaskKind(abc.ABC):
     its last published rung, scoring is idempotent. Work with no
     partial-progress marker does not."""
     retries: ClassVar[int] = 3
+    """Whether the task's run directory is ITS OWN to publish. True for the
+    trainers; an evaluation FETCHES other runs under the same directory, and
+    publishing those back cost ~30 minutes per task on a reused node."""
+    publishes_run: ClassVar[bool] = False
 
     @abc.abstractmethod
     def validate(self, task: TaskFields) -> None:
@@ -401,6 +405,7 @@ class TrainTask(TaskKind):
     """Train a run to an ABSOLUTE iteration target."""
 
     name = TaskName.TRAIN
+    publishes_run = True
     unit = "iterations"
     progress_file = "train-progress.json"
 
@@ -499,6 +504,7 @@ class TrainVectorTask(TaskKind):
     """
 
     name = TaskName.TRAIN_VECTOR
+    publishes_run = True
     unit = "iterations"
     """The SAME file as the scalar trainer's, and deliberately: one task runs on
     a node, it counts the same thing against the same kind of target, and two

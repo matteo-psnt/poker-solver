@@ -161,16 +161,6 @@ class TestPublish:
         assert (destination / "static-1000.zarr" / "regrets" / "0" / "1").read_text() == "b"
         assert (destination / archive.marker_for("static-1000.zarr")).exists()
 
-    def test_publish_all_covers_every_run_on_the_disk(self, tmp_path):
-        for name in ("run-a", "run-b"):
-            _snapshot(_run(tmp_path, name), "static-10.zarr")
-        assert archive.publish_all(tmp_path / "runs", tmp_path / "archive")
-        assert (tmp_path / "archive" / "run-a" / "static-10.zarr").is_dir()
-        assert (tmp_path / "archive" / "run-b" / "static-10.zarr").is_dir()
-
-    def test_publish_all_tolerates_a_missing_runs_directory(self, tmp_path):
-        assert archive.publish_all(tmp_path / "nothing", tmp_path / "archive")
-
 
 def _raise(*args, **kwargs):
     raise OSError("share went away")
@@ -349,35 +339,40 @@ class TestLadderState:
         """checkpoint_every below the retain interval advances `iteration`
         while the ladder stands still; watching only the ladder would sit idle
         through exactly those chunks."""
-        runs = tmp_path / "runs"
-        run_dir = runs / "run-a"
+        run_dir = tmp_path / "runs" / "run-a"
         run_dir.mkdir(parents=True)
         _manifest(run_dir, "static-1000.zarr", iteration=1000)
-        before = archive.ladder_state(runs)
+        before = archive.ladder_state(run_dir)
         _manifest(run_dir, "static-2000.zarr", iteration=2000)
-        assert archive.ladder_state(runs) != before
+        assert archive.ladder_state(run_dir) != before
 
-    def test_it_sees_a_run_that_did_not_exist_yet(self, tmp_path):
-        """A fresh train's id appears only once the trainer creates it, so the
-        watcher must poll the whole runs directory."""
-        runs = tmp_path / "runs"
-        runs.mkdir()
-        assert archive.ladder_state(runs) == ""
-        run_dir = runs / "run-new"
-        run_dir.mkdir()
+    def test_a_run_that_does_not_exist_yet_reads_as_empty_then_appears(self, tmp_path):
+        """The id is fixed before the trainer starts; the directory is not."""
+        run_dir = tmp_path / "runs" / "run-new"
+        assert archive.ladder_state(run_dir) == ""
+        run_dir.mkdir(parents=True)
         _manifest(run_dir, "static-10.zarr", iteration=10)
-        assert "run-new" in archive.ladder_state(runs)
+        assert "run-new" in archive.ladder_state(run_dir)
+
+    def test_it_never_reads_a_neighbouring_run(self, tmp_path):
+        """The reused-node bug: a watcher that read the runs directory pushed
+        every run an earlier evaluate task had fetched there."""
+        runs = tmp_path / "runs"
+        mine, theirs = runs / "run-mine", runs / "run-theirs"
+        mine.mkdir(parents=True)
+        theirs.mkdir()
+        _manifest(theirs, "static-5.zarr", iteration=5)
+        assert archive.ladder_state(mine) == ""
 
     def test_a_torn_manifest_reads_as_absent(self, tmp_path):
         """Half-written JSON is the expected residue of a kill mid-checkpoint
         and must not take down the watcher that would publish the rest."""
-        runs = tmp_path / "runs"
-        run_dir = runs / "run-a"
+        run_dir = tmp_path / "runs" / "run-a"
         run_dir.mkdir(parents=True)
         (run_dir / records.STATIC_CHECKPOINT).write_text('{"zarr": ')
-        assert archive.ladder_state(runs) == ""
+        assert archive.ladder_state(run_dir) == ""
 
-    def test_a_missing_runs_directory_reads_as_empty(self, tmp_path):
+    def test_a_missing_run_directory_reads_as_empty(self, tmp_path):
         assert archive.ladder_state(tmp_path / "nothing") == ""
 
 

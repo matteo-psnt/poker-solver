@@ -98,7 +98,9 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
 
     plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
-    watcher = progress.LadderWatcher(paths, log, plan=plan, publish_log=log.publish)
+    watcher = progress.LadderWatcher(
+        paths, log, run_dir=paths.runs / run_id, plan=plan, publish_log=log.publish
+    )
     watcher.start()
     try:
         # The command this actually runs, not a hardcoded one: `_train` is the
@@ -364,6 +366,21 @@ def _measurement(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int
         return code, None
     log(f"published {MEASUREMENT_OUTPUT[plan.op]}/{published}")
     return 0, None
+
+
+def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
+    """The end-of-task publish: a TRAINING task's own run, and nothing else.
+
+    Every other kind either fetched runs onto this disk (evaluate) or wrote
+    nowhere under ``runs/``; publishing the directory wholesale re-uploaded
+    those fetched ladders on every task that ran on the node.
+    """
+    kind = kinds.kind_of(plan.op)
+    if kind is None or not kind.publishes_run:
+        return
+    run_dir = paths.runs / plan.train_run_id
+    if run_dir.is_dir():
+        archive.publish_run(run_dir, paths.archive / run_dir.name, log)
 
 
 HANDLERS: dict[str, Handler] = {
