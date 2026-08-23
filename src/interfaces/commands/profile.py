@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from azure.core.exceptions import ResourceNotFoundError
 from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.shared.cloudtask.node import profile as node_profile
@@ -31,7 +31,6 @@ from src.shared.cloudtask.node import profile as node_profile
 if TYPE_CHECKING:
     import argparse
 
-    from azure.storage.fileshare import ShareServiceClient
 
 # A poll on the node, plus the recording, plus the upload of a few MB over SMB.
 # Generous because the cost of being early is reporting "nothing landed" about a
@@ -84,19 +83,14 @@ class ProfilePayload(BaseModel):
     available: list[str] | None = None
 
 
-def _profiles(service: ShareServiceClient, share_name: str) -> list[str]:
-    """Every profile document on the share, newest name last."""
-    entries = share.list_entries(service, share_name, node_profile.PROFILES_DIRNAME)
-    return sorted(
-        entry.name
-        for entry in entries
-        if not entry.is_directory and entry.name.endswith(node_profile.PROFILE_SUFFIX)
-    )
+def _profiles(config: Any) -> list[str]:
+    """Every profile document in the container, newest name last."""
+    return blob.diagnostic_names(config, node_profile.PROFILE_SUFFIX)
 
 
-def _download(service: ShareServiceClient, share_name: str, name: str, out: str) -> str:
+def _download(config: Any, name: str, out: str) -> str:
     destination = Path(out).expanduser() / name
-    share.download_file(service, share_name, f"{node_profile.PROFILES_DIRNAME}/{name}", destination)
+    blob.download_diagnostic(config, name, destination)
     return str(destination)
 
 
@@ -106,29 +100,26 @@ def run(args: argparse.Namespace) -> ProfilePayload:
         raise CommandError("profile: --task is required unless --list or --get is given.")
 
     config = CloudConfig.load()
-    service = share.share_client(config)
 
     if args.list:
-        return ProfilePayload(available=_profiles(service, config.share_name))
+        return ProfilePayload(available=_profiles(config))
 
     if args.get:
         return ProfilePayload(
             landed=args.get,
-            downloaded=_download(service, config.share_name, args.get, args.out),
+            downloaded=_download(config, args.get, args.out),
         )
 
     # Taken BEFORE the request so the wait can tell a profile this call produced
     # from one an earlier call left behind -- the node numbers them per task and
     # per attempt, so a retried task starts counting again.
-    before = set(_profiles(service, config.share_name))
-    share.write_text(
-        service,
-        config.share_name,
-        f"{node_profile.PROFILES_DIRNAME}/{args.task}{node_profile.REQUEST_SUFFIX}",
-        # The trailing newline is a COMPLETENESS MARKER, not formatting: this
-        # write lands over REST and the node reads it off an SMB mount, so it
-        # can see the file before its bytes. Without the marker an in-flight
-        # read looks empty and silently profiles for the default instead.
+    before = set(_profiles(config))
+    blob.write_diagnostic(
+        config,
+        f"{args.task}{node_profile.REQUEST_SUFFIX}",
+        # A blob is committed whole, so the trailing newline the SMB write
+        # needed as a completeness marker is now belt and braces rather than
+        # load-bearing: the node cannot see this object before its bytes.
         f"{args.seconds}\n",
     )
     if args.no_wait:
@@ -140,18 +131,17 @@ def run(args: argparse.Namespace) -> ProfilePayload:
         time.sleep(POLL_SECONDS)
         fresh = [
             name
-            for name in _profiles(service, config.share_name)
+            for name in _profiles(config)
             if name not in before and name.startswith(f"{args.task}.")
         ]
         if fresh:
             name = sorted(fresh)[-1]
             try:
-                downloaded = _download(service, config.share_name, name, args.out)
+                downloaded = _download(config, name, args.out)
             except ResourceNotFoundError:
-                # LISTED is not READABLE. The node writes the profile over SMB
-                # and this lists it over REST, so the name appears first; a raw
-                # Azure XML error came back from exactly this. The next poll
-                # gets it.
+                # LISTED is not READABLE -- kept because a listing and a read
+                # are still two calls, and the one that raised here came back
+                # as raw Azure XML. The next poll gets it.
                 continue
             return ProfilePayload(
                 task=args.task,

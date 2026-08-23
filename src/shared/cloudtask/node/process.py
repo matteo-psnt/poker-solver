@@ -184,7 +184,11 @@ def run_guarded(
     if profile_dir is not None:
         with contextlib.suppress(Exception):
             _, profiler = profile.watcher(
-                process.pid, profile_dir, os.environ.get("AZ_BATCH_TASK_ID", "local"), log
+                process.pid,
+                profile_dir,
+                os.environ.get("AZ_BATCH_TASK_ID", "local"),
+                log,
+                log.sas,
             )
     timed_out = False
     started = time.monotonic()

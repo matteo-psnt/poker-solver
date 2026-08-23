@@ -272,6 +272,31 @@ def task_log_names(config: Any) -> list[str]:
     return sorted(x.name for x in service.get_container_client(DIAGNOSTICS).list_blobs())
 
 
+def write_diagnostic(config: Any, name: str, body: str) -> None:
+    """Put one small text object in the diagnostics container."""
+    _diagnostics(config).upload_blob(name, body.encode("utf-8"), overwrite=True)
+
+
+def diagnostic_names(config: Any, suffix: str) -> list[str]:
+    """Every diagnostics object whose name ends with `suffix`, sorted."""
+    return sorted(x.name for x in _diagnostics(config).list_blobs() if x.name.endswith(suffix))
+
+
+def download_diagnostic(config: Any, name: str, destination: Path) -> None:
+    """Save one diagnostics object beside the operator."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(_diagnostics(config).download_blob(name).readall())
+
+
+def _diagnostics(config: Any) -> Any:
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+    return BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    ).get_container_client(DIAGNOSTICS)
+
+
 def published_record(config: Any) -> dict[str, dict[str, Any]]:
     """Every published run, as `{run_id: {"rungs": {...}, "manifest": bytes}}`.
 

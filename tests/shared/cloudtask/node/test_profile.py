@@ -31,55 +31,56 @@ def profile_dir(tmp_path):
     return directory
 
 
+class _Container:
+    """The diagnostics container as `take_request` uses it: names to bodies."""
+
+    SAS = "https://acct.blob.core.windows.net/diagnostics?sig=x"
+
+    def __init__(self, monkeypatch, **objects: bytes) -> None:
+        self.objects = dict(objects)
+        monkeypatch.setattr(
+            profile.blobstore, "read_object", lambda _s, name: self.objects.get(name)
+        )
+        monkeypatch.setattr(profile.blobstore, "exists", lambda _s, name: name in self.objects)
+        monkeypatch.setattr(
+            profile.blobstore,
+            "put_bytes",
+            lambda _s, name, body: self.objects.__setitem__(name, body) or len(body),
+        )
+
+
 class TestItStaysOffUntilAsked:
-    def test_no_request_is_no_profile(self, profile_dir):
-        assert profile.take_request(profile_dir, "task-1") is None
+    def test_no_request_is_no_profile(self, monkeypatch):
+        _Container(monkeypatch)
+        assert profile.take_request("task-1", _Container.SAS) is None
 
-    def test_a_request_is_consumed_so_one_ask_is_one_profile(self, profile_dir):
-        """Consumed BEFORE the recording, so a refused ptrace does not leave a
-        file that re-profiles every poll for the rest of a six-hour task."""
-        (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").write_text("45")
+    def test_a_request_fires_once(self, monkeypatch):
+        """Marked served BEFORE the recording, so a refused ptrace does not
+        leave a request that re-profiles every poll for six hours. MARKED, not
+        deleted: no task SAS carries `delete`."""
+        _Container(monkeypatch, **{f"task-1{profile.REQUEST_SUFFIX}": b"45"})
 
-        assert profile.take_request(profile_dir, "task-1") == 45
-        assert profile.take_request(profile_dir, "task-1") is None
+        assert profile.take_request("task-1", _Container.SAS) == 45
+        assert profile.take_request("task-1", _Container.SAS) is None
 
-    def test_an_empty_request_still_profiles(self, profile_dir):
-        """The intent is in the file existing. `touch` is a reasonable way to
-        ask, and refusing over the contents would be the least useful reading."""
-        (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").touch()
+    def test_an_empty_request_still_profiles(self, monkeypatch):
+        """The intent is in the request existing. `touch` is a reasonable way
+        to ask, and refusing over the contents would be the least useful
+        reading."""
+        _Container(monkeypatch, **{f"task-1{profile.REQUEST_SUFFIX}": b""})
 
-        assert profile.take_request(profile_dir, "task-1") == profile.DEFAULT_SECONDS
+        assert profile.take_request("task-1", _Container.SAS) == profile.DEFAULT_SECONDS
 
-    def test_a_write_still_landing_is_re_read_not_defaulted(self, profile_dir, monkeypatch):
-        """MEASURED: a request asking for 180s profiled for 30. The laptop
-        writes over REST and the node reads over SMB, so a poll saw the file
-        before its bytes, read empty, and fell to the default."""
-        request = profile_dir / f"task-1{profile.REQUEST_SUFFIX}"
-        request.write_text("")
-        reads = iter(["", "180\n"])
-        monkeypatch.setattr(profile.Path, "read_text", lambda _self: next(reads))
-        monkeypatch.setattr(profile.time, "sleep", lambda _seconds: None)
+    def test_a_request_for_another_task_is_not_this_one(self, monkeypatch):
+        _Container(monkeypatch, **{f"task-2{profile.REQUEST_SUFFIX}": b"30"})
 
-        assert profile.take_request(profile_dir, "task-1") == 180
+        assert profile.take_request("task-1", _Container.SAS) is None
 
-    def test_a_touch_still_means_the_default(self, profile_dir, monkeypatch):
-        """The re-read must not cost `touch` its meaning: an empty file that
-        STAYS empty is an operator asking for a profile, not a partial write."""
-        (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").touch()
-        monkeypatch.setattr(profile.time, "sleep", lambda _seconds: None)
-
-        assert profile.take_request(profile_dir, "task-1") == profile.DEFAULT_SECONDS
-
-    def test_a_request_for_another_task_is_not_this_one(self, profile_dir):
-        (profile_dir / f"task-2{profile.REQUEST_SUFFIX}").write_text("30")
-
-        assert profile.take_request(profile_dir, "task-1") is None
-
-    def test_an_absurd_duration_is_clamped_not_honoured(self, profile_dir):
+    def test_an_absurd_duration_is_clamped_not_honoured(self, monkeypatch):
         """A profiler holding a node for an hour is worse than no profiler."""
-        (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").write_text("999999")
+        _Container(monkeypatch, **{f"task-1{profile.REQUEST_SUFFIX}": b"999999"})
 
-        assert profile.take_request(profile_dir, "task-1") == profile.MAX_SECONDS
+        assert profile.take_request("task-1", _Container.SAS) == profile.MAX_SECONDS
 
 
 class TestItProfilesTheProcessDOINGTheWork:
@@ -174,10 +175,9 @@ class TestItCannotCostATaskItsExitCode:
         assert code == 3
 
     def test_a_profiler_that_raises_is_swallowed(self, profile_dir, monkeypatch):
-        """Every failure mode here is a property of the box -- ptrace refused, a
-        slow share, no `py-spy` -- and none of them is a reason to lose the work.
-        """
-        (profile_dir / f"task-1{profile.REQUEST_SUFFIX}").write_text("1")
+        """Every failure mode here is a property of the box -- ptrace refused,
+        a slow store, no `py-spy` -- and none is a reason to lose the work."""
+        _Container(monkeypatch, **{f"task-1{profile.REQUEST_SUFFIX}": b"1"})
         monkeypatch.setattr(profile, "POLL_SECONDS", 0.01)
 
         def _explode(*_args, **_kwargs):
@@ -190,7 +190,9 @@ class TestItCannotCostATaskItsExitCode:
 
         stop = threading.Event()
         thread = threading.Thread(
-            target=profile.watch, args=(1, profile_dir, "task-1", print, stop), daemon=True
+            target=profile.watch,
+            args=(1, profile_dir, "task-1", print, stop, _Container.SAS),
+            daemon=True,
         )
         thread.start()
         assert served.wait(timeout=3), "the request was never picked up"
@@ -199,7 +201,8 @@ class TestItCannotCostATaskItsExitCode:
 
         assert not thread.is_alive(), "the profiler thread died on an exception"
 
-    def test_a_missing_profiles_directory_is_not_an_error(self, tmp_path):
-        """The share may not have one yet, and the first task must not be the
-        one that finds out."""
-        assert profile.take_request(tmp_path / "never-created", "task-1") is None
+    def test_a_task_with_no_credential_never_profiles(self, monkeypatch):
+        """A dispatch always mints one; a task run without is not a path that
+        should reach the container and guess."""
+        _Container(monkeypatch, **{f"task-1{profile.REQUEST_SUFFIX}": b"1"})
+        assert profile.take_request("task-1", "") is None

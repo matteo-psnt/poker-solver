@@ -30,7 +30,7 @@ def _args(**overrides) -> argparse.Namespace:
 
 
 class _Share:
-    """The share as this command uses it: a name -> body dict, and a listing."""
+    """The diagnostics container as this command uses it: names and bodies."""
 
     def __init__(self, names: list[str] | None = None) -> None:
         self.names = list(names or [])
@@ -43,28 +43,27 @@ class _Share:
 
     def install(self, monkeypatch) -> None:
         monkeypatch.setattr(profile.CloudConfig, "load", staticmethod(lambda: self))
-        monkeypatch.setattr(profile.share, "share_client", lambda _config: self)
-        monkeypatch.setattr(profile.share, "list_entries", self._list)
-        monkeypatch.setattr(profile.share, "write_text", self._write)
-        monkeypatch.setattr(profile.share, "download_file", self._download)
+        monkeypatch.setattr(profile.blob, "diagnostic_names", self._names)
+        monkeypatch.setattr(profile.blob, "write_diagnostic", self._write)
+        monkeypatch.setattr(profile.blob, "download_diagnostic", self._download)
         monkeypatch.setattr(profile, "POLL_SECONDS", 0.01)
 
     # CloudConfig stand-in.
     share_name = "poker"
+    storage_account = "acct"
+    share_key = "key"
 
-    def _list(self, _service, _share, _path, **_kwargs):
+    def _names(self, _config, suffix):
         self.listings += 1
         if self.appears and self.listings >= self.appears[0] and self.appears[1] not in self.names:
             self.names.append(self.appears[1])
-        return [
-            profile.share.ShareEntry(name=name, is_directory=False, size=1) for name in self.names
-        ]
+        return sorted(name for name in self.names if name.endswith(suffix))
 
-    def _write(self, _service, _share, path, body) -> None:
-        self.written[path] = body
+    def _write(self, _config, name, body) -> None:
+        self.written[name] = body
 
-    def _download(self, _service, _share, path, destination) -> None:
-        self.downloaded.append(path)
+    def _download(self, _config, name, destination) -> None:
+        self.downloaded.append(name)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text("{}")
 
@@ -79,7 +78,7 @@ class TestTheRequest:
 
         profile.run(_args(seconds=45))
 
-        path = f"{node_profile.PROFILES_DIRNAME}/{TASK}{node_profile.REQUEST_SUFFIX}"
+        path = f"{TASK}{node_profile.REQUEST_SUFFIX}"
         assert remote.written == {path: "45\n"}
 
     def test_without_a_task_it_is_refused_before_any_azure_call(self, monkeypatch):
@@ -107,24 +106,24 @@ class TestTheWait:
         assert payload.downloaded is not None
 
     def test_a_profile_listed_before_it_is_readable_is_waited_for(self, monkeypatch):
-        """MEASURED: this came back as raw Azure XML on the terminal. The node
-        writes the profile over SMB and this lists it over REST, so the name
-        appears in a listing before the bytes can be fetched."""
+        """MEASURED: this came back as raw Azure XML on the terminal. A listing
+        and a read are two calls, so a name can appear before its bytes can be
+        fetched, and the command must poll again rather than surface that."""
         remote = _Share()
         landed = f"{TASK}.0.1{node_profile.PROFILE_SUFFIX}"
         remote.appears = (2, landed)
         remote.install(monkeypatch)
         refusals = [1]
 
-        def _not_yet(_service, _share, path, destination):
+        def _not_yet(_config, name, destination):
             if refusals:
                 refusals.pop()
                 raise ResourceNotFoundError(message="The specified resource does not exist.")
-            remote.downloaded.append(path)
+            remote.downloaded.append(name)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text("{}")
 
-        monkeypatch.setattr(profile.share, "download_file", _not_yet)
+        monkeypatch.setattr(profile.blob, "download_diagnostic", _not_yet)
 
         payload = profile.run(_args(no_wait=False, out="/tmp/profiles"))
 
