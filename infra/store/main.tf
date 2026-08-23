@@ -58,6 +58,11 @@ resource "azurerm_storage_account" "store" {
   # is still the local one. Geo-redundancy would double the cost to protect
   # against a regional loss that would not lose unique data.
   account_replication_type = "LRS"
+  # Without this a standard share is capped at ~60 MiB/s TOTAL, split across every
+  # node publishing at once: measured 2026-08-23 at 60 nodes, a 9-minute 30M train
+  # spent 26 minutes publishing its ~8 GB ladder. One-way (cannot be disabled),
+  # no cost change on LRS, lifts the cap to the 10 GiB/s large-share limit.
+  large_file_share_enabled = true
   # SMB from the boxes needs no public blob access, and the mount uses the account
   # key over TLS.
   https_traffic_only_enabled      = true

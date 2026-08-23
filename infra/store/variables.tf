@@ -37,9 +37,9 @@ variable "share_quota_gb" {
 
     512 was NOT enough: 56 archived runs filled it exactly, and a full share
     fails a submit mid-upload with ShareSizeLimitReached rather than at
-    validation, so the dispatch path breaks before the work starts. Stays under
-    the 5 TiB standard ceiling on purpose -- going past it needs
-    large_file_share_enabled, which cannot be turned back off.
+    validation, so the dispatch path breaks before the work starts. The account
+    has large_file_share_enabled (for throughput, see main.tf), so the 5 TiB
+    standard ceiling no longer binds; raise this freely.
   EOT
   type        = number
   default     = 4096
