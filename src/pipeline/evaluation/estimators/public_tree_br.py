@@ -43,7 +43,7 @@ import multiprocessing as mp
 import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import repeat
 from typing import TYPE_CHECKING, Any
 
@@ -116,16 +116,41 @@ class PublicBRConfig:
     num_rivers: int = 2
     board_seed: int = 7
     num_workers: int = 1
+    in_abstraction: bool = False
+    """The responder picks ONE action per (public node, bucket), maximising the
+    bucket-summed counterfactual value: the abstract game's own best response,
+    the figure a converged abstract-game solver drives to zero. Own-reach is not
+    in the weighting (imperfect recall makes the reach-aware optimum circular),
+    so it is a valid constrained strategy's value and a lower bound on the true
+    in-abstraction BR -- the standard CFR-BR convention."""
+    policy_threshold: float = 0.0
+    """Eval-time transform of the strategy under measurement: blueprint actions
+    below this probability are zeroed and the row renormalised (Ganzfried &
+    Sandholm 2012). Applied to trained rows only; fallback rows stay uniform."""
+    purify: bool = False
+    """The blueprint plays its argmax. Overrides ``policy_threshold``."""
+    decompose: bool = False
+    """Attribute the responder's gain to the public nodes it comes from. Does
+    not change the number; costs one extra reach vector per walk."""
 
 
 @dataclass(frozen=True)
 class SeatResult:
-    """Best-response value for one (responder seat, button) configuration."""
+    """Best-response value for one (responder seat, button) configuration.
+
+    ``value_mbb`` is the BR's value against the blueprint; ``self_play_mbb`` the
+    blueprint's own value in that seat; their difference ``gain_mbb`` is what
+    the decomposition attributes node by node. Zero-sum: the two seats' self-play
+    values at one button cancel, so the mean of the four BR values is also the
+    mean of the four gains.
+    """
 
     br_seat: int
     button: int
     value_mbb: float
     missing_policy_mass: float
+    self_play_mbb: float
+    gain_mbb: float
 
 
 @dataclass(frozen=True)
@@ -146,6 +171,47 @@ class PublicBRResult:
     num_flops: int
     elapsed_s: float
     config: PublicBRConfig
+    decomposition: dict[str, Any] | None = None
+
+
+@dataclass
+class _NodeGain:
+    """Per-walk accumulator for one public node (street, betting sequence).
+
+    Arrays are indexed by the node's legal-action position. ``mass`` is the
+    self-play reach mass (own reach x compatible opponent mass), the weight
+    behind both mixes; ``gain`` is the sum of this node's deviation terms.
+    """
+
+    tokens: tuple[str, ...]
+    types: tuple[str, ...]
+    line: str
+    gain: float = 0.0
+    mass: float = 0.0
+    blueprint_mix: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    br_mix: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    gain_by_br_action: np.ndarray = field(default_factory=lambda: np.zeros(0))
+
+
+@dataclass(frozen=True)
+class WalkResult:
+    """One (responder seat, button) walk's raw parts, aggregated by the parent.
+
+    Values are per dealt hand (already divided by the 1326 x 1225 measure) in
+    chips. ``terms_chips`` is the decomposition's sum, carried separately so the
+    identity ``chips - self_play_chips == terms_chips`` is CHECKED, never assumed.
+    """
+
+    chips: float
+    self_play_chips: float
+    terms_chips: float
+    nodes: int
+    decision_mass: float
+    missing_mass: float
+    selfplay_mass: float
+    selfplay_missing: float
+    branches: int
+    gains: dict[tuple[Street, str], _NodeGain] | None
 
 
 class _BoardPlan:
@@ -197,8 +263,23 @@ class _BoardPlan:
         return [candidates[int(i)] for i in picks]
 
 
+TOP_NODES = 30
+TOP_LINES = 30
+
+
 class PublicTreeBestResponse:
-    """Exact best response of one seat against the blueprint on the sampled tree."""
+    """Exact best response of one seat against the blueprint on the sampled tree.
+
+    Every walk carries two reach vectors down -- the opponent's under the
+    blueprint (with chance folded in) and the responder's OWN under the
+    blueprint -- and two value vectors up: the best response's and the
+    blueprint's self-play. At a responder node the gain decomposition records
+    ``own_reach * (B(n) - sum_a sigma_a B_a)``: prefix reach under the blueprint,
+    suffix values under the best response. Those terms telescope exactly to
+    ``BR - self-play`` at the root and are each >= 0 for the per-combo
+    responder, so aggregating them by street or node is attribution, not
+    cancellation.
+    """
 
     def __init__(
         self,
@@ -227,6 +308,10 @@ class PublicTreeBestResponse:
         self._nodes = 0
         self._decision_mass = 0.0
         self._missing_mass = 0.0
+        self._selfplay_mass = 0.0
+        self._selfplay_missing = 0.0
+        self._terms = 0.0
+        self._gains: dict[tuple[Street, str], _NodeGain] = {}
         # Last, because it needs the rules, the action model and the board plan.
         self._branches_per_walk = self._count_flop_deals()
 
@@ -261,26 +346,31 @@ class PublicTreeBestResponse:
                         range(len(walks)),
                     )
                 )
-            self._branches_done = sum(part[4] for part in parts)
+            self._branches_done = sum(part.branches for part in parts)
         else:
             parts = [self.run_walk(br_seat, button) for br_seat, button in walks]
 
-        for (br_seat, button), (chips, nodes, decision, missing, _) in zip(
-            walks, parts, strict=True
-        ):
-            fraction = missing / decision if decision else 0.0
+        for (br_seat, button), part in zip(walks, parts, strict=True):
+            fraction = part.missing_mass / part.decision_mass if part.decision_mass else 0.0
             seat_results.append(
                 SeatResult(
                     br_seat=br_seat,
                     button=button,
-                    value_mbb=chips / big_blind * 1000.0,
+                    value_mbb=part.chips / big_blind * 1000.0,
                     missing_policy_mass=fraction,
+                    self_play_mbb=part.self_play_chips / big_blind * 1000.0,
+                    gain_mbb=(part.chips - part.self_play_chips) / big_blind * 1000.0,
                 )
             )
-            total_nodes += nodes
-            total_decision += decision
-            total_missing += missing
+            total_nodes += part.nodes
+            total_decision += part.decision_mass
+            total_missing += part.missing_mass
         exploitability = float(np.mean([r.value_mbb for r in seat_results]))
+        decomposition = (
+            _summarise_decomposition(walks, parts, seat_results, big_blind)
+            if self._config.decompose
+            else None
+        )
         return PublicBRResult(
             exploitability_mbb=exploitability,
             seat_results=tuple(seat_results),
@@ -289,67 +379,87 @@ class PublicTreeBestResponse:
             num_flops=len(self._plan.flops),
             elapsed_s=time.perf_counter() - start,
             config=self._config,
+            decomposition=decomposition,
         )
 
-    def responder_values(self, br_seat: int, button: int, opp_reach: np.ndarray) -> np.ndarray:
-        """Responder's per-combo counterfactual chip values against ``opp_reach``.
+    def walk_values(
+        self, br_seat: int, button: int, opp_reach: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Responder's per-combo (best-response, self-play) chip values vs ``opp_reach``.
 
         ``values[h]`` sums utility over every opponent combo weighted by
         ``opp_reach`` and every sampled board branch; dividing by the
-        compatible opponent mass turns it into a per-hand expectation. Exposed
-        for validation against the scalar reference game and for range-level
-        analysis; :meth:`evaluate` is the standard entry point.
+        compatible opponent mass turns it into a per-hand expectation. The
+        second vector is the same sum with the responder following the
+        blueprint too. Exposed for validation against the scalar reference
+        game; :meth:`evaluate` is the standard entry point.
         """
         self._br_seat = br_seat
         self._nodes = 0
         self._decision_mass = 0.0
         self._missing_mass = 0.0
+        self._selfplay_mass = 0.0
+        self._selfplay_missing = 0.0
+        self._terms = 0.0
+        self._gains = {}
         root = self._rules.create_initial_state(
             starting_stack=self._starting_stack, hole_cards=self._dummy_holes, button=button
         )
-        return self._walk(root, opp_reach.astype(np.float64))
+        own_reach = np.ones(NUM_COMBOS, dtype=np.float64)
+        return self._walk(root, opp_reach.astype(np.float64), own_reach, "")
 
-    def _run(self, br_seat: int, button: int) -> float:
-        values = self.responder_values(br_seat, button, np.ones(NUM_COMBOS, dtype=np.float64))
-        return float(values.sum()) / (NUM_COMBOS * _NUM_OPP_DEALS)
+    def responder_values(self, br_seat: int, button: int, opp_reach: np.ndarray) -> np.ndarray:
+        """Best-response half of :meth:`walk_values`."""
+        return self.walk_values(br_seat, button, opp_reach)[0]
 
-    def run_walk(self, br_seat: int, button: int) -> tuple[float, int, float, float, int]:
-        """One walk's chips plus the telemetry the aggregate needs.
+    def run_walk(self, br_seat: int, button: int) -> WalkResult:
+        """One walk's values plus the telemetry the aggregate needs.
 
         Public because a worker process runs exactly this and nothing else, and
         because returning the raw parts keeps the value/mass arithmetic in ONE
         place -- the serial and parallel paths then cannot drift.
 
-        The trailing branch count is what lets the PARALLEL path report a bar at
-        all: a walk in another process shares no counter with this one, but it
-        can say what it cost on the way back, and every walk costs the same.
+        The branch count is what lets the PARALLEL path report a bar at all: a
+        walk in another process shares no counter with this one, but it can say
+        what it cost on the way back, and every walk costs the same.
         """
         before = self._branches_done
-        chips = self._run(br_seat, button)
-        return (
-            chips,
-            self._nodes,
-            self._decision_mass,
-            self._missing_mass,
-            self._branches_done - before,
+        best, self_play = self.walk_values(br_seat, button, np.ones(NUM_COMBOS, dtype=np.float64))
+        measure = NUM_COMBOS * _NUM_OPP_DEALS
+        return WalkResult(
+            chips=float(best.sum()) / measure,
+            self_play_chips=float(self_play.sum()) / measure,
+            terms_chips=self._terms / measure,
+            nodes=self._nodes,
+            decision_mass=self._decision_mass,
+            missing_mass=self._missing_mass,
+            selfplay_mass=self._selfplay_mass,
+            selfplay_missing=self._selfplay_missing,
+            branches=self._branches_done - before,
+            gains=self._gains if self._config.decompose else None,
         )
 
-    def _walk(self, state: GameState, opp_reach: np.ndarray) -> np.ndarray:
-        """Responder's per-combo counterfactual values under best play below ``state``."""
+    def _walk(
+        self, state: GameState, opp_reach: np.ndarray, own_reach: np.ndarray, line: str
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """(best-response, self-play) per-combo values below ``state``.
+
+        ``line`` is the preflop betting line a postflop node descends from, for
+        attribution only. The two returned arrays may be one object at a
+        terminal; callers that modify in place apply the same mask to both.
+        """
         self._nodes += 1
         if not opp_reach.any():
-            return np.zeros(NUM_COMBOS, dtype=np.float64)
+            return np.zeros(NUM_COMBOS, dtype=np.float64), np.zeros(NUM_COMBOS, dtype=np.float64)
         if state.is_terminal:
-            return self._terminal_values(state, opp_reach)
+            values = self._terminal_values(state, opp_reach)
+            return values, values
         if len(state.board) < state.street.board_card_count:
-            return self._deal_values(state, opp_reach)
+            return self._deal_values(state, opp_reach, own_reach, line)
         legal = self._rules.get_legal_actions(state, self._action_model)
         if state.current_player == self._br_seat:
-            children = [
-                self._walk(self._rules.apply_action(state, action), opp_reach) for action in legal
-            ]
-            return np.maximum.reduce(children)
-        return self._opponent_values(state, legal, opp_reach)
+            return self._responder_values(state, legal, opp_reach, own_reach, line)
+        return self._opponent_values(state, legal, opp_reach, own_reach, line)
 
     def _terminal_values(self, state: GameState, opp_reach: np.ndarray) -> np.ndarray:
         if state.ended_by_fold:
@@ -376,9 +486,12 @@ class PublicTreeBestResponse:
             values += child
         return values
 
-    def _deal_values(self, state: GameState, opp_reach: np.ndarray) -> np.ndarray:
+    def _deal_values(
+        self, state: GameState, opp_reach: np.ndarray, own_reach: np.ndarray, line: str
+    ) -> tuple[np.ndarray, np.ndarray]:
         first_to_act = 1 - state.button_position
-        values = np.zeros(NUM_COMBOS, dtype=np.float64)
+        best = np.zeros(NUM_COMBOS, dtype=np.float64)
+        self_play = np.zeros(NUM_COMBOS, dtype=np.float64)
         # The FLOP deal only -- an empty board. It is the outermost branching in
         # the whole walk, so the counter fires `num_flops` times per walk rather
         # than once per node, and costs nothing measurable. Turn and river deals
@@ -389,6 +502,8 @@ class PublicTreeBestResponse:
         # and while this was tied to `on_branch` it measured zero and taught the
         # next evaluation nothing.
         top_level = not state.board
+        if top_level:
+            line = state.normalized_betting_sequence()
         for cards, weight in self._plan.deal_options(state.board):
             block = blocked_combos(cards)
             child_reach = np.where(block, 0.0, opp_reach) * weight
@@ -403,9 +518,11 @@ class PublicTreeBestResponse:
                     to_call=0,
                     last_aggressor=None,
                 )
-                child = self._walk(child_state, child_reach)
-                child[block] = 0.0
-                values += child
+                child_best, child_self = self._walk(child_state, child_reach, own_reach, line)
+                child_best[block] = 0.0
+                child_self[block] = 0.0
+                best += child_best
+                self_play += child_self
             if top_level:
                 self._branches_done += 1
                 # Silent until the denominator is known -- measured by a walk of
@@ -414,7 +531,7 @@ class PublicTreeBestResponse:
                 # a growing one a bar that moves backwards.
                 if self._on_branch is not None and self._branches_per_walk:
                     self._on_branch(self._branches_done, self.branch_total)
-        return values
+        return best, self_play
 
     def _flop_deals_below(self, state: GameState) -> int:
         """Top-level flop branches in the tree below ``state``, walked structurally.
@@ -455,12 +572,28 @@ class PublicTreeBestResponse:
         return 4 * self._branches_per_walk
 
     def _opponent_values(
-        self, state: GameState, legal: tuple[Action, ...], opp_reach: np.ndarray
-    ) -> np.ndarray:
+        self,
+        state: GameState,
+        legal: tuple[Action, ...],
+        opp_reach: np.ndarray,
+        own_reach: np.ndarray,
+        line: str,
+    ) -> tuple[np.ndarray, np.ndarray]:
         sigma, missing = self._policy_matrix(state, legal)
         self._decision_mass += float(opp_reach.sum())
         self._missing_mass += float(opp_reach[missing].sum())
-        values = np.zeros(NUM_COMBOS, dtype=np.float64)
+        if self._config.decompose:
+            # The self-play view of the same fallback: what fraction of the
+            # opponent decisions the BLUEPRINT actually brings the responder to
+            # land on a uniform row. The all-branches figure above counts
+            # subtrees the responder explores and the blueprint never enters.
+            alive = self._alive(state)
+            self._selfplay_mass += float((own_reach * nonblocking_mass(opp_reach))[alive].sum())
+            if missing.any():
+                fallback = own_reach * nonblocking_mass(np.where(missing, opp_reach, 0.0))
+                self._selfplay_missing += float(fallback[alive].sum())
+        best = np.zeros(NUM_COMBOS, dtype=np.float64)
+        self_play = np.zeros(NUM_COMBOS, dtype=np.float64)
         for a_idx, action in enumerate(legal):
             child = self._rules.apply_action(state, action)
             child_reach = opp_reach * sigma[:, a_idx]
@@ -471,8 +604,125 @@ class PublicTreeBestResponse:
                 # cannot know the policy, is one the bar can never reach.
                 self._skip_branches(self._flop_deals_below(child))
                 continue
-            values += self._walk(child, child_reach)
-        return values
+            child_best, child_self = self._walk(child, child_reach, own_reach, line)
+            best += child_best
+            self_play += child_self
+        return best, self_play
+
+    def _responder_values(
+        self,
+        state: GameState,
+        legal: tuple[Action, ...],
+        opp_reach: np.ndarray,
+        own_reach: np.ndarray,
+        line: str,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Max over actions for the responder; the blueprint's mix for self-play.
+
+        Every action is walked whatever the blueprint's own probability: the
+        best response does not depend on the responder's reach, only its
+        attribution does.
+        """
+        sigma, _ = self._policy_matrix(state, legal)
+        best_children = np.empty((NUM_COMBOS, len(legal)), dtype=np.float64)
+        self_children = np.empty((NUM_COMBOS, len(legal)), dtype=np.float64)
+        for a_idx, action in enumerate(legal):
+            child = self._rules.apply_action(state, action)
+            child_best, child_self = self._walk(child, opp_reach, own_reach * sigma[:, a_idx], line)
+            best_children[:, a_idx] = child_best
+            self_children[:, a_idx] = child_self
+        if self._config.in_abstraction:
+            choice = self._bucket_choice(state, best_children)
+        else:
+            choice = best_children.argmax(axis=1)
+        best = np.take_along_axis(best_children, choice[:, None], axis=1)[:, 0]
+        self_play = np.einsum("ij,ij->i", sigma, self_children)
+        if self._config.decompose:
+            self._record_gain(
+                state, legal, line, opp_reach, own_reach, sigma, best_children, choice, best
+            )
+        return best, self_play
+
+    def _bucket_choice(self, state: GameState, best_children: np.ndarray) -> np.ndarray:
+        """One action per bucket: argmax of the bucket-summed counterfactual values.
+
+        The values already aggregate every sampled runout below this node, and
+        a bucket here is a function of the cards face up at this node, so the
+        maximisation is joint over exactly the futures the responder cannot
+        yet distinguish -- being told your bucket is not being told the river.
+        Blocked combos (bucket -1) are excluded from the sums; their values are
+        zeroed at the deal above on the way up regardless.
+        """
+        buckets = self._responder_buckets(state.board, state.street)
+        alive = buckets >= 0
+        live = buckets[alive]
+        count = int(live.max()) + 1
+        totals = np.stack(
+            [
+                np.bincount(live, weights=best_children[alive, a], minlength=count)
+                for a in range(best_children.shape[1])
+            ],
+            axis=1,
+        )
+        choice = np.zeros(NUM_COMBOS, dtype=np.int64)
+        choice[alive] = totals.argmax(axis=1)[live]
+        return choice
+
+    def _responder_buckets(self, board: tuple[Card, ...], street: Street) -> np.ndarray:
+        """What the constrained responder is allowed to tell apart: its own bucket.
+
+        A seam distinct from :meth:`_bucket_vector` so a test can give the
+        responder a coarser partition while the OPPONENT's policy lookup keeps
+        the real one.
+        """
+        return self._bucket_vector(board, street)
+
+    def _record_gain(
+        self,
+        state: GameState,
+        legal: tuple[Action, ...],
+        line: str,
+        opp_reach: np.ndarray,
+        own_reach: np.ndarray,
+        sigma: np.ndarray,
+        best_children: np.ndarray,
+        choice: np.ndarray,
+        best: np.ndarray,
+    ) -> None:
+        """One node's deviation terms, masked to combos alive on this board.
+
+        A combo blocked by the board still carries a (meaningless) value inside
+        the subtree -- it is zeroed at the deal on the way up -- so its term
+        must not enter the sum here, where nothing above will cancel it.
+        """
+        alive = self._alive(state)
+        terms = own_reach * (best - np.einsum("ij,ij->i", sigma, best_children))
+        terms[~alive] = 0.0
+        weight = own_reach * nonblocking_mass(opp_reach)
+        weight[~alive] = 0.0
+        key = (state.street, state.normalized_betting_sequence())
+        entry = self._gains.get(key)
+        if entry is None:
+            width = len(legal)
+            entry = self._gains[key] = _NodeGain(
+                tokens=tuple(action.normalize(state.pot) for action in legal),
+                types=tuple(action.type.name for action in legal),
+                line=key[1] if state.street == Street.PREFLOP else line,
+                blueprint_mix=np.zeros(width),
+                br_mix=np.zeros(width),
+                gain_by_br_action=np.zeros(width),
+            )
+        total = float(terms.sum())
+        self._terms += total
+        entry.gain += total
+        entry.mass += float(weight.sum())
+        entry.blueprint_mix += weight @ sigma
+        entry.br_mix += np.bincount(choice, weights=weight, minlength=len(legal))
+        entry.gain_by_br_action += np.bincount(choice, weights=terms, minlength=len(legal))
+
+    def _alive(self, state: GameState) -> np.ndarray:
+        """Combos not sharing a card with the board at ``state``."""
+        return self._bucket_vector(state.board, state.street) >= 0
 
     def _skip_branches(self, branches: int) -> None:
         if branches <= 0:
@@ -489,7 +739,9 @@ class PublicTreeBestResponse:
         The per-bucket rows depend only on the betting context, never the board,
         so they are built densely over all buckets once per context and every
         node with that context (one per sampled board) reduces to a vectorized
-        gather through the board's bucket vector.
+        gather through the board's bucket vector. The eval-time transform
+        (threshold / purify) is applied to the dense rows, so it costs nothing
+        per node.
         """
         sequence = state.normalized_betting_sequence()
         spr = min(state.stacks) / state.pot if state.pot > 0 else 0
@@ -506,9 +758,10 @@ class PublicTreeBestResponse:
         )
         cached = self._policy_cache.get(context_key)
         if cached is None:
-            cached = blueprint_policy_table(
+            rows, row_missing = blueprint_policy_table(
                 self._policy_source.rows_at(state), state, self._rules, legal
             )
+            cached = (transform_policy_rows(rows, row_missing, self._config), row_missing)
             self._policy_cache[context_key] = cached
         rows, row_missing = cached
         bucket_vec = self._bucket_vector(state.board, state.street)
@@ -541,6 +794,151 @@ class PublicTreeBestResponse:
             cached = RunoutEvaluator(board)
             self._showdown_cache[cache_key] = cached
         return cached
+
+
+def transform_policy_rows(
+    rows: np.ndarray, missing: np.ndarray, config: PublicBRConfig
+) -> np.ndarray:
+    """The strategy under measurement after the eval-time transform, row by row.
+
+    Trained rows only: a fallback row is uniform because nothing was learned
+    there, and purifying it would field "always the first action" (fold) in
+    place of the blueprint's real behaviour. A thresholded row that zeroes out
+    entirely (every action below the cut) falls back to its argmax rather than
+    to NaN.
+    """
+    if not config.purify and config.policy_threshold <= 0.0:
+        return rows
+    out = rows.copy()
+    present = ~missing
+    if config.purify:
+        one_hot = np.zeros_like(out[present])
+        one_hot[np.arange(one_hot.shape[0]), out[present].argmax(axis=1)] = 1.0
+        out[present] = one_hot
+        return out
+    cut = out[present]
+    cut[cut < config.policy_threshold] = 0.0
+    totals = cut.sum(axis=1)
+    empty = totals <= 0.0
+    if empty.any():
+        cut[empty] = 0.0
+        cut[np.nonzero(empty)[0], rows[present][empty].argmax(axis=1)] = 1.0
+        totals[empty] = 1.0
+    out[present] = cut / totals[:, None]
+    return out
+
+
+def _summarise_decomposition(
+    walks: list[tuple[int, int]],
+    parts: list[WalkResult],
+    seats: list[SeatResult],
+    big_blind: float,
+) -> dict[str, Any]:
+    """The gain attribution, in mbb per hand, as it is recorded.
+
+    Aggregates are MEANS over the four walks, so ``by_street`` sums to
+    ``exploitability_mbb``; a node or line entry carries its walk-level
+    ``gain_mbb`` (what that responder takes there) and ``headline_mbb``, its
+    quarter share of the reported number. ``identity`` is the check that the
+    terms sum to ``gain_mbb`` walk by walk -- the one number that says the
+    attribution is exact rather than approximate.
+    """
+    per_hand = 1000.0 / (NUM_COMBOS * _NUM_OPP_DEALS * big_blind)
+    share = 1.0 / len(walks)
+    streets = [str(street) for street in Street]
+    by_street = dict.fromkeys(streets, 0.0)
+    by_line: dict[str, dict[str, Any]] = {}
+    by_type: dict[str, dict[str, float]] = {street: {} for street in streets}
+    nodes: list[dict[str, Any]] = []
+    per_walk: list[dict[str, Any]] = []
+    selfplay_mass = sum(part.selfplay_mass for part in parts)
+    selfplay_missing = sum(part.selfplay_missing for part in parts)
+    for (br_seat, button), part, seat in zip(walks, parts, seats, strict=True):
+        walk_streets = dict.fromkeys(streets, 0.0)
+        for (street, sequence), entry in (part.gains or {}).items():
+            name = str(street)
+            gain = entry.gain * per_hand
+            walk_streets[name] += gain
+            line = by_line.setdefault(
+                entry.line,
+                {"line": entry.line, "headline_mbb": 0.0, "by_street": dict.fromkeys(streets, 0.0)},
+            )
+            line["headline_mbb"] += gain * share
+            line["by_street"][name] += gain * share
+            for kind, amount in zip(entry.types, entry.gain_by_br_action, strict=True):
+                by_type[name][kind] = (
+                    by_type[name].get(kind, 0.0) + float(amount) * per_hand * share
+                )
+            mass = entry.mass
+            nodes.append(
+                {
+                    "br_seat": br_seat,
+                    "button": button,
+                    "street": name,
+                    "sequence": sequence,
+                    "line": entry.line,
+                    "gain_mbb": gain,
+                    "headline_mbb": gain * share,
+                    "reach": mass / (NUM_COMBOS * _NUM_OPP_DEALS),
+                    "blueprint": {
+                        token: float(p / mass) if mass else 0.0
+                        for token, p in zip(entry.tokens, entry.blueprint_mix, strict=True)
+                    },
+                    "best_response": {
+                        token: float(p / mass) if mass else 0.0
+                        for token, p in zip(entry.tokens, entry.br_mix, strict=True)
+                    },
+                    "gain_by_br_action_mbb": {
+                        token: float(g) * per_hand
+                        for token, g in zip(entry.tokens, entry.gain_by_br_action, strict=True)
+                    },
+                }
+            )
+        for name in streets:
+            by_street[name] += walk_streets[name] * share
+        terms_mbb = part.terms_chips / big_blind * 1000.0
+        per_walk.append(
+            {
+                "br_seat": br_seat,
+                "button": button,
+                "br_value_mbb": seat.value_mbb,
+                "self_play_mbb": seat.self_play_mbb,
+                "gain_mbb": seat.gain_mbb,
+                "terms_mbb": terms_mbb,
+                "identity_gap_mbb": seat.gain_mbb - terms_mbb,
+                "by_street": walk_streets,
+            }
+        )
+    nodes.sort(key=lambda node: -node["gain_mbb"])
+    lines = sorted(by_line.values(), key=lambda item: -item["headline_mbb"])
+
+    def mean_over(predicate: Callable[[tuple[int, int]], bool]) -> float:
+        picked = [seat.gain_mbb for walk, seat in zip(walks, seats, strict=True) if predicate(walk)]
+        return float(np.mean(picked)) if picked else 0.0
+
+    return {
+        "form": (
+            "sum over responder nodes of own_reach(blueprint) * "
+            "[value(best response) - sum_a sigma(a) value_a(best response)]"
+        ),
+        "identity": {
+            "max_abs_gap_mbb": max(abs(walk["identity_gap_mbb"]) for walk in per_walk),
+            "per_walk": per_walk,
+        },
+        "by_street": by_street,
+        "by_seat": {str(seat): mean_over(lambda w, s=seat: w[0] == s) for seat in (0, 1)},
+        "by_button": {str(b): mean_over(lambda w, b=b: w[1] == b) for b in (0, 1)},
+        "by_position": {
+            "button": mean_over(lambda w: w[0] == w[1]),
+            "big_blind": mean_over(lambda w: w[0] != w[1]),
+        },
+        "by_br_action_type": by_type,
+        "by_preflop_line": lines[:TOP_LINES],
+        "top_nodes": nodes[:TOP_NODES],
+        "nodes_with_gain": sum(1 for node in nodes if node["gain_mbb"] > 0.0),
+        "responder_nodes": len(nodes),
+        "selfplay_missing_policy_mass": selfplay_missing / selfplay_mass if selfplay_mass else 0.0,
+    }
 
 
 """How long the drainer waits on an empty queue before checking whether the
@@ -608,7 +1006,7 @@ def _walk_worker(
     button: int,
     reports: Any = None,
     walk: int = 0,
-) -> tuple[float, int, float, float, int]:
+) -> WalkResult:
     """One (responder seat, button) walk, in its own process.
 
     Rebuilds the blueprint rather than receiving it: the solver holds a

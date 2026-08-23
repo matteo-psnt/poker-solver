@@ -89,3 +89,44 @@ class TestParallelMatchesSerial:
         # any drift means work was duplicated, dropped, or reordered.
         assert parallel == serial
         assert parallel_nodes == serial_nodes
+
+
+class TestResponderAndTransformKnobs:
+    """A constrained responder or a transformed blueprint is a different number,
+    so it must split the tier -- and only when set, so old rows keep theirs."""
+
+    def test_defaults_add_nothing(self):
+        from src.pipeline.evaluation import ledger as eval_ledger
+
+        knobs = eval_ledger.build_exact_br_knobs_from_params(
+            num_flops=4, num_turns=2, num_rivers=2, board_seed=7
+        )
+        assert set(knobs) == {"num_flops", "num_turns", "num_rivers", "base_seed"}
+
+    def test_each_variant_splits_the_tier(self):
+        from src.pipeline.evaluation import ledger as eval_ledger
+        from src.pipeline.evaluation.ledger.tiers import tier_key
+
+        def knobs_with(**variant):
+            return eval_ledger.build_exact_br_knobs_from_params(
+                num_flops=4, num_turns=2, num_rivers=2, board_seed=7, **variant
+            )
+
+        plain = {"method": "exact_br", "knobs": knobs_with()}
+        variants = [
+            knobs_with(in_abstraction=True),
+            knobs_with(policy_threshold=0.05),
+            knobs_with(purify=True),
+        ]
+        keys = {tier_key({"method": "exact_br", "knobs": knobs}) for knobs in variants}
+        assert len(keys) == 3
+        assert tier_key(plain) not in keys
+
+    def test_purify_overrides_threshold(self):
+        from src.pipeline.evaluation import ledger as eval_ledger
+
+        knobs = eval_ledger.build_exact_br_knobs_from_params(
+            num_flops=4, num_turns=2, num_rivers=2, board_seed=7, purify=True, policy_threshold=0.1
+        )
+        assert knobs.get("purify") is True
+        assert "policy_threshold" not in knobs

@@ -31,6 +31,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--limit", type=int, default=25, help="Show only the last N rows (0 = all)."
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Carry each row's FULL results (per-seat values, decomposition, policy "
+        "profile) instead of the index's four summary fields.",
+    )
 
 
 class LedgerRow(BaseModel):
@@ -97,6 +103,11 @@ def _list(args: argparse.Namespace, root: Path) -> LedgerPayload:
     matched = len(records)
     if args.limit > 0:
         records = records[-args.limit :]
+    if getattr(args, "full", False):
+        # The index row keeps four summary fields; the document has the rest.
+        # Loaded only for the rows that survived the filters, after paging.
+        for record in records:
+            record["results"] = eval_ledger.load_payload(record, root).get("results", {})
     return LedgerPayload(
         ledger=str(ledger_path),
         matched=matched,
