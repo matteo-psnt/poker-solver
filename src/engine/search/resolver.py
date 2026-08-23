@@ -95,6 +95,18 @@ class HUResolver:
         if self._ranges is None:
             self._ranges = infer_ranges(state, self.blueprint)
         self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
+        self.observe_public(state, action)
+
+    def observe_public(self, state: GameState, action: Action) -> None:
+        """Advance the on-tree shadow for a realized action, and nothing else.
+
+        Split out because a driver that tracks ranges ITSELF never calls
+        :meth:`observe` -- `ResolvedOpponent` runs its own history replay and
+        passes ranges into `solve_strategy_matrix`, so wiring the shadow only
+        into `observe` left it never advanced on exactly the path the off-tree
+        measurement runs. The tell was an LBR re-run reproducing +2567.9 mbb/hand
+        BIT-IDENTICALLY: the strategy had not changed at all.
+        """
         self._shadow.observe(state, action)
 
     def act(self, state: GameState, *, time_budget_ms: int | None = None) -> Action:

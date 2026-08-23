@@ -93,27 +93,54 @@ class TreeShadow:
         assert self._shadow is not None
 
         # A new street was dealt since the last observe. Street advancement is
-        # driven by action TYPE, which the proxy preserves, so only the public
-        # cards differ.
+        # driven by action TYPE, which the proxy preserves, so ordinarily only
+        # the public cards differ -- but only while the two streets agree. They
+        # can come apart (an all-in on one side, a proxy that closed betting on
+        # the other), and mirroring across that mismatch asks for a board of the
+        # wrong length: measured as "Board should have 3 cards on flop, got 0".
         if self._diverged and self._shadow.board != real_state.board:
-            self._shadow = self._shadow.replace(board=real_state.board)
+            if self._shadow.street is not real_state.street:
+                self._broken = True
+                return
+            try:
+                self._shadow = self._shadow.replace(board=real_state.board)
+            except (ValueError, KeyError, AssertionError):
+                self._broken = True
+                return
 
         shadow = self._shadow
-        proxy = self._proxy(shadow, action)
-        if proxy is None:
+        if shadow.is_terminal:
+            # The real hand outlived the shadow, so there is nothing left to
+            # follow. `ShadowTracker` rules this out for the EXPLOITER by a
+            # structural argument (its invariant 3); here the opponent's sizes
+            # are arbitrary, so it is simply possible and must be survivable.
             self._broken = True
             return
 
-        if not self._diverged and proxy == action:
-            self._shadow = real_state.apply_action(action, self._rules)
-            return
-
-        legal = self._rules.get_legal_actions(shadow, action_model=self._action_model)
-        if proxy not in legal:
+        # ADVISORY, so it degrades instead of raising. Everything this touches
+        # -- proxy selection, legality, applying an action -- is reachable with
+        # an arbitrary opponent size behind it, and the caller has a correct
+        # answer without any of it: the real state, which is what `state_for`
+        # returns once broken. A shadow that raised would turn a lookup that
+        # merely loses sharpness into a dead evaluation.
+        try:
+            proxy = self._proxy(shadow, action)
+            if proxy is None:
+                self._broken = True
+                return
+            if not self._diverged and proxy == action:
+                self._shadow = real_state.apply_action(action, self._rules)
+                return
+            legal = self._rules.get_legal_actions(shadow, action_model=self._action_model)
+            if proxy not in legal:
+                self._broken = True
+                return
+            advanced = shadow.apply_action(proxy, self._rules)
+        except (ValueError, KeyError, AssertionError):
             self._broken = True
             return
         self._diverged = True
-        self._shadow = shadow.apply_action(proxy, self._rules)
+        self._shadow = advanced
 
     def _proxy(self, shadow: GameState, action: Action) -> Action | None:
         """The on-menu action the shadow takes in place of ``action``."""
@@ -121,7 +148,10 @@ class TreeShadow:
             return action
         if action.type == ActionType.ALL_IN:
             # Normalises to the pot-independent token; the amount never leaks.
-            return all_in(shadow.stacks[shadow.current_player])
+            # A zero stack means the shadow player is already all-in, so there
+            # is no jam left to mirror -- measured, not hypothetical.
+            stack = shadow.stacks[shadow.current_player]
+            return all_in(stack) if stack > 0 else None
         # Weighted by construction; take the heaviest so one hand replays the
         # same way twice. A resolver that sampled here would make its own
         # strategy depend on an RNG draw the opponent could not observe.
