@@ -20,6 +20,7 @@ from src.engine.search.range_inference import (
 )
 from src.engine.search.subgame_cfr import Continuation, solve_subgame
 from src.engine.search.tree_builder import build_local_tree
+from src.engine.search.tree_shadow import TreeShadow
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 from src.shared.numeric import NORMALIZE_EPS
 
@@ -76,6 +77,9 @@ class HUResolver:
         # Decisions where solve() raised and act() fell back to the blueprint.
         # Harnesses read this directly; the warning below is for humans only.
         self.fallback_count: int = 0
+        # An on-tree parallel state, so ONE off-menu size from the opponent does
+        # not turn every later blueprint lookup on the hand into a uniform row.
+        self._shadow = TreeShadow(rules, action_model)
 
     def observe(self, state: GameState, action: Action) -> None:
         """Bayes-update the acting player's range for a realized ``action``.
@@ -91,6 +95,7 @@ class HUResolver:
         if self._ranges is None:
             self._ranges = infer_ranges(state, self.blueprint)
         self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
+        self._shadow.observe(state, action)
 
     def act(self, state: GameState, *, time_budget_ms: int | None = None) -> Action:
         """Resolve local subgame and sample an action at the root."""
@@ -224,6 +229,10 @@ class HUResolver:
         share a row — cached by infoset key (a few hundred lookups, not 1326).
         Board-blocked combos keep a uniform placeholder row.
         """
+        lookup = self._lookup_state(state, list(actions))
+        if lookup is not state:
+            actions = list(self.rules.get_legal_actions(lookup, action_model=self.action_model))
+            state = lookup
         actor = state.current_player
         blocked = blocked_combos(state.board)
         matrix = np.full((NUM_COMBOS, len(actions)), 1.0 / len(actions), dtype=np.float64)
@@ -261,6 +270,26 @@ class HUResolver:
         uniform = np.full(mixed.shape[1], 1.0 / mixed.shape[1])
         return np.where(totals > NORMALIZE_EPS, mixed / np.maximum(totals, NORMALIZE_EPS), uniform)
 
+    def _lookup_state(self, state: GameState, actions: list[Action]) -> GameState:
+        """Where to ask the blueprint about ``state``, given ``actions``.
+
+        The shadow only helps if its menu lines up with the real one position
+        for position -- the row is returned over the CALLER's action list. Types
+        stay in lockstep because street closure and raise counts are type
+        driven, so a length-and-type check is the whole guard; anything else
+        falls back to the real state, i.e. to the behaviour before the shadow
+        existed, rather than silently pairing two different menus.
+        """
+        shadow = self._shadow.state_for(state)
+        if shadow is state:
+            return state
+        shadow_actions = self.rules.get_legal_actions(shadow, action_model=self.action_model)
+        if len(shadow_actions) != len(actions):
+            return state
+        if any(a.type is not b.type for a, b in zip(actions, shadow_actions, strict=True)):
+            return state
+        return shadow
+
     def _blueprint_strategy(
         self,
         state: GameState,
@@ -277,9 +306,15 @@ class HUResolver:
             return np.array([], dtype=np.float64)
 
         source = self._policy_source
-        bucket = source.bucket_for(state, state.current_player)
+        lookup = self._lookup_state(state, actions)
+        if lookup is not state:
+            # Ask over the SHADOW's own menu; `_lookup_state` has already
+            # checked it lines up with the caller's position for position, so
+            # the row it returns is still indexed by the caller's actions.
+            actions = list(self.rules.get_legal_actions(lookup, action_model=self.action_model))
+        bucket = source.bucket_for(lookup, lookup.current_player)
         try:
-            infoset = source.infoset_at(state, bucket)
+            infoset = source.infoset_at(lookup, bucket)
         except KeyError:
             # Off-tree, legitimately: the resolver plays real states and a real
             # opponent can bet a size the abstraction never enumerated. The tree
