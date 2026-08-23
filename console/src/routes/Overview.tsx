@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 
+/** How many finished tasks the Now page lists. Mirrors `views.LIVE_LIMIT`. */
+const RECENT = 10;
+
 /**
  * The page the console exists for: what is happening, and did anything die.
  *
@@ -101,29 +104,34 @@ export function Overview() {
               </tr>
             </thead>
             <tbody>
-              {[...(tasksData?.rows ?? [])].reverse().map((row) => (
-                <tr key={`${row.task_id}-${row.attempt}`}>
-                  <Td mono title={row.task_id}>
-                    <Link
-                      to="/tasks/$taskId"
-                      params={{ taskId: row.task_id }}
-                      className="hover:underline"
-                    >
-                      {taskLabel(row.task_id)}
-                    </Link>
-                  </Td>
-                  <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
-                  <Td>
-                    <StatusBadge state={row.cause} />
-                  </Td>
-                  <Td right className="text-[var(--fg-muted)]">
-                    {span(row.started_at, row.ended_at, now)}
-                  </Td>
-                  <Td right className="text-[var(--fg-faint)]" title={row.ended_at ?? undefined}>
-                    {row.ended_at ? since(row.ended_at) : "—"}
-                  </Td>
-                </tr>
-              ))}
+              {/* The part carries every RUNNING row too, for the bars above;
+                  this list is the deaths, so it is the newest ten. */}
+              {(tasksData?.rows ?? [])
+                .slice(-RECENT)
+                .reverse()
+                .map((row) => (
+                  <tr key={`${row.task_id}-${row.attempt}`}>
+                    <Td mono title={row.task_id}>
+                      <Link
+                        to="/tasks/$taskId"
+                        params={{ taskId: row.task_id }}
+                        className="hover:underline"
+                      >
+                        {taskLabel(row.task_id)}
+                      </Link>
+                    </Td>
+                    <Td className="text-[var(--fg-muted)]">{row.what || row.op || "—"}</Td>
+                    <Td>
+                      <StatusBadge state={row.cause} />
+                    </Td>
+                    <Td right className="text-[var(--fg-muted)]">
+                      {span(row.started_at, row.ended_at, now)}
+                    </Td>
+                    <Td right className="text-[var(--fg-faint)]" title={row.ended_at ?? undefined}>
+                      {row.ended_at ? since(row.ended_at) : "—"}
+                    </Td>
+                  </tr>
+                ))}
             </tbody>
           </Table>
         )}

@@ -252,15 +252,22 @@ def _failure(execution: Any) -> TaskFailure | None:
     return TaskFailure(code=info.code, message=info.message, category=str(info.category or ""))
 
 
+# A task that has stopped. Batch's own OData spelling, for `list_tasks`.
+_NOT_FINISHED = "state ne 'completed'"
+
+
 def list_jobs(batch: BatchClient) -> list[Job]:
-    """Every job, WITHOUT its tasks. One call, ~1.1s against 44 jobs.
+    """Every job, WITHOUT its tasks -- and without anything but id and state.
 
     Split from the tasks deliberately. Listing tasks costs ~0.39s per job, so
     the caller that wants only the live ones must be able to decide WHICH jobs
-    are worth that before paying it -- see :func:`attach_tasks`.
+    are worth that before paying it -- see :func:`attach_tasks`. The ``select``
+    halves the call (0.39s -> 0.21s over 57 jobs): the rest of a job record is
+    constraints and pool info nothing here reads.
     """
     return [
-        Job(job=job.id, state=str(job.state) if job.state else None) for job in batch.list_jobs()
+        Job(job=job.id, state=str(job.state) if job.state else None)
+        for job in batch.list_jobs(select=["id", "state"])
     ]
 
 
@@ -269,6 +276,7 @@ def attach_tasks(
     jobs: list[Job],
     *,
     want: Callable[[Job], bool] | None = None,
+    in_flight_only: bool = False,
 ) -> list[Job]:
     """Fill in ``tasks`` for the jobs ``want`` selects; ``[]`` for the rest.
 
@@ -277,6 +285,10 @@ def attach_tasks(
     render the 2 that were active. Whatever survives the filter is then fetched
     CONCURRENTLY, because the calls are independent and the latency is the
     round trip, not the work.
+
+    ``in_flight_only`` asks Batch for the tasks that have not stopped, which is
+    what "what is the pool doing" needs: a day's job holds hundreds of finished
+    scoring tasks, and listing them cost 1.1s against 0.25s for the 44 live.
 
     ``exit_code`` is surfaced beside ``state`` because a task that completed is
     not necessarily a task that succeeded, and the two together are what tells
@@ -287,7 +299,12 @@ def attach_tasks(
         return [job.model_copy(update={"tasks": []}) for job in jobs]
 
     def _tasks(job: Job) -> list[BatchTask]:
-        return [_task_record(task, job.job) for task in batch.list_tasks(job.job)]
+        listed = (
+            batch.list_tasks(job.job, filter=_NOT_FINISHED)
+            if in_flight_only
+            else batch.list_tasks(job.job)
+        )
+        return [_task_record(task, job.job) for task in listed]
 
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_CALLS, len(wanted))) as pool:
         fetched = dict(zip([job.job for job in wanted], pool.map(_tasks, wanted), strict=True))

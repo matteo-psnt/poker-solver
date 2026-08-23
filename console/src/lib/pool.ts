@@ -3,9 +3,9 @@ import type { Jobs, NodePhase, NodeStatus, Phase } from "@/api/types";
 /**
  * What the pool IS, rather than what the API happened to return.
  *
- * A flat list of tasks hides the three things a pool actually has, so this splits
- * it into them: NODES (real machines, each in a state, some holding a task), a
- * QUEUE (ordered, waiting for a node), and HISTORY (done, newest first).
+ * A flat list of tasks hides the two things a pool actually has, so this splits
+ * it into them: NODES (real machines, each in a state, some holding a task) and
+ * a QUEUE (ordered, waiting for a node).
  *
  * The nodes are Batch's own list, not a count drawn as hollow dots. That is the
  * difference between "7 of 7" and "7, two of them still booting" -- which is
@@ -46,7 +46,6 @@ export type Slot = { node: NodeStatus | null; task: Task | null };
 export type PoolShape = {
   slots: Slot[];
   queue: Task[];
-  history: Task[];
   /** Waiting tasks with no node idle or booting to go to: the queue cannot drain as-is. */
   starved: number;
   /** How many nodes are in each phase, for the panel's title. Zero counts are absent. */
@@ -76,10 +75,6 @@ export function poolShape(jobs: Jobs | undefined, nodes: NodeStatus[] | undefine
     .sort(
       (a, b) => at(a.created, Number.MAX_SAFE_INTEGER) - at(b.created, Number.MAX_SAFE_INTEGER),
     );
-
-  const history = tasks
-    .filter((t) => !OCCUPYING.has(t.phase) && t.phase !== WAITING)
-    .sort((a, b) => at(b.end_time, at(b.created, 0)) - at(a.end_time, at(a.created, 0)));
 
   // The join, both ways: Batch names the node on the task AND the task on the
   // node, and a freshly started task can be on one list before the other.
@@ -112,7 +107,7 @@ export function poolShape(jobs: Jobs | undefined, nodes: NodeStatus[] | undefine
   const free = (nodes ?? []).filter(
     (node) => WILL_FREE.has(node.phase) && !node.tasks.length,
   ).length;
-  return { slots, queue, history, starved: Math.max(0, queue.length - free), byPhase };
+  return { slots, queue, starved: Math.max(0, queue.length - free), byPhase };
 }
 
 /** `2h 14m`, `3m`, `just now` — how long something has been as it is. */

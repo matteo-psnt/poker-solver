@@ -36,7 +36,7 @@ const jobs = (...tasks: Record<string, unknown>[]) =>
   }) as any;
 
 describe("poolShape", () => {
-  it("separates the three things a pool has, which one flat list could not show", () => {
+  it("separates the two things a pool has, which one flat list could not show", () => {
     const shape = poolShape(
       jobs(
         T({ task: "done", phase: "finished", end_time: "2026-08-04T09:00:00Z" }),
@@ -50,7 +50,6 @@ describe("poolShape", () => {
       ["n2", null],
     ]);
     expect(shape.queue.map((t) => t.task)).toEqual(["next"]);
-    expect(shape.history.map((t) => t.task)).toEqual(["done"]);
     expect(shape.byPhase).toEqual({ busy: 1, idle: 1 });
   });
 

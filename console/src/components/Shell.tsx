@@ -1,4 +1,4 @@
-import { useJobs, usePool } from "@/api/queries";
+import { useNow } from "@/api/queries";
 import type { Phase } from "@/api/types";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -21,16 +21,23 @@ const NAV = [
  * Left rail plus a status bar that is present on every page.
  *
  * Nodes, burn rate and live task count are the things worth knowing wherever
- * you are, so they are never a click away. They reuse the same queries the
- * Overview panels use -- TanStack Query dedupes them, so this costs nothing.
+ * you are, so they are never a click away. They read the Now view, which the
+ * Overview polls too -- TanStack Query dedupes them, so this costs nothing.
  */
 /** Phases that mean a task is occupying a node or waiting for one. */
 const IN_FLIGHT = new Set<Phase>(["running", "starting", "queued"]);
 
 export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const pool = usePool();
-  const jobs = useJobs(10);
+  // The same composed view the Now page polls, not the two commands on their
+  // own: one memo, one cadence, and served stale-while-revalidate -- so the bar
+  // never waits on Azure, and a page other than Now costs the same sweep
+  // rather than two extra Batch reads of its own.
+  const view = useNow();
+  // `?.` at every step: this is the SHELL, and a 200 whose body lacks a part
+  // must take down nothing rather than every page at once.
+  const pool = { data: view.data?.parts?.pool?.payload };
+  const jobs = { data: view.data?.parts?.jobs?.payload };
 
   const nodes = pool.data?.current_dedicated_nodes ?? null;
   // `?.` past `jobs` as well as past `data`: this is the app SHELL, so a 200

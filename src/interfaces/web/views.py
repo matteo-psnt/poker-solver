@@ -49,14 +49,38 @@ def now() -> dict[str, Any]:
     cross-references the client draws -- a task onto its node, a progress bar
     onto a task -- are presentation, not data.
     """
-    return compose(
+    composed = compose(
         "view-now",
         [
             Part("pool", pool_status.COMMAND),
             Part("jobs", jobs.COMMAND, {"limit": LIVE_LIMIT}),
-            Part("tasks", tasks.COMMAND, {"limit": LIVE_LIMIT}),
+            Part("tasks", tasks.COMMAND),
         ],
     )
+    composed["parts"]["tasks"] = _live_and_recent(composed["parts"]["tasks"])
+    return composed
+
+
+def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
+    """A copy of the tasks part holding every row still running, plus the last
+    `LIVE_LIMIT`.
+
+    `--limit 10` was the wrong cut: with twenty-one tasks running, eleven of
+    them had no row to draw a progress bar from. A running task is live by
+    definition and there are never many; the recent ten are the deaths.
+
+    A COPY -- the payload is memoised and shared with `/api/tasks`.
+    """
+    payload = part.get("payload")
+    if not isinstance(payload, dict) or "rows" not in payload:
+        return part
+    rows = payload["rows"]
+    recent = rows[-LIVE_LIMIT:] if LIVE_LIMIT > 0 else rows
+    kept = [row for row in rows if not row.get("ended_at") or row in recent]
+    return {
+        **part,
+        "payload": {**payload, "rows": kept, "hidden_rows": len(rows) - len(kept)},
+    }
 
 
 def run(run_id: str) -> dict[str, Any]:

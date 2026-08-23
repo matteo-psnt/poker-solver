@@ -30,8 +30,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Include jobs whose tasks have all finished. The default hides them: a "
-        "day of scoring leaves dozens of completed single-task jobs, and burying "
+        help="Include finished jobs and finished tasks. The default shows what is in "
+        "flight: a day of scoring leaves hundreds of completed tasks, and burying "
         "the one running task in that list is how a stalled run goes unnoticed.",
     )
     parser.add_argument(
@@ -79,7 +79,12 @@ def run(args: argparse.Namespace) -> JobsPayload:
     the status screen.
     """
     client = batch.client(CloudConfig.load())
-    jobs = batch.attach_tasks(client, batch.list_jobs(client), want=None if args.all else is_active)
+    jobs = batch.attach_tasks(
+        client,
+        batch.list_jobs(client),
+        want=None if args.all else is_active,
+        in_flight_only=not args.all,
+    )
     shown = jobs if args.all else [job for job in jobs if is_live(job)]
     if args.limit > 0:
         shown = shown[-args.limit :]
