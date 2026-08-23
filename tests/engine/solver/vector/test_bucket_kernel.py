@@ -35,8 +35,7 @@ def _context(rng):
     return ordered_context(rng, ALL_COUNTS)
 
 
-@pytest.fixture(scope="module")
-def solver():
+def _build_solver() -> BucketVectorCFR:
     config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=STACK)
     rules = GameRules(small_blind=1, big_blind=2)
     tree = BettingTree(rules, ActionModel(config), starting_stack=STACK, buckets_per_street=COUNTS)
@@ -45,6 +44,11 @@ def solver():
     rng = np.random.default_rng(31)
     game = bucket_game.derive([_context(rng) for _ in range(6)], ALL_COUNTS)
     return BucketVectorCFR(compiled, game, cfr_plus=True)
+
+
+@pytest.fixture(scope="module")
+def solver():
+    return _build_solver()
 
 
 @pytest.fixture(scope="module")
@@ -129,7 +133,7 @@ class TestKernel:
     # marked slow: this is the check that the kernel solves the game it plays,
     # and it should run on every commit.
     @pytest.mark.timeout(60)
-    def test_abstract_game_exploitability_falls_toward_zero(self, solver, initial):
+    def test_abstract_game_exploitability_falls_toward_zero(self, initial):
         """The kernel must solve the game it is actually playing.
 
         Distinct from the real-game floor: the averaging in ``bucket_game``
@@ -137,7 +141,12 @@ class TestKernel:
         the abstract game has no such floor and must decay. If it did not, the
         floor would be a solver defect rather than an abstraction cost, and the
         whole conclusion would change.
+
+        A FRESH solver: the shared one has been iterated by earlier tests in
+        file order, which moves the iteration-0 reading the ratio is taken from
+        and made this pass or fail with test ordering.
         """
+        solver = _build_solver()
         history = []
         target = 0
         for target in (0, 10, 50, 200):

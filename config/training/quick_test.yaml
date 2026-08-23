@@ -1,6 +1,11 @@
 # Quick Test Configuration
 # For rapid iteration and CI (~3.6K iterations, small infoset capacity).
 
+action_model:
+  preflop_templates:
+    bb_vs_limp: ["check", 2.0, 3.0]
+    sb_vs_limp_raise: ["fold", "call", "2.3x_last", "jam"]
+
 resolver:
   max_raises_per_street: 3
 

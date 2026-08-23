@@ -11,6 +11,8 @@ on Kuhn/Leduc. Property tests add BR-dominates-on-policy and determinism.
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
 from functools import partial
 
 import numpy as np
@@ -22,6 +24,7 @@ from src.pipeline.evaluation.estimators.public_tree_br import (
     PublicBRConfig,
     PublicTreeBestResponse,
     compute_public_tree_br,
+    transform_policy_rows,
 )
 from src.pipeline.evaluation.reference.best_response import best_response_value, on_policy_value
 from tests.pipeline.evaluation.restricted_hunl import RestrictedHUNL, blueprint_policy
@@ -29,6 +32,8 @@ from tests.test_helpers import build_trained_test_solver
 
 CONFIG = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3)
 STACK = 400
+_DEAL = {Card.new("As"), Card.new("Kd"), Card.new("7c"), Card.new("2h")}
+_FLOP = tuple(Card.new(c) for c in ("Qs", "Jh", "3d"))
 
 
 def _combo(a: str, b: str) -> tuple[Card, Card]:
@@ -145,6 +150,52 @@ def test_untrained_blueprint_is_all_fallback(uniform_solver):
     result = compute_public_tree_br(uniform_solver, CONFIG, starting_stack=STACK)
     assert result.missing_policy_mass == pytest.approx(1.0)
     assert result.exploitability_mbb >= -1e-6
+
+
+class TestConditionalChance:
+    """The annulled measure voids a branch a deal collides with, and a void pays
+    zero -- the whole hand refunded -- so every postflop terminal is worth less
+    than a preflop fold by the street's compatible fraction. The conditional
+    plan divides that fraction back out; at full enumeration the branch
+    weights then sum to exactly one over the boards a deal can reach."""
+
+    def _compatible_mass(self, plan, board) -> float:
+        return sum(w for cards, w in plan.deal_options(board) if not _DEAL & set(cards))
+
+    @pytest.mark.timeout(30)
+    def test_weights_sum_to_one_over_compatible_boards(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _BoardPlan
+
+        plan = _BoardPlan(
+            PublicBRConfig(num_flops=1755, num_turns=49, num_rivers=48, conditional_chance=True)
+        )
+        # A canonical flop stands for its whole suit class, so "compatible with
+        # this deal" is only defined per class in expectation: the total is
+        # scaled so a deal's C(48,3)/C(52,3) share of it is exactly one.
+        total = sum(w for _, w in plan.deal_options(()))
+        assert total * math.comb(48, 3) / math.comb(52, 3) == pytest.approx(1.0)
+        assert self._compatible_mass(plan, _FLOP) == pytest.approx(1.0)
+        assert self._compatible_mass(plan, (*_FLOP, Card.new("9c"))) == pytest.approx(1.0)
+
+    @pytest.mark.timeout(30)
+    def test_annulled_weights_sum_below_one(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _BoardPlan
+
+        plan = _BoardPlan(PublicBRConfig(num_flops=1, num_turns=49, num_rivers=48))
+        assert self._compatible_mass(plan, _FLOP) == pytest.approx(45 / 49)
+
+    @pytest.mark.timeout(60)
+    def test_it_is_a_different_game(self, trained_solver):
+        annulled = compute_public_tree_br(trained_solver, CONFIG, starting_stack=STACK)
+        conditional = compute_public_tree_br(
+            trained_solver,
+            PublicBRConfig(
+                num_flops=2, num_turns=1, num_rivers=1, board_seed=3, conditional_chance=True
+            ),
+            starting_stack=STACK,
+        )
+        assert conditional.exploitability_mbb != annulled.exploitability_mbb
+        assert conditional.exploitability_mbb >= 0.0
 
 
 class TestBranchProgress:
@@ -300,3 +351,209 @@ class TestTheCountedDenominator:
 
         assert sum(credited) > 0, "nothing was pruned, so this proves nothing"
         assert engine._branches_done == engine.branch_total
+
+
+def _reach_for(game: RestrictedHUNL) -> np.ndarray:
+    reach = np.zeros(NUM_COMBOS)
+    for combo in game.opp_combos:
+        reach[combo_index_for(combo)] = 1.0
+    return reach
+
+
+@pytest.mark.timeout(60)
+class TestDecomposition:
+    """The gain attribution is exact, not approximate.
+
+    Self-play values are checked against the reference ``on_policy_value`` on
+    the scalar game the way the BR values are, and the per-node terms must sum
+    to ``BR - self-play`` walk by walk: prefix reach under the blueprint,
+    suffix values under the best response, every term non-negative.
+    """
+
+    DECOMPOSED = PublicBRConfig(
+        num_flops=2, num_turns=1, num_rivers=1, board_seed=3, decompose=True
+    )
+
+    @pytest.mark.parametrize(("hero_seat", "button"), [(0, 0), (1, 1)])
+    def test_self_play_values_match_the_scalar_oracle(self, trained_solver, hero_seat, button):
+        engine = PublicTreeBestResponse(trained_solver, CONFIG, starting_stack=STACK)
+        policy = blueprint_policy(trained_solver)
+        for hero_combo in HERO_COMBOS:
+            game = RestrictedHUNL(
+                trained_solver,
+                engine._plan,
+                hero_seat=hero_seat,
+                hero_combo=hero_combo,
+                opp_combos=OPP_COMBOS,
+                button=button,
+                starting_stack=STACK,
+                full_state_keys=True,
+            )
+            scalar = on_policy_value(game, hero_seat, policy)
+            _, self_play = engine.walk_values(hero_seat, button, _reach_for(game))
+            vectorized = self_play[combo_index_for(hero_combo)] / len(game.opp_combos)
+            assert vectorized == pytest.approx(scalar, abs=1e-9)
+
+    @pytest.mark.parametrize("conditional", [False, True], ids=["annulled", "conditional"])
+    def test_terms_sum_to_the_gain_on_every_walk(self, trained_solver, conditional):
+        """Under BOTH chance measures: the conditional one rescales every
+        street's weights, and the identity must survive that rescaling."""
+        config = replace(self.DECOMPOSED, conditional_chance=conditional)
+        result = compute_public_tree_br(trained_solver, config, starting_stack=STACK)
+        decomposition = result.decomposition
+        assert decomposition is not None
+        for walk in decomposition["identity"]["per_walk"]:
+            assert walk["gain_mbb"] == pytest.approx(walk["terms_mbb"], abs=1e-9)
+            assert walk["gain_mbb"] == pytest.approx(
+                walk["br_value_mbb"] - walk["self_play_mbb"], abs=1e-9
+            )
+        assert decomposition["identity"]["max_abs_gap_mbb"] < 1e-9
+        assert sum(decomposition["by_street"].values()) == pytest.approx(
+            result.exploitability_mbb, abs=1e-9
+        )
+
+    def test_self_play_is_zero_sum_across_seats_at_one_button(self, trained_solver):
+        result = compute_public_tree_br(trained_solver, self.DECOMPOSED, starting_stack=STACK)
+        by_button: dict[int, float] = {}
+        for seat in result.seat_results:
+            by_button[seat.button] = by_button.get(seat.button, 0.0) + seat.self_play_mbb
+        for total in by_button.values():
+            assert total == pytest.approx(0.0, abs=1e-9)
+
+    def test_every_term_is_nonnegative_and_the_number_is_unchanged(self, trained_solver):
+        plain = compute_public_tree_br(trained_solver, CONFIG, starting_stack=STACK)
+        decomposed = compute_public_tree_br(trained_solver, self.DECOMPOSED, starting_stack=STACK)
+        assert decomposed.exploitability_mbb == plain.exploitability_mbb
+        decomposition = decomposed.decomposition
+        assert decomposition is not None
+        assert all(v >= -1e-12 for v in decomposition["by_street"].values())
+        assert decomposition["top_nodes"], "no responder node recorded a term"
+        for node in decomposition["top_nodes"]:
+            assert node["gain_mbb"] >= -1e-12
+            assert sum(node["blueprint"].values()) == pytest.approx(1.0, abs=1e-9)
+            assert sum(node["best_response"].values()) == pytest.approx(1.0, abs=1e-9)
+        assert decomposition["nodes_with_gain"] > 0
+
+
+@pytest.mark.timeout(60)
+class TestInAbstraction:
+    """A responder that must act per (node, bucket) is never stronger than one
+    told its cards, and with one bucket for a hero set it IS the card-blind
+    best response the scalar oracle computes."""
+
+    CONSTRAINED = PublicBRConfig(
+        num_flops=2, num_turns=1, num_rivers=1, board_seed=3, in_abstraction=True
+    )
+
+    def test_bucket_constrained_never_exceeds_per_combo(self, trained_solver):
+        free = PublicTreeBestResponse(trained_solver, CONFIG, starting_stack=STACK)
+        bound = PublicTreeBestResponse(trained_solver, self.CONSTRAINED, starting_stack=STACK)
+        reach = np.ones(NUM_COMBOS)
+        for hero_seat, button in ((0, 0), (1, 0)):
+            unconstrained = free.responder_values(hero_seat, button, reach)
+            constrained = bound.responder_values(hero_seat, button, reach)
+            assert np.all(constrained <= unconstrained + 1e-9)
+            assert constrained.sum() < unconstrained.sum(), "the constraint never bound"
+
+    @pytest.mark.parametrize(("hero_seat", "button"), [(0, 0), (1, 1)])
+    def test_one_bucket_for_the_hero_set_is_the_card_blind_oracle(
+        self, trained_solver, hero_seat, button, monkeypatch
+    ):
+        """Hero combos share bucket 0 on every board, every other combo sits in
+        bucket 1: the constrained responder must pick one action per public
+        node for the set, which is exactly a hero dealt from that set whose
+        information key carries no cards."""
+        engine = PublicTreeBestResponse(trained_solver, self.CONSTRAINED, starting_stack=STACK)
+        hero_set = {combo_index_for(combo) for combo in HERO_COMBOS}
+        real_buckets = engine._bucket_vector
+
+        def coarse(board, street):
+            vector = np.where(real_buckets(board, street) >= 0, 1, -1)
+            for index in hero_set:
+                if vector[index] >= 0:
+                    vector[index] = 0
+            return vector
+
+        monkeypatch.setattr(engine, "_responder_buckets", coarse)
+        game = RestrictedHUNL(
+            trained_solver,
+            engine._plan,
+            hero_seat=hero_seat,
+            hero_combos=HERO_COMBOS,
+            opp_combos=OPP_COMBOS,
+            button=button,
+            starting_stack=STACK,
+            hero_public_key=True,
+        )
+        assert len(game.opp_combos) == len(OPP_COMBOS), "fixture: a hero blocks an opponent"
+        scalar = best_response_value(game, hero_seat, blueprint_policy(trained_solver))
+        values = engine.responder_values(hero_seat, button, _reach_for(game))
+        vectorized = sum(values[index] for index in hero_set) / (
+            len(hero_set) * len(game.opp_combos)
+        )
+        assert vectorized == pytest.approx(scalar, abs=1e-9)
+
+    @pytest.mark.parametrize("conditional", [False, True], ids=["annulled", "conditional"])
+    def test_decomposition_still_sums_under_the_constraint(self, trained_solver, conditional):
+        config = PublicBRConfig(
+            num_flops=2,
+            num_turns=1,
+            num_rivers=1,
+            board_seed=3,
+            in_abstraction=True,
+            decompose=True,
+            conditional_chance=conditional,
+        )
+        result = compute_public_tree_br(trained_solver, config, starting_stack=STACK)
+        assert result.decomposition is not None
+        assert result.decomposition["identity"]["max_abs_gap_mbb"] < 1e-9
+
+
+@pytest.mark.timeout(60)
+class TestPolicyTransforms:
+    """Eval-time purification and thresholding reshape the fielded rows only."""
+
+    ROWS = np.array(
+        [
+            [0.50, 0.30, 0.15, 0.05],
+            [0.97, 0.01, 0.01, 0.01],
+            [0.25, 0.25, 0.25, 0.25],
+            [0.25, 0.25, 0.25, 0.25],
+        ]
+    )
+    MISSING = np.array([False, False, False, True])
+
+    def test_thresholding_zeroes_the_tail_and_renormalises(self):
+        out = transform_policy_rows(self.ROWS, self.MISSING, PublicBRConfig(policy_threshold=0.1))
+        assert np.allclose(out[0], np.array([0.50, 0.30, 0.15, 0.0]) / 0.95)
+        assert np.allclose(out[1], [1.0, 0.0, 0.0, 0.0])
+        assert np.allclose(out[2], 0.25), "nothing below the cut, nothing changes"
+        assert np.allclose(out.sum(axis=1), 1.0)
+
+    def test_a_row_cut_to_nothing_falls_back_to_its_argmax(self):
+        out = transform_policy_rows(self.ROWS, self.MISSING, PublicBRConfig(policy_threshold=0.3))
+        assert np.allclose(out[2], [1.0, 0.0, 0.0, 0.0])
+        assert np.allclose(out[0], [0.5 / 0.8, 0.3 / 0.8, 0.0, 0.0])
+
+    def test_purification_is_the_argmax(self):
+        out = transform_policy_rows(self.ROWS, self.MISSING, PublicBRConfig(purify=True))
+        assert np.array_equal(out[:3].max(axis=1), [1.0, 1.0, 1.0])
+        assert np.array_equal(out[0], [1.0, 0.0, 0.0, 0.0])
+
+    def test_fallback_rows_are_untouched_and_the_input_is_not_mutated(self):
+        before = self.ROWS.copy()
+        for config in (PublicBRConfig(purify=True), PublicBRConfig(policy_threshold=0.2)):
+            out = transform_policy_rows(self.ROWS, self.MISSING, config)
+            assert np.allclose(out[3], 0.25)
+        assert np.array_equal(self.ROWS, before)
+
+    def test_no_transform_returns_the_rows_themselves(self):
+        assert transform_policy_rows(self.ROWS, self.MISSING, PublicBRConfig()) is self.ROWS
+
+    def test_the_transformed_number_is_deterministic_and_different(self, trained_solver):
+        purified = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3, purify=True)
+        first = compute_public_tree_br(trained_solver, purified, starting_stack=STACK)
+        second = compute_public_tree_br(trained_solver, purified, starting_stack=STACK)
+        plain = compute_public_tree_br(trained_solver, CONFIG, starting_stack=STACK)
+        assert first.exploitability_mbb == second.exploitability_mbb
+        assert first.exploitability_mbb != plain.exploitability_mbb

@@ -14,7 +14,10 @@ Information keys are ``(player, full GameState)`` for policy players — the
 policy callable rebuilds the canonical infoset key from the state — and a
 public-plus-own-cards projection for the hero, which makes the scalar best
 responder exactly as informed as the vectorized one (each combo is its own
-information set).
+information set). ``hero_combos`` with ``hero_public_key`` deals the hero from
+a set and hides its cards from its own key: a card-blind responder, which is
+what the bucket-constrained engine becomes when every hero combo shares one
+bucket.
 """
 
 from __future__ import annotations
@@ -44,24 +47,31 @@ class RestrictedHUNL:
         plan,
         *,
         hero_seat: int,
-        hero_combo: tuple[Card, Card],
+        hero_combo: tuple[Card, Card] | None = None,
         opp_combos: Sequence[tuple[Card, Card]],
         button: int,
         starting_stack: int,
         full_state_keys: bool = False,
+        hero_combos: Sequence[tuple[Card, Card]] | None = None,
+        hero_public_key: bool = False,
     ):
         self._rules = blueprint.rules
         self._action_model = blueprint.action_model
         self._plan = plan
         self.hero_seat = hero_seat
-        self._hero_combo = hero_combo
-        hero_mask = hero_combo[0].mask | hero_combo[1].mask
+        if hero_combos is None:
+            assert hero_combo is not None, "one hero combo or a set of them"
+            hero_combos = [hero_combo]
+        self._hero_combos: list[tuple[Card, Card]] = list(hero_combos)
         self.opp_combos = [
-            combo for combo in opp_combos if not ((combo[0].mask | combo[1].mask) & hero_mask)
+            combo
+            for combo in opp_combos
+            if all(not (_mask(combo) & _mask(hero)) for hero in self._hero_combos)
         ]
         self._button = button
         self._starting_stack = starting_stack
         self._full_state_keys = full_state_keys
+        self._hero_public_key = hero_public_key
 
     def initial_state(self):
         return DEAL
@@ -87,8 +97,8 @@ class RestrictedHUNL:
 
     def chance_outcomes(self, state):
         if state == DEAL:
-            probability = 1.0 / len(self.opp_combos)
-            return [(combo, probability) for combo in self.opp_combos]
+            pairs = [(hero, opp) for hero in self._hero_combos for opp in self.opp_combos]
+            return [(pair, 1.0 / len(pairs)) for pair in pairs]
         return self._plan.deal_options(state.board)
 
     def legal_actions(self, state):
@@ -96,9 +106,10 @@ class RestrictedHUNL:
 
     def next_state(self, state, action):
         if state == DEAL:
+            hero, opp = action
             holes: list = [None, None]
-            holes[self.hero_seat] = self._hero_combo
-            holes[1 - self.hero_seat] = action
+            holes[self.hero_seat] = hero
+            holes[1 - self.hero_seat] = opp
             return self._rules.create_initial_state(
                 starting_stack=self._starting_stack,
                 hole_cards=(holes[0], holes[1]),
@@ -125,7 +136,7 @@ class RestrictedHUNL:
     def information_state_key(self, state, player: int):
         if self._full_state_keys or player != self.hero_seat:
             return (player, state)
-        return (
+        public = (
             player,
             state.street,
             state.normalized_betting_sequence(),
@@ -134,6 +145,13 @@ class RestrictedHUNL:
             state.stacks,
             state.to_call,
         )
+        # The hero's own cards are in the full state, so a full-state key is
+        # per-combo; the public projection below is card-blind.
+        return public if self._hero_public_key else (*public, state.hole_cards[player])
+
+
+def _mask(combo: tuple[Card, Card]) -> int:
+    return combo[0].mask | combo[1].mask
 
 
 def blueprint_policy(blueprint) -> Policy:

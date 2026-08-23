@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig, compute_public_tree_br
+from src.pipeline.evaluation.policy_profile import profile_policy
 from src.pipeline.services.runs import checkpoint_iteration_of
 from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
 
@@ -21,6 +22,7 @@ def evaluate_run_exact_br(
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     on_branch: Callable[[int, int], None] | None = None,
+    policy_profile: bool = False,
 ) -> EvaluationOutput:
     """Exact best response on the sampled public tree (deterministic point value).
 
@@ -30,6 +32,10 @@ def evaluate_run_exact_br(
     or p-value involved. The value is the exploitability of the board-sampled
     restricted game (see :mod:`~src.pipeline.evaluation.estimators.public_tree_br`), not of
     full HUNL: compare within a tier, don't quote it as a bound.
+
+    ``policy_profile`` attaches the checkpoint's per-street entropy and
+    preflop tables (:mod:`~src.pipeline.evaluation.policy_profile`) to the
+    record; it reads the arrays already loaded for the walk.
 
     ``at_iteration`` scores a retained ladder rung instead of the published
     snapshot. Because the value is deterministic, scoring several rungs of one run
@@ -43,8 +49,7 @@ def evaluate_run_exact_br(
             is not a retained rung (the error lists the available ones).
     """
     config = config or PublicBRConfig()
-    # The four (seat, button) walks are independent, and workers rebuild the
-    # blueprint because the solver is not picklable.
+    # Workers rebuild the blueprint because the solver is not picklable.
     metadata, solver, storage, factory = prepare_blueprint(
         run_dir, abstraction_hash, at_iteration, config.num_workers
     )
@@ -53,10 +58,8 @@ def evaluate_run_exact_br(
         config,
         starting_stack=metadata.config.game.starting_stack,
         blueprint_factory=factory,
-        # BOTH paths. Serial reports every flop branch; parallel reports each
-        # walk as it lands, in the same unit, because a walk returns what it
-        # cost. Coarser when parallel -- four steps, not hundreds -- and still
-        # the difference between a bar that moves and one that cannot.
+        # Both paths report every flop branch, serial as it is walked and
+        # forked as its job lands.
         on_branch=on_branch,
     )
     results: dict[str, Any] = {
@@ -69,6 +72,8 @@ def evaluate_run_exact_br(
                 "button": r.button,
                 "value_mbb": r.value_mbb,
                 "missing_policy_mass": r.missing_policy_mass,
+                "self_play_mbb": r.self_play_mbb,
+                "gain_mbb": r.gain_mbb,
             }
             for r in result.seat_results
         ],
@@ -78,9 +83,19 @@ def evaluate_run_exact_br(
         "num_turns": config.num_turns,
         "num_rivers": config.num_rivers,
         "board_seed": config.board_seed,
+        "conditional_chance": config.conditional_chance,
         "elapsed_s": result.elapsed_s,
         "big_blind": metadata.config.game.big_blind,
+        "in_abstraction": config.in_abstraction,
+        "policy_threshold": config.policy_threshold,
+        "purify": config.purify,
     }
+    if result.decomposition is not None:
+        results["decomposition"] = result.decomposition
+    if policy_profile:
+        results["policy_profile"] = profile_policy(
+            storage, solver.rules, solver.action_model, metadata.config.game.starting_stack
+        )
     return EvaluationOutput(
         infosets=storage.num_infosets(),
         results=results,

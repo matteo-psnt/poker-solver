@@ -216,13 +216,14 @@ class TestStreetTransitions:
         Regression: a backward scan mis-matched the boundary-straddling pair
         (previous street's last check + current street's first check), so the
         current street's second check saw only itself and could not advance.
-        Here betting_history is CALL (preflop limp) + flop check-check + the
-        two turn checks; the current (turn) street must contain both checks.
+        Here betting_history is CALL-CHECK (limp, big blind checks its
+        option) + flop check-check + the two turn checks; the current (turn)
+        street must contain both checks.
         """
         rules = GameRules()
 
-        # Preflop limp-call, flop check-check, turn check-check (second check pending).
-        betting_history = [call(), check(), check(), check(), check()]
+        # Preflop limp-check, flop check-check, turn check-check (second check pending).
+        betting_history = [call(), check(), check(), check(), check(), check()]
 
         actions = rules._get_actions_on_current_street(betting_history)
 
@@ -283,5 +284,5 @@ class TestStreetTransitions:
         assert state.is_terminal, "Pure check-down must reach a terminal state, not hang"
         assert state.street == Street.RIVER, "Check-down should terminate on the river"
         assert Street.TURN in streets_seen, "Hand must actually reach and pass the turn"
-        # CALL (limp) + three check-check pairs = 7 actions.
-        assert len(state.betting_history) == 7
+        # CALL (limp) + the big blind's check + three check-check pairs = 8 actions.
+        assert len(state.betting_history) == 8

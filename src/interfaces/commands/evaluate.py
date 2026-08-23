@@ -180,6 +180,43 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--br-board-seed", type=int, default=7, help="[exact_br] Seed pinning the board sample."
     )
+    parser.add_argument(
+        "--in-abstraction",
+        action="store_true",
+        help="[exact_br] Bucket-constrained responder: one action per (node, bucket). The "
+        "abstract game's own exploitability; a separate tier from the per-combo default.",
+    )
+    parser.add_argument(
+        "--policy-threshold",
+        type=float,
+        default=0.0,
+        help="[exact_br] Eval-time thresholding of the blueprint: zero actions below this "
+        "probability and renormalise. A separate tier.",
+    )
+    parser.add_argument(
+        "--purify",
+        action="store_true",
+        help="[exact_br] Eval-time purification: the blueprint plays its argmax. A separate tier.",
+    )
+    parser.add_argument(
+        "--decompose",
+        action="store_true",
+        help="[exact_br] Attribute the responder's gain to streets, seats, preflop lines and "
+        "the top public nodes (recorded in the eval document; `ledger --full` reads it).",
+    )
+    parser.add_argument(
+        "--policy-profile",
+        action="store_true",
+        help="[exact_br] Record per-street coverage/entropy and the preflop tables of the "
+        "checkpoint beside the score.",
+    )
+    parser.add_argument(
+        "--br-conditional",
+        action="store_true",
+        help="[exact_br] Condition chance on the deal: divide each street's branch weights by "
+        "the fraction a four-card deal leaves compatible, so a voided branch is not a refund. "
+        "Exact at full enumeration; a separate comparison tier from the annulled default.",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
 
 
@@ -212,9 +249,14 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             num_turns=args.br_turns,
             num_rivers=args.br_rivers,
             board_seed=args.br_board_seed,
-            # --workers is shared with lbr; exact_br splits its four independent
-            # (seat, button) walks over it, so 4 saturates the useful range.
+            conditional_chance=args.br_conditional,
+            # --workers is shared with lbr; exact_br farms flop subtrees over
+            # it, one blueprint per process, so memory caps it before cores do.
             num_workers=args.workers,
+            in_abstraction=args.in_abstraction,
+            policy_threshold=args.policy_threshold,
+            purify=args.purify,
+            decompose=args.decompose,
         ),
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,
@@ -227,6 +269,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
+        policy_profile=args.policy_profile,
     )
 
 
@@ -266,6 +309,65 @@ def render(payload: services.EvaluationPayload) -> None:
         f"  Exploitability: {results['exploitability_mbb']:.2f} mbb/g "
         f"(± {results['std_error_mbb']:.2f})"
     )
+    for seat in results.get("seat_values_mbb") or []:
+        if "self_play_mbb" not in seat:
+            continue
+        print(
+            f"    seat {seat['br_seat']} button {seat['button']}: "
+            f"BR {seat['value_mbb']:9.2f}  self-play {seat['self_play_mbb']:9.2f}  "
+            f"gain {seat['gain_mbb']:9.2f}"
+        )
+    if decomposition := results.get("decomposition"):
+        _render_decomposition(decomposition)
+    if profile := results.get("policy_profile"):
+        _render_profile(profile)
+
+
+def _render_decomposition(decomposition: dict) -> None:
+    """The attribution as a table: where the responder's gain comes from."""
+    print(f"  Decomposition (identity gap {decomposition['identity']['max_abs_gap_mbb']:.2e} mbb):")
+    streets = decomposition["by_street"]
+    print("    by street:   " + "  ".join(f"{k} {v:8.1f}" for k, v in streets.items()))
+    print(
+        "    by position: "
+        + "  ".join(f"{k} {v:8.1f}" for k, v in decomposition["by_position"].items())
+    )
+    for walk in decomposition["identity"]["per_walk"]:
+        by_street = "  ".join(f"{v:7.1f}" for v in walk["by_street"].values())
+        print(
+            f"    seat {walk['br_seat']} button {walk['button']}: gain {walk['gain_mbb']:8.1f}"
+            f"  [{by_street}]"
+        )
+    print("    top nodes (walk-level mbb; blueprint -> best response):")
+    for node in decomposition["top_nodes"][:12]:
+        blueprint = " ".join(f"{k}:{v:.2f}" for k, v in node["blueprint"].items())
+        best = " ".join(f"{k}:{v:.2f}" for k, v in node["best_response"].items())
+        print(
+            f"      {node['gain_mbb']:8.1f}  s{node['br_seat']}b{node['button']} "
+            f"{node['street']:<7} {node['sequence'] or '(root)':<28} reach {node['reach']:.3f}"
+        )
+        print(f"{'':18}{blueprint}  ->  {best}")
+    print(
+        f"    self-play fallback mass: {decomposition['selfplay_missing_policy_mass']:.6f}"
+        f"  nodes with gain: {decomposition['nodes_with_gain']:,}/{decomposition['responder_nodes']:,}"
+    )
+
+
+def _render_profile(profile: dict) -> None:
+    print("  Policy profile (entropy normalised by log(actions); p50 average / current):")
+    for street, row in profile["streets"].items():
+        if "average_entropy" not in row:
+            print(f"    {street:<8} visited {row['visited_fraction']:.4f}")
+            continue
+        print(
+            f"    {street:<8} visited {row['visited_fraction']:.4f}  "
+            f"H_avg p50 {row['average_entropy']['p50']:.3f}  "
+            f"H_cur p50 {row['current_entropy']['p50']:.3f}  "
+            f"pure {row['pure_fraction']:.3f}  no+regret {row['no_positive_regret_fraction']:.3f}"
+        )
+    for node in profile["preflop"]:
+        mix = " ".join(f"{k}:{v:.3f}" for k, v in node["combo_weighted_mix"].items())
+        print(f"    {node['label']}: {mix}")
 
 
 COMMAND = Command(
