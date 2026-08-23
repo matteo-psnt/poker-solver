@@ -3,6 +3,7 @@ import type { NodePhase, NodeStatus, Pool, TaskRow } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
+import { useClock } from "@/lib/clock";
 import { clock, count, duration, instant, since, span, taskLabel } from "@/lib/format";
 import { type PoolShape, type Slot, elapsed, nodeLabel, poolShape } from "@/lib/pool";
 import { cn } from "@/lib/utils";
@@ -31,10 +32,10 @@ export function Overview() {
   const tasksData = tasks?.payload;
   const composedAt = instant(view.data?.at) ?? view.dataUpdatedAt;
 
-  // Recomputed each render rather than ticked: the panel already re-renders on
-  // the poll, and a second timer would redraw it between polls to move one
-  // "2h 14m" by a minute.
-  const now = Date.now();
+  // Ticked, not read at render: a poll served from the memo returns the same
+  // payload and re-renders nothing, so "running for" and "next in" would sit
+  // still until something else changed.
+  const now = useClock(15_000);
   const shape = useMemo(
     () => poolShape(jobsData ?? undefined, poolData?.nodes),
     [jobsData, poolData],
