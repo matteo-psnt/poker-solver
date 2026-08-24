@@ -89,6 +89,9 @@ def evaluate_run_exact_br(
         "in_abstraction": config.in_abstraction,
         "policy_threshold": config.policy_threshold,
         "purify": config.purify,
+        # Attribution only -- it changes what is TALLIED, never a value -- so it
+        # is recorded to tell two rows apart and stays out of the knob tier.
+        "decompose": config.decompose,
     }
     if result.decomposition is not None:
         results["decomposition"] = result.decomposition
@@ -100,4 +103,5 @@ def evaluate_run_exact_br(
         infosets=storage.num_infosets(),
         results=results,
         checkpoint_iteration=checkpoint_iteration_of(run_dir, at_iteration),
+        tree_fingerprint=solver.tree.fingerprint(),
     )

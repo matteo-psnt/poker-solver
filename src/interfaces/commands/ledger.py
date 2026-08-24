@@ -136,26 +136,23 @@ def render(payload: LedgerPayload) -> None:
         else f"{len(rows)} of {matched} row(s) (--limit 0 for all)"
     )
     print(f"Eval ledger ({payload.ledger}): {shown}")
-    header = (
-        f"{'run_id':<26} {'commit':<14} {'scorer':<10} {'opp':<10} "
-        f"{'seed':>12} {'hands':>6} {'mbb/g':>12}"
-    )
+    header = f"{'run_id':<44} {'at':>12} {'commit':<9} {'mbb/g':>12}  tier"
     print(header)
     print("-" * len(header))
     for r in rows:
-        knobs = r.knobs
         res = r.results
         mbb = res.get("exploitability_mbb")
         se = res.get("std_error_mbb")
         score = f"{mbb:.1f}±{se:.1f}" if isinstance(mbb, (int, float)) and se is not None else "—"
+        at = getattr(r, "checkpoint_iteration", None)
+        # The TIER, not three of its knobs: an exact_br row carries no
+        # scorer/opponent/seed, so 4/2/2-annulled and 4/16/16-conditional rows
+        # rendered as identical lines and only their `mbb/g` said otherwise.
         print(
-            f"{(r.run_id or '')[:26]:<26} "
-            f"{_fmt_commit(r.eval_git_commit, getattr(r, 'eval_git_dirty', None)):<14} "
-            f"{knobs.get('scorer', '')!s:<10} "
-            f"{knobs.get('opponent', '')!s:<10} "
-            f"{knobs.get('base_seed', '')!s:>12} "
-            f"{res.get('num_hands', '')!s:>6} "
-            f"{score:>12}"
+            f"{(r.run_id or '')[:44]:<44} "
+            f"{(f'{at:,}' if isinstance(at, int) else '—'):>12} "
+            f"{_fmt_commit(r.eval_git_commit, getattr(r, 'eval_git_dirty', None)):<9} "
+            f"{score:>12}  {eval_ledger.tier_label(r.model_dump())}"
         )
 
 
