@@ -43,15 +43,12 @@ class _StubWatcher:
 def logger(tmp_path: Path) -> process.TaskLogger:
     """A real TaskLogger, so the FATAL line is asserted where an operator would
     actually find it -- the task log -- rather than in a list only a test sees."""
-    return process.TaskLogger(tmp_path / "task.log", tmp_path / "share")
+    return process.TaskLogger(tmp_path / "task.log")
 
 
 @pytest.fixture
 def paths(tmp_path: Path) -> node_paths.NodePaths:
-    built = node_paths.NodePaths(
-        work=tmp_path / "work", share=tmp_path / "share", code=tmp_path / "code"
-    )
-    built.archive.mkdir(parents=True, exist_ok=True)
+    built = node_paths.NodePaths(work=tmp_path / "work", code=tmp_path / "code")
     built.runs.mkdir(parents=True, exist_ok=True)
     return built
 
@@ -61,7 +58,7 @@ def _plan(**overrides: str) -> node_plan.TaskPlan:
 
 
 def test_a_missing_prior_fails_the_task(
-    paths: node_paths.NodePaths, logger: process.TaskLogger, monkeypatch
+    paths: node_paths.NodePaths, logger: process.TaskLogger, monkeypatch, container
 ):
     def _never(*_args, **_kwargs):
         raise AssertionError("trained despite a missing prior")
@@ -81,19 +78,15 @@ def test_a_missing_prior_fails_the_task(
 def test_a_present_prior_is_fetched(
     paths: node_paths.NodePaths, logger: process.TaskLogger, monkeypatch
 ):
-    # A MANIFEST, not just a directory: "present" means the store can answer
-    # for it. An empty directory under `archive/` was never a fetchable prior,
-    # and accepting one is how the old gate stayed green while the rungs moved.
-    prior = paths.archive / "vec-here"
-    prior.mkdir(parents=True)
-    (prior / "STATIC_CHECKPOINT.json").write_text(
-        '{"zarr": "static-1000.ckpt.zst", "iteration": 1000, "retained": []}'
-    )
+    # A PUBLISHED MANIFEST is what "present" means -- the store answering for
+    # the run id. A directory was never publication, and accepting one is how
+    # the old gate stayed green while the rungs moved to the container.
+    monkeypatch.setattr(handlers.archive, "is_published", lambda run_id, _sas: run_id == "vec-here")
     fetched: list[str] = []
     monkeypatch.setattr(
         handlers.archive,
         "fetch_current_rung",
-        lambda source, destination, log=None, sas="": (fetched.append(source.name), "")[1],
+        lambda run_id, _destination, _sas, _log=None: (fetched.append(run_id), "")[1],
     )
     monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
     monkeypatch.setattr(progress, "LadderWatcher", _StubWatcher)
@@ -106,7 +99,7 @@ def test_a_present_prior_is_fetched(
 
 
 def test_a_task_with_no_prior_requested_is_unaffected(
-    paths: node_paths.NodePaths, logger: process.TaskLogger, monkeypatch
+    paths: node_paths.NodePaths, logger: process.TaskLogger, monkeypatch, container
 ):
     """Only warm-started tasks are gated -- an ordinary control has no prior to
     miss, and gating it would break every scalar run."""

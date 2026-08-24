@@ -9,12 +9,12 @@ production failures its comments describe, reproduced on a tmp_path.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
 from src.shared import records
 from src.shared.cloudtask.node import archive
+from tests.shared.cloudtask.node.conftest import SAS
 
 
 def _snapshot(run_dir, name: str, *files: str) -> None:
@@ -47,158 +47,116 @@ def _run(tmp_path, name: str = "run-a"):
     return run_dir
 
 
-class TestCopySemantics:
-    def test_no_timestamp_is_preserved(self, tmp_path):
-        """`cp --preserve=timestamps` fails on this mount AFTER copying the
-        data, which suppressed the manifest and made a good publish look
-        broken. shutil.copy2/copytree would reintroduce exactly that."""
-        source, destination = tmp_path / "s", tmp_path / "d"
-        source.mkdir()
-        (source / "f").write_text("x")
-        os.utime(source / "f", (1_000_000_000, 1_000_000_000))
-
-        archive.copy_tree(source, destination)
-
-        assert (destination / "f").stat().st_mtime != pytest.approx(1_000_000_000)
-
-    def test_the_update_rule_skips_an_older_source(self, tmp_path):
-        source, destination = tmp_path / "s.txt", tmp_path / "d.txt"
-        source.write_text("old")
-        destination.write_text("newer")
-        os.utime(source, (1_000_000_000, 1_000_000_000))
-        assert not archive.needs_copy(source, destination)
-
-    def test_the_update_rule_copies_a_newer_source(self, tmp_path):
-        source, destination = tmp_path / "s.txt", tmp_path / "d.txt"
-        destination.write_text("old")
-        os.utime(destination, (1_000_000_000, 1_000_000_000))
-        source.write_text("new")
-        assert archive.needs_copy(source, destination)
-
-    def test_update_false_copies_regardless(self, tmp_path):
-        """The fetch direction: a file already on the node is evidence of a
-        cancelled task, not of a complete copy."""
-        source, destination = tmp_path / "s", tmp_path / "d"
-        source.mkdir()
-        (source / "f").write_text("real")
-        destination.mkdir()
-        (destination / "f").write_text("truncated")
-        os.utime(source / "f", (1_000_000_000, 1_000_000_000))
-
-        archive.copy_tree(source, destination, update=False)
-        assert (destination / "f").read_text() == "real"
-
-
 class TestFetchCurrentRung:
-    def _published(self, tmp_path, *, marked: bool = True, current: str = "static-2000.zarr"):
-        share = tmp_path / "archive" / "run-a"
-        share.mkdir(parents=True)
-        (share / ".run.json").write_text("{}")
-        for name in ("static-1000.zarr", "static-2000.zarr"):
-            (share / name / "regrets").mkdir(parents=True)
-            (share / name / "regrets" / "0").write_text(name)
-            if marked:
-                (share / archive.marker_for(name)).write_text("")
-        (share / records.STATIC_CHECKPOINT).write_text(
-            json.dumps({"zarr": current, "iteration": 2000, "retained": []})
-        )
-        return share
+    """The container is the only store, so a rung is one OBJECT, not a tree."""
 
-    def test_only_the_current_rung_comes_down(self, tmp_path):
-        """The ladder stays on the share: taking all 31 rungs was ~25 GB and
+    def _published(self, container, *, current: str = "static-2000.zarr"):
+        for name in ("static-1000.ckpt.zst", "static-2000.ckpt.zst"):
+            container[f"run-a/{name}"] = name.encode()
+        container["run-a/.run.json"] = b"{}"
+        container["run-a/" + records.STATIC_CHECKPOINT] = json.dumps(
+            {"zarr": current, "iteration": 2000, "retained": []}
+        ).encode()
+
+    def test_only_the_current_rung_comes_down(self, tmp_path, container):
+        """The ladder stays in the container: taking all 31 rungs was ~25 GB and
         ~40 minutes to load the 809 MB the trainer actually reads."""
-        share = self._published(tmp_path)
+        self._published(container)
         node = tmp_path / "runs" / "run-a"
 
-        archive.fetch_current_rung(share, node)
+        archive.fetch_current_rung("run-a", node, SAS)
 
-        assert (node / "static-2000.zarr" / "regrets" / "0").exists()
-        assert not (node / "static-1000.zarr").exists()
+        assert (node / "static-2000.ckpt.zst").exists()
+        assert not (node / "static-1000.ckpt.zst").exists()
         assert (node / records.STATIC_CHECKPOINT).exists()
-        assert (node / ".run.json").exists()
+        assert (node / ".run.json").exists(), "loose metadata comes with it"
 
-    def test_a_manifest_naming_an_absent_rung_is_refused(self, tmp_path):
-        share = self._published(tmp_path, current="static-9999.zarr")
-        with pytest.raises(archive.FetchRefusedError, match="no store holds it"):
-            archive.fetch_current_rung(share, tmp_path / "runs" / "run-a")
+    def test_a_manifest_naming_an_absent_rung_is_refused(self, tmp_path, container):
+        self._published(container, current="static-9999.zarr")
+        with pytest.raises(archive.FetchRefusedError, match="does not hold it"):
+            archive.fetch_current_rung("run-a", tmp_path / "runs" / "run-a", SAS)
 
-    def test_a_manifest_naming_nothing_is_refused(self, tmp_path):
-        share = self._published(tmp_path, current="")
+    def test_a_manifest_naming_nothing_is_refused(self, tmp_path, container):
+        self._published(container, current="")
         with pytest.raises(archive.FetchRefusedError, match="no current snapshot"):
-            archive.fetch_current_rung(share, tmp_path / "runs" / "run-a")
+            archive.fetch_current_rung("run-a", tmp_path / "runs" / "run-a", SAS)
 
-    def test_a_dynamic_backend_run_is_refused_by_name(self, tmp_path):
+    def test_a_dynamic_backend_run_is_refused_by_name(self, tmp_path, container):
         """Its checkpoints are unreadable at HEAD by design. Fetching them
-        would buy a confusing failure several minutes deeper."""
-        share = tmp_path / "archive" / "old-run"
-        (share / "checkpoint-500.zarr").mkdir(parents=True)
-        (share / archive.LEGACY_MANIFEST).write_text('{"zarr": "checkpoint-500.zarr"}')
+        would buy a confusing failure several minutes deeper.
+
+        A LEGACY manifest with no static one beside it is the whole signal, and
+        it is only looked for in that case -- the common path pays nothing."""
+        container["old-run/" + archive.LEGACY_MANIFEST] = b'{"zarr": "checkpoint-500.zarr"}'
 
         with pytest.raises(archive.FetchRefusedError, match="dynamic backend"):
-            archive.fetch_current_rung(share, tmp_path / "runs" / "old-run")
+            archive.fetch_current_rung("old-run", tmp_path / "runs" / "old-run", SAS)
 
-    def test_a_run_with_no_manifest_starts_the_ladder(self, tmp_path):
+    def test_a_run_with_no_manifest_starts_the_ladder(self, tmp_path, container):
         """A task that died before its first checkpoint published .run.json and
         nothing else. Refusing that would strand the run id forever."""
-        share = tmp_path / "archive" / "run-a"
-        share.mkdir(parents=True)
-        (share / ".run.json").write_text("{}")
+        container["run-a/.run.json"] = b"{}"
         node = tmp_path / "runs" / "run-a"
 
-        archive.fetch_current_rung(share, node)
+        assert archive.fetch_current_rung("run-a", node, SAS) == ""
         assert (node / ".run.json").exists()
 
-    def test_markers_are_not_copied_onto_the_node(self, tmp_path):
-        """They describe the SHARE's copy. Carrying them down would let a later
-        publish skip a rung it never actually uploaded."""
-        share = self._published(tmp_path)
+    def test_a_marker_object_is_not_carried_down(self, tmp_path, container):
+        """Presence is completeness now, so nothing writes one -- but a marker
+        left over from the share era must not land on the node, where a later
+        publish could read it as "already uploaded"."""
+        self._published(container)
+        container["run-a/" + archive.marker_for("static-2000.ckpt.zst")] = b""
         node = tmp_path / "runs" / "run-a"
-        archive.fetch_current_rung(share, node)
+
+        archive.fetch_current_rung("run-a", node, SAS)
+
         assert not list(node.glob(archive.MARKER_PREFIX + "*"))
 
 
 class TestFetchForEvaluation:
-    def _published(self, tmp_path, rungs=(1000, 2000, 3000), unmarked=()):
-        share = tmp_path / "archive" / "run-a"
-        share.mkdir(parents=True)
+    def _published(self, container, rungs=(1000, 2000, 3000)):
         for rung in rungs:
-            name = f"static-{rung}.zarr"
-            (share / name).mkdir()
-            (share / name / "chunk").write_text(name)
-            if rung not in unmarked:
-                (share / archive.marker_for(name)).write_text("")
+            container[f"run-a/static-{rung}.ckpt.zst"] = f"static-{rung}".encode()
         # The manifest is what NAMES each rung; without one there is nothing to
-        # resolve an iteration to a file, which is the point of the lookup.
-        _manifest(share, f"static-{rungs[-1]}.zarr", retained=rungs, iteration=rungs[-1])
-        return share
+        # resolve an iteration to an object, which is the point of the lookup.
+        container["run-a/" + records.STATIC_CHECKPOINT] = json.dumps(
+            {
+                "zarr": f"static-{rungs[-1]}.zarr",
+                "iteration": rungs[-1],
+                "retained": [{"iteration": r, "zarr": f"static-{r}.zarr"} for r in rungs],
+            }
+        ).encode()
 
-    def test_only_the_named_rungs_come_down(self, tmp_path):
-        share = self._published(tmp_path)
+    def test_only_the_named_rungs_come_down(self, tmp_path, container):
+        self._published(container)
         node = tmp_path / "runs" / "run-a"
 
-        assert archive.fetch_for_evaluation(share, node, ["1000", "3000"]) == ["1000", "3000"]
-        assert (node / "static-1000.zarr" / "chunk").exists()
-        assert (node / "static-3000.zarr" / "chunk").exists()
-        assert not (node / "static-2000.zarr").exists()
+        assert archive.fetch_for_evaluation("run-a", node, ["1000", "3000"], SAS) == [
+            "1000",
+            "3000",
+        ]
+        assert (node / "static-1000.ckpt.zst").exists()
+        assert (node / "static-3000.ckpt.zst").exists()
+        assert not (node / "static-2000.ckpt.zst").exists()
 
-    def test_a_missing_rung_is_skipped_not_fatal(self, tmp_path):
-        share = self._published(tmp_path)
+    def test_a_missing_rung_is_skipped_not_fatal(self, tmp_path, container):
+        """A partial curve beats none."""
+        self._published(container)
         node = tmp_path / "runs" / "run-a"
-        assert archive.fetch_for_evaluation(share, node, ["9999"]) == []
+        assert archive.fetch_for_evaluation("run-a", node, ["9999"], SAS) == []
 
-    def test_a_partial_node_copy_is_replaced_not_merged(self, tmp_path):
+    def test_a_partial_node_copy_is_replaced_not_merged(self, tmp_path, container):
         """Rung 10000000: "fetched" in one second, then a read error. `cp -u`
         had treated a cancelled task's leftovers as already present."""
-        share = self._published(tmp_path)
+        self._published(container)
         node = tmp_path / "runs" / "run-a"
-        (node / "static-1000.zarr").mkdir(parents=True)
-        (node / "static-1000.zarr" / "chunk").write_text("truncated")
-        (node / "static-1000.zarr" / "orphan").write_text("from a dead attempt")
+        node.mkdir(parents=True)
+        (node / "static-1000.ckpt.zst").write_text("truncated")
 
-        archive.fetch_for_evaluation(share, node, ["1000"])
+        archive.fetch_for_evaluation("run-a", node, ["1000"], SAS)
 
-        assert (node / "static-1000.zarr" / "chunk").read_text() == "static-1000.zarr"
-        assert not (node / "static-1000.zarr" / "orphan").exists()
+        assert (node / "static-1000.ckpt.zst").read_text() == "static-1000"
 
 
 class TestLadderState:
@@ -248,109 +206,88 @@ class TestTheManifestNamesTheRung:
 
     That is a second opinion about a name the manifest already holds, and it
     holds only while every snapshot is a zarr directory. A run repointed to the
-    new format would have reported every rung missing while its bytes sat on
-    the share untouched.
+    new format reported every rung missing while its bytes sat untouched.
     """
 
-    def _published(self, tmp_path, name: str):
-        share = tmp_path / "archive" / "run-a"
-        share.mkdir(parents=True)
-        (share / name).mkdir()
-        (share / name / "chunk").write_text(name)
-        (share / archive.marker_for(name)).write_text("")
-        _manifest(share, name, iteration=1000)
-        return share
+    def _published(self, container, name: str):
+        container[f"run-a/{records.object_name(name)}"] = b"the rung"
+        container["run-a/" + records.STATIC_CHECKPOINT] = json.dumps(
+            {"zarr": name, "iteration": 1000, "retained": []}
+        ).encode()
 
-    def test_a_repointed_manifest_still_resolves_its_rung(self, tmp_path):
-        share = self._published(tmp_path, f"static-1000{records.SNAPSHOT_SUFFIX}")
+    def test_a_repointed_manifest_still_resolves_its_rung(self, tmp_path, container):
+        self._published(container, f"static-1000{records.SNAPSHOT_SUFFIX}")
         node = tmp_path / "runs" / "run-a"
 
-        assert archive.fetch_for_evaluation(share, node, ["1000"]) == ["1000"]
-        assert (node / f"static-1000{records.SNAPSHOT_SUFFIX}" / "chunk").exists()
+        assert archive.fetch_for_evaluation("run-a", node, ["1000"], SAS) == ["1000"]
+        assert (node / f"static-1000{records.SNAPSHOT_SUFFIX}").read_text() == "the rung"
 
-    def test_a_rung_the_manifest_does_not_name_is_skipped_and_said_so(self, tmp_path):
+    def test_a_manifest_still_spelling_zarr_resolves_the_object(self, tmp_path, container):
+        """The other direction, and the one 1,081 migrated rungs depend on."""
+        self._published(container, "static-1000.zarr")
+        node = tmp_path / "runs" / "run-a"
+
+        assert archive.fetch_for_evaluation("run-a", node, ["1000"], SAS) == ["1000"]
+        assert (node / "static-1000.ckpt.zst").read_text() == "the rung"
+
+    def test_a_rung_the_manifest_does_not_name_is_skipped_and_said_so(self, tmp_path, container):
         """Not guessed at. A rung outside the manifest has no published bytes
         under any spelling, so inventing one only moves the failure later."""
-        share = self._published(tmp_path, "static-1000.zarr")
+        self._published(container, "static-1000.zarr")
         node = tmp_path / "runs" / "run-a"
         lines: list[str] = []
 
-        assert archive.fetch_for_evaluation(share, node, ["9999"], lines.append) == []
+        assert archive.fetch_for_evaluation("run-a", node, ["9999"], SAS, lines.append) == []
         assert any("9999" in line and "manifest names no snapshot" in line for line in lines)
 
 
-class TestTheContainerIsActuallyReached:
+class TestTheObjectNameIsWhatIsAskedFor:
     """The manifest names `static-N.zarr`; the container holds
     `static-N.ckpt.zst`. Every lookup passed the manifest's spelling straight
-    through, so all 1,081 migrated objects 404ed and the fetch fell back to the
-    share -- which worked, right up until the share was deleted.
+    through, so all 1,081 migrated objects 404ed.
     """
 
-    def _share(self, tmp_path):
-        share = tmp_path / "archive" / "run-a"
-        share.mkdir(parents=True)
-        _manifest(share, "static-1000.zarr", iteration=1000)
-        return share
-
-    def test_the_object_name_is_what_is_asked_for(self, tmp_path, monkeypatch):
+    def test_completeness_is_asked_of_the_object(self, tmp_path, monkeypatch):
         asked: list[str] = []
         monkeypatch.setattr(
             archive.blobstore,
             "exists",
-            lambda _s, name: (asked.append(name.split("/", 1)[1]), True)[1],
+            lambda _s, name: (asked.append(name), True)[1],
         )
-        archive.require_complete(self._share(tmp_path), "static-1000.zarr", "sas")
-        assert asked == ["static-1000.ckpt.zst"]
+        archive.require_complete("run-a", "static-1000.zarr", SAS)
+        assert asked == ["run-a/static-1000.ckpt.zst"]
 
-    def test_a_rung_in_the_container_needs_no_share_copy(self, tmp_path, monkeypatch):
-        """The share holds no directory at all here; existence in the container
-        IS completeness, which is the whole point of the flip."""
-        monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: True)
-        archive.require_complete(self._share(tmp_path), "static-1000.zarr", "sas")
+    def test_a_rung_the_container_lacks_is_refused(self, tmp_path, container):
+        """Presence IS completeness: there is no marker and no second store."""
+        with pytest.raises(archive.FetchRefusedError, match="does not hold it"):
+            archive.require_complete("run-a", "static-1000.zarr", SAS)
 
-    def test_the_fetch_pulls_the_object_and_lands_it_under_that_name(self, tmp_path, monkeypatch):
-        share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
+    def test_the_fetch_lands_the_object_under_the_object_name(self, tmp_path, container):
+        container["run-a/static-1000.ckpt.zst"] = b"the object"
+        node = tmp_path / "runs" / "run-a"
 
-        def _get(_s, name, destination):
-            name = name.split("/", 1)[1]
-            (destination / name).write_text("the object")
-            return True
-
-        monkeypatch.setattr(archive.blobstore, "get_object", _get)
-        archive.fetch_snapshot(share, node, "static-1000.zarr", "sas")
+        archive.fetch_snapshot("run-a", node, "static-1000.zarr", SAS)
 
         assert (node / "static-1000.ckpt.zst").read_text() == "the object"
 
-    def test_a_stale_copy_of_the_other_spelling_is_cleared(self, tmp_path, monkeypatch):
+    def test_a_stale_copy_of_the_other_spelling_is_cleared(self, tmp_path, container):
         """A cancelled task leaves a partial rung under whichever name it was
         fetching. Removing only the name asked for leaves the other beside the
         one that just landed, and the loader's fallback picks it up."""
-        share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
+        container["run-a/static-1000.ckpt.zst"] = b"fresh"
+        node = tmp_path / "runs" / "run-a"
         (node / "static-1000.zarr").mkdir(parents=True)
         (node / "static-1000.zarr" / "chunk").write_text("from a dead attempt")
 
-        monkeypatch.setattr(
-            archive.blobstore,
-            "get_object",
-            lambda _s, name, destination: (
-                (destination / name.split("/", 1)[1]).write_text("fresh"),
-                True,
-            )[1],
-        )
-        archive.fetch_snapshot(share, node, "static-1000.zarr", "sas")
+        archive.fetch_snapshot("run-a", node, "static-1000.zarr", SAS)
 
         assert not (node / "static-1000.zarr").exists()
         assert (node / "static-1000.ckpt.zst").read_text() == "fresh"
 
-    def test_a_file_snapshot_on_the_share_is_fetched_as_a_file(self, tmp_path):
-        """Published without a SAS, a rung lands on the share as one FILE.
-        `is_dir()` refused it and `copy_tree` could not have copied it."""
-        share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
-        name = f"static-1000{records.SNAPSHOT_SUFFIX}"
-        (share / name).write_text("one object")
-        (share / archive.marker_for(name)).write_text("")
-
-        archive.require_complete(share, name)
-        archive.fetch_snapshot(share, node, name)
-
-        assert (node / name).read_text() == "one object"
+    def test_a_rung_that_is_not_there_refuses_rather_than_landing_nothing(
+        self, tmp_path, container
+    ):
+        """There is no share to fall through to, so a silent no-op would leave
+        the loader to discover the absence minutes later."""
+        with pytest.raises(archive.FetchRefusedError, match="does not hold"):
+            archive.fetch_snapshot("run-a", tmp_path / "runs" / "run-a", "static-1.zarr", SAS)

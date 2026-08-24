@@ -95,7 +95,7 @@ class TestMain:
         assert lifecycle.main() == 1
         (row,) = recorded.join()
         assert row.cause == task_log.CAUSE_FAILED
-        assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
+        assert "ABSOLUTE" in (paths.work / "task-task-1.log").read_text()
 
     def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch, recorded, container):
         """An operator-cancelled task still leaves its progress in the store."""
@@ -162,7 +162,7 @@ class TestStage:
         tree; the symlink is what lands it on the data disk instead."""
         paths.code.mkdir(parents=True)
         monkeypatch.setattr(lifecycle, "run_guarded", lambda *a, **k: 0)
-        logger = TaskLogger(paths.work / "task.log", paths.share)
+        logger = TaskLogger(paths.work / "task.log")
         try:
             assert lifecycle._stage(paths, logger) == 0
         finally:
@@ -174,7 +174,7 @@ class TestStage:
         paths.code.mkdir(parents=True)
         (paths.code / "data").symlink_to(paths.work / "somewhere-else")
         monkeypatch.setattr(lifecycle, "run_guarded", lambda *a, **k: 0)
-        logger = TaskLogger(paths.work / "task.log", paths.share)
+        logger = TaskLogger(paths.work / "task.log")
         try:
             lifecycle._stage(paths, logger)
         finally:
@@ -189,7 +189,7 @@ class TestTheCacheSurvivesBetweenTasks:
     def _stage(self, paths, monkeypatch):
         paths.code.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(lifecycle, "run_guarded", lambda *a, **k: 0)
-        logger = TaskLogger(paths.work / "task.log", paths.share)
+        logger = TaskLogger(paths.work / "task.log")
         try:
             assert lifecycle._stage(paths, logger) == 0
         finally:
@@ -211,7 +211,7 @@ class TestTheCacheSurvivesBetweenTasks:
         run_guarded, not the stub the other cases use."""
         monkeypatch.setenv(cache.ENV_OVERRIDE, "/mnt/work/cache")
         paths.work.mkdir(parents=True, exist_ok=True)
-        logger = TaskLogger(paths.work / "child.log", paths.share)
+        logger = TaskLogger(paths.work / "child.log")
         try:
             lifecycle.run_guarded(
                 python("import os", f"print(os.environ['{cache.ENV_OVERRIDE}'])"),

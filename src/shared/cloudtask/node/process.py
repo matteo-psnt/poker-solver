@@ -52,19 +52,18 @@ class Killed(BaseException):
 
 
 class TaskLogger:
-    """Tees everything to node-local disk, then to the share on demand.
+    """Tees everything to node-local disk, then to the container on demand.
 
     Batch keeps a task's stdout ON THE NODE and the pool drains within minutes
     of a task ending, so anything only echoed is gone for exactly the tasks
     worth reading later -- which is what happened to a 30M task that died at
     ~720k iterations, leaving ``exit 1`` and nothing else. Node-local first
-    because the training stream is chatty and writing every line straight to
-    SMB would put the task's throughput at the mercy of the share.
+    because the training stream is chatty: only a TAIL is published, on a
+    cadence, so a task's throughput never waits on the store.
     """
 
-    def __init__(self, path: Path, share: Path, sas: str = "") -> None:
+    def __init__(self, path: Path, sas: str = "") -> None:
         self.path = path
-        self.share = share
         # The DIAGNOSTICS container when a task carries a credential for it.
         # The share is what answered before, and it answers still for a task
         # dispatched by something that mints none.
@@ -86,16 +85,16 @@ class TaskLogger:
             sys.stdout.buffer.flush()
 
     def publish(self) -> None:
-        """Copy the tail to the share, skipping a copy that would change nothing.
+        """PUT the tail to the diagnostics container, skipping an unchanged send.
 
         Called on a timer as well as at exit. Training used to publish only when
         the task ENDED, so `logs` answered "no published log yet" for the whole
         of a multi-hour run and then produced the entire thing at once -- the
-        share copy is the only one a reader can reach, because the node-side
+        published copy is the only one a reader can reach, because the node-side
         stream dies with the node.
 
-        The size guard is what makes a timer affordable: this rewrites the whole
-        2 MB tail every time, and a quiet task would otherwise send it again
+        The size guard is what makes a timer affordable: this sends the whole
+        2 MB tail every time, and a quiet task would otherwise resend it
         unchanged on every tick.
         """
         task = os.environ.get("AZ_BATCH_TASK_ID", "task")
@@ -107,12 +106,9 @@ class TaskLogger:
             with self.path.open("rb") as source:
                 source.seek(max(0, size - PUBLISHED_LOG_BYTES))
                 tail = source.read()
-            if self.sas:
-                blobstore.put_bytes(self.sas, f"{task}.log", tail)
-            else:
-                destination = self.share / "logs" / f"{task}.log"
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(tail)
+            if not self.sas:
+                return
+            blobstore.put_bytes(self.sas, f"{task}.log", tail)
             self._published_size = size
         except Exception:  # noqa: BLE001 -- the observer must not fail the task
             pass

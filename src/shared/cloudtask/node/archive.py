@@ -19,10 +19,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import shutil
 from collections.abc import Callable, Iterable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from src.shared import records
@@ -30,7 +28,6 @@ from src.shared.cloudtask.node import blobstore
 
 if TYPE_CHECKING:
     from pathlib import Path
-from uuid import uuid4
 
 # The deleted dynamic backend's manifest, recognised only so a run predating the
 # static tree is REFUSED rather than fetched and failed several minutes deeper.
@@ -45,14 +42,6 @@ SNAPSHOT_PREFIXES = ("static-", "checkpoint-", "keys-")
 
 MARKER_PREFIX = ".complete-"
 
-# A zarr rung is thousands of small files and a single-stream SMB copy is
-# latency-bound, not bandwidth-bound: MEASURED on a pool node at ~93 ms per
-# file either way, so a 300M rung's 5,508 files are ~8.5 minutes serial and
-# ~1.2 at 16 threads (7.0x over a 478 MB ladder, 2026-08-24). Override with
-# `POKER_SOLVER_PUBLISH_WORKERS`; 1 is the serial arm that was measured.
-COPY_WORKERS_ENV = "POKER_SOLVER_PUBLISH_WORKERS"
-DEFAULT_COPY_WORKERS = 16
-
 Log = Callable[[str], None]
 
 
@@ -66,85 +55,6 @@ def is_snapshot(name: str) -> bool:
 
 def marker_for(snapshot: str) -> str:
     return MARKER_PREFIX + snapshot
-
-
-def needs_copy(source: Path, destination: Path) -> bool:
-    """``cp -u``: copy when the destination is missing or older.
-
-    Correct precisely BECAUSE timestamps are not preserved. The destination
-    takes the copy time, which is newer than the source it came from, so an
-    already-published file compares as up to date while a genuinely newer one
-    does not.
-    """
-    if not destination.exists():
-        return True
-    return source.stat().st_mtime > destination.stat().st_mtime
-
-
-def copy_workers() -> int:
-    """How many files are copied at once. Clamped to 1..64, never zero."""
-    try:
-        wanted = int(os.environ.get(COPY_WORKERS_ENV) or DEFAULT_COPY_WORKERS)
-    except ValueError:
-        wanted = DEFAULT_COPY_WORKERS
-    return max(1, min(64, wanted))
-
-
-def copy_file(source: Path, destination: Path) -> None:
-    """Content only -- no mode, no timestamps. See the module docstring."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
-
-
-def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: bool = False) -> int:
-    """Merge ``source`` into ``destination`` file by file; returns bytes copied.
-
-    Merging rather than replacing is what makes an interrupted publish
-    resumable. ``update=False`` copies unconditionally, for the fetch
-    direction -- where a file already on the node is not evidence of a complete
-    copy but of a cancelled task. ``atomic`` gives every file a ``.partial``
-    staging name and one rename, for trees a reader fetches back (``evals/``).
-    """
-    destination.mkdir(parents=True, exist_ok=True)
-    files = []
-    # Directories FIRST and serially, so the parallel pass below never races two
-    # threads creating one parent -- and pays no per-file `mkdir` round trip.
-    for item in sorted(source.rglob("*")):
-        target = destination / item.relative_to(source)
-        if item.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-        else:
-            files.append((item, target))
-
-    def transfer(pair: tuple[Path, Path]) -> int:
-        item, target = pair
-        if update and not needs_copy(item, target):
-            return 0
-        size = item.stat().st_size
-        if atomic:
-            partial = _partial_path(target)
-            shutil.copyfile(item, partial)
-            partial.replace(target)
-        else:
-            shutil.copyfile(item, target)
-        return size
-
-    if not files:
-        return 0
-    with ThreadPoolExecutor(max_workers=min(copy_workers(), len(files))) as pool:
-        return sum(pool.map(transfer, files))
-
-
-def _partial_path(destination: Path) -> Path:
-    """A staging name unique to THIS writer.
-
-    `<name>.partial` is deterministic, so two sessions publishing the same run
-    stage to the SAME path: one `replace()` moves it and the other raises
-    ENOENT, aborting a copy whose file was already written correctly. Measured
-    09-03 -- two scoring tasks scored fine, logged "1 scored, 0 failed", and
-    never reached the share because a concurrent publisher won the rename.
-    """
-    return destination.with_name(f"{destination.name}.{os.getpid()}-{uuid4().hex[:8]}.partial")
 
 
 def publish_run(run_dir: Path, run_id: str, sas: str, log: Log = _quiet) -> bool:
@@ -321,31 +231,17 @@ def read_manifest(manifest: Path) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def fetch_metadata(source: Path, destination: Path, sas: str = "") -> None:
+def fetch_metadata(run_id: str, destination: Path, sas: str) -> None:
     """Everything that is not a snapshot: the manifest, `.run.json`, the curve.
 
-    A MISSING SOURCE DIRECTORY IS NOT AN ERROR. This iterated the share
-    unconditionally, so once the share stopped holding runs every score died
-    three frames into the fetch with a `FileNotFoundError` naming an archive
-    path -- before the evaluator it was setting up had run at all.
-
-    The container is read SECOND so it wins: it is where a published run's
-    metadata is, and the share answers only while it still holds a copy. The
-    manifest matters most of what is here, because it is what the evaluator
-    resolves a rung's name through.
+    Symmetric with what `publish_run` writes, rather than the manifest alone --
+    fetching only the manifest would strand the rest under a name the publish
+    had already chosen.
     """
     destination.mkdir(parents=True, exist_ok=True)
-    if source.is_dir():
-        for child in sorted(source.iterdir()):
-            if child.name.startswith(MARKER_PREFIX) or is_snapshot(child.name):
-                continue
-            if child.is_dir():
-                copy_tree(child, destination / child.name, update=False)
-            else:
-                copy_file(child, destination / child.name)
     if not sas:
         return
-    for name in blobstore.list_container(sas, f"{source.name}/"):
+    for name in blobstore.list_container(sas, f"{run_id}/"):
         leaf = name.partition("/")[2]
         if not leaf or leaf.startswith(MARKER_PREFIX) or is_snapshot(leaf):
             continue
@@ -357,39 +253,26 @@ def fetch_metadata(source: Path, destination: Path, sas: str = "") -> None:
         target.write_bytes(body)
 
 
-def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") -> None:
+def fetch_snapshot(run_id: str, destination: Path, name: str, sas: str) -> None:
     """Get one snapshot onto the node, replacing whatever is there.
-
-    THE CONTAINER FIRST, the share as the fallback, and that order is the whole
-    read flip: while both stores hold rungs this prefers the one that is a
-    single request, and when the share stops holding them the fallback simply
-    stops finding anything. `source.name` IS the run id -- the archive
-    directory is named for it -- so nothing has to thread one.
 
     Remove first, and no update check. A cancelled task leaves partial rungs on
     the node, and treating those as already-present means the next task
-    inherits a TRUNCATED checkpoint and dies inside zarr. That is what happened
-    to rung 10000000: "fetched" in one second, then a read error. Node-local
-    state is never evidence of a complete copy.
+    inherits a TRUNCATED checkpoint and dies in the loader. That is what
+    happened to rung 10000000: "fetched" in one second, then a read error.
+    Node-local state is never evidence of a complete copy.
     """
     stored = records.object_name(name)
     destination.mkdir(parents=True, exist_ok=True)
-    # BOTH SPELLINGS, not merely the one asked for. The container holds the
-    # object and the share may still hold the directory it was converted from,
-    # so a node that fetched under one name can be holding the other from a
-    # cancelled task -- and a loader that finds the stale one loads a rung this
-    # fetch did not fetch.
+    # BOTH SPELLINGS, not merely the one asked for. A node that fetched under
+    # one name can be holding the other from a cancelled task, and a loader
+    # that finds the stale one loads a rung this fetch did not fetch.
     for stale in {name, stored}:
         path = destination / stale
         shutil.rmtree(path, ignore_errors=True)
         path.unlink(missing_ok=True)
-    if sas and blobstore.get_object(sas, f"{source.name}/{stored}", destination):
-        return
-    published = source / name
-    if published.is_file():
-        copy_file(published, destination / name)
-        return
-    copy_tree(published, destination / name, update=False)
+    if not blobstore.get_object(sas, f"{run_id}/{stored}", destination):
+        raise FetchRefusedError(f"the container does not hold {run_id}/{stored}")
 
 
 class FetchRefusedError(Exception):
@@ -402,7 +285,7 @@ class FetchRefusedError(Exception):
     """
 
 
-def require_complete(source: Path, name: str, sas: str = "") -> None:
+def require_complete(run_id: str, name: str, sas: str) -> None:
     """A rung without its marker is either pre-marker or was interrupted.
 
     The two are indistinguishable from here, and loading a truncated one yields
@@ -418,30 +301,30 @@ def require_complete(source: Path, name: str, sas: str = "") -> None:
     # it is either there whole or not there at all. The completion marker this
     # used to demand existed because a DIRECTORY on SMB could be half-copied
     # and look finished, and there are no directories left in any store.
-    if sas and blobstore.exists(sas, f"{source.name}/{records.object_name(name)}"):
-        return
-    if not (source / name).exists():
-        raise FetchRefusedError(f"the manifest names {name} but no store holds it")
+    if not blobstore.exists(sas, f"{run_id}/{records.object_name(name)}"):
+        raise FetchRefusedError(f"the manifest names {name} but the container does not hold it")
 
 
-def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: str = "") -> str:
+def fetch_current_rung(run_id: str, destination: Path, sas: str, log: Log = _quiet) -> str:
     """Fetch the one rung the manifest calls current. Returns its name, or "".
 
     What both continuing a run and scoring "the latest checkpoint" need, and in
     both cases ONE rung, not the ladder. Taking the whole retained ladder was 31
     rungs, ~25 GB over SMB and ~40 minutes, to load the 809 MB actually read.
 
-    Leaving the older rungs on the share loses nothing: ``_extend_ladder``
+    Leaving the older rungs in the container loses nothing: ``_extend_ladder``
     builds the next manifest from the PREVIOUS manifest rather than from what
-    is on disk, ``_prune`` only deletes what the manifest does not name, and
-    publish copies per directory -- so rungs this node never had are neither
-    re-uploaded nor removed.
+    is on disk, and a rung is skipped on existence -- so rungs this node never
+    had are neither re-uploaded nor removed.
     """
-    fetch_metadata(source, destination, sas)
-    body = published_manifest(source, sas)
-    if (source / LEGACY_MANIFEST).is_file() and not body:
+    fetch_metadata(run_id, destination, sas)
+    body = published_manifest(run_id, sas)
+    # Only when there is no static manifest, so the common path pays nothing:
+    # a legacy manifest ALONE means the dynamic backend, whose checkpoints are
+    # unreadable at HEAD by design.
+    if not body and blobstore.read_object(sas, f"{run_id}/{LEGACY_MANIFEST}") is not None:
         raise FetchRefusedError(
-            f"{source.name} was trained by the dynamic backend, which no longer "
+            f"{run_id} was trained by the dynamic backend, which no longer "
             f"exists. Its checkpoints are unreadable at HEAD by design, so this "
             f"run cannot be continued."
         )
@@ -450,14 +333,13 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
         # An absent manifest is not an error: a task that died before its first
         # checkpoint publishes .run.json and nothing else, and the right thing
         # is to start the ladder rather than refuse.
-        log(f"no published checkpoint for {source.name}")
+        log(f"no published checkpoint for {run_id}")
         return ""
     current = manifest.get("zarr") or ""
     if not current:
         raise FetchRefusedError(f"{records.STATIC_CHECKPOINT} names no current snapshot")
-    require_complete(source, current, sas)
-    fetch_snapshot(source, destination, current, sas)
-    # The node's own copy comes from WHICHEVER STORE ANSWERED, not the mount.
+    require_complete(run_id, current, sas)
+    fetch_snapshot(run_id, destination, current, sas)
     (destination / records.STATIC_CHECKPOINT).write_text(body, encoding="utf-8")
     log(f"fetched current rung {current}")
     return current
@@ -527,49 +409,60 @@ def fetch_abstractions(sas: str, destination: Path, log: Log = _quiet) -> int:
     return fetched
 
 
-def published_manifest(source: Path, sas: str = "") -> str:
-    """A run's manifest as TEXT, from the container first and the share second.
+def published_manifest(run_id: str, sas: str) -> str:
+    """A run's manifest as TEXT, or "" when the container holds none.
 
     The manifest lives beside the rungs it names -- `<run>/STATIC_CHECKPOINT
-    .json` in the checkpoints container -- because it is the thing that says
-    which of them is current, and a pointer stored apart from what it points at
-    is the drift this migration spent a day undoing. The share answers only
-    while it still holds one.
+    .json` -- because it is the thing that says which of them is current, and a
+    pointer stored apart from what it points at is the drift this migration
+    spent a day undoing.
 
-    `source.name` IS the run id, as everywhere else here: the archive directory
-    is named for it, so nothing has to thread one.
+    NO CREDENTIAL IS "NOTHING PUBLISHED", not an error: a task sealed without
+    one cannot see the store at all, and every caller here already treats an
+    absent manifest as a run with nothing to fetch. Without this the empty SAS
+    builds `/<run>/STATIC_CHECKPOINT.json` and urllib raises `unknown url type`.
     """
-    if sas:
-        body = blobstore.read_object(sas, f"{source.name}/{records.STATIC_CHECKPOINT}")
-        if body is not None:
-            return body.decode("utf-8")
-    path = source / records.STATIC_CHECKPOINT
-    return path.read_text() if path.is_file() else ""
+    if not sas:
+        return ""
+    body = blobstore.read_object(sas, f"{run_id}/{records.STATIC_CHECKPOINT}")
+    return body.decode("utf-8") if body is not None else ""
 
 
-def is_published(source: Path, sas: str = "") -> bool:
+def is_published(run_id: str, sas: str) -> bool:
     """Does this run exist in a store a fetch can reach?
 
-    ASK THE MANIFEST, NOT THE SHARE FOR A DIRECTORY. The directory check was a
-    second opinion that fails for every run whose rungs moved to the container:
-    there is nothing left on the share to find. It gated four node paths, and
-    the quiet one was the worst -- a RESUME skipped its fetch instead of
-    failing, so the trainer started from zero and republished a ladder whose
-    pointer no longer described the run. The same reasoning is already written
-    one level down, for the warm-start RUNG; this is the enclosing question.
+    ASK THE MANIFEST, NOT A STORE FOR A DIRECTORY. The directory check this
+    replaced gated four node paths, and the quiet one was the worst -- a RESUME
+    skipped its fetch instead of failing, so the trainer started from zero and
+    republished a ladder whose pointer no longer described the run.
     """
-    return bool(published_manifest(source, sas))
+    return bool(published_manifest(run_id, sas))
 
 
-def manifest_entries(source: Path, sas: str = "") -> list[tuple[int, str]]:
+def manifest_entries(run_id: str, sas: str) -> list[tuple[int, str]]:
     """Every (iteration, snapshot name) the manifest CLAIMS, ascending.
 
-    The claim is what a fetch resolves and what a migration has to reproduce.
-    Listing the share's directories answers a different question and cannot see
-    a rung whose bytes are gone: six runs hold 316 marked rungs with no
-    directory at all, and a directory-driven check reported nothing to do.
+    The claim is what a fetch resolves. LISTING a store answers a different
+    question and cannot see a rung whose bytes are gone: six runs once held 316
+    marked rungs with no directory at all, and a listing-driven check reported
+    nothing to do.
     """
-    manifest = _parse_manifest(published_manifest(source, sas))
+    return ladder_entries(_parse_manifest(published_manifest(run_id, sas)))
+
+
+def local_entries(run_dir: Path) -> list[tuple[int, str]]:
+    """The same claim, read from the copy a fetch already put on this node.
+
+    Split from :func:`manifest_entries` when that one started taking a run id:
+    one of its two callers was asking about a LOCAL directory, and a store
+    reader and a disk reader that share a signature are one refactor away from
+    silently asking the wrong one.
+    """
+    return ladder_entries(read_manifest(run_dir / records.STATIC_CHECKPOINT))
+
+
+def ladder_entries(manifest: dict) -> list[tuple[int, str]]:
+    """Current plus retained, deduplicated by iteration and sorted."""
     if not manifest:
         return []
     entries = [*manifest.get("retained", [])]
@@ -584,17 +477,17 @@ def manifest_entries(source: Path, sas: str = "") -> list[tuple[int, str]]:
     return sorted(claimed.items())
 
 
-def _ladder_names(source: Path, sas: str = "") -> dict[str, str]:
+def _ladder_names(run_id: str, sas: str) -> dict[str, str]:
     """Iteration (as a string) -> the snapshot name the manifest gives it.
 
     Keyed on the string because that is what a `--at` flag carries; an int key
     would make every caller convert, and one of them would forget.
     """
-    return {str(iteration): name for iteration, name in manifest_entries(source, sas)}
+    return {str(iteration): name for iteration, name in manifest_entries(run_id, sas)}
 
 
 def fetch_for_evaluation(
-    source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet, sas: str = ""
+    run_id: str, destination: Path, rungs: Sequence[str], sas: str, log: Log = _quiet
 ) -> list[str]:
     """Fetch only the rungs being scored. Returns the ones that arrived.
 
@@ -604,12 +497,10 @@ def fetch_for_evaluation(
 
     THE MANIFEST NAMES THE RUNG, and this used to build `static-<rung>.zarr` by
     hand instead. That is a second opinion about a name the manifest already
-    holds, and it survives only as long as every snapshot is a zarr directory:
-    a run whose manifest was repointed to the new format would have every rung
-    "missing" here while sitting on the share untouched.
+    holds, and it survives only as long as every snapshot is a zarr directory.
     """
-    fetch_metadata(source, destination, sas)
-    ladder = _ladder_names(source, sas)
+    fetch_metadata(run_id, destination, sas)
+    ladder = _ladder_names(run_id, sas)
     fetched = []
     for rung in rungs:
         name = ladder.get(str(rung), "")
@@ -620,13 +511,13 @@ def fetch_for_evaluation(
             log(f"  WARN rung {rung}: the manifest names no snapshot at that iteration")
             continue
         try:
-            require_complete(source, name, sas)
+            require_complete(run_id, name, sas)
         except FetchRefusedError as refusal:
             log(f"  WARN rung {rung}: {refusal}")
             continue
         try:
-            fetch_snapshot(source, destination, name, sas)
-        except OSError as error:
+            fetch_snapshot(run_id, destination, name, sas)
+        except (OSError, FetchRefusedError) as error:
             # Reported, not swallowed: a silent copy failure becomes a
             # confusing load error minutes later, in a different subsystem.
             log(f"  WARN rung {rung} copy FAILED: {error}")

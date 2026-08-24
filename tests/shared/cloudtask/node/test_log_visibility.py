@@ -1,5 +1,10 @@
 """A running task's log must be readable BEFORE it ends.
 
+It goes to the `diagnostics` CONTAINER, which is why every test here takes the
+`container` fixture and a SAS: a logger without one publishes nowhere, and for
+a read-only task that was true in production until the credential was split
+(a score could not write the one object that explains its own death).
+
 Two defects, both measured against a live console on 08-15, and both invisible
 in every existing test because each one only bites over wall-clock:
 
@@ -20,17 +25,19 @@ import os
 import sys
 from pathlib import Path
 
-from src.shared.cloudtask.node import progress
+from src.shared.cloudtask.node import process, progress
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
-from tests.shared.cloudtask.node.conftest import eventually
+from tests.shared.cloudtask.node.conftest import SAS, eventually
 
 
-class TestTheLogReachesTheShareWhileRunning:
-    def test_the_watcher_publishes_without_the_task_ending(self, paths, tmp_path, monkeypatch):
+class TestTheLogReachesTheStoreWhileRunning:
+    def test_the_watcher_publishes_without_the_task_ending(
+        self, paths, tmp_path, monkeypatch, container
+    ):
         """The defect: only `lifecycle.main`'s `finally` ever copied the log."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-live")
         paths.runs.mkdir(parents=True)
-        logger = TaskLogger(tmp_path / "task.log", paths.share)
+        logger = TaskLogger(tmp_path / "task.log", SAS)
         logger("first thing the wrapper says")
 
         watcher = progress.ProgressWatcher(
@@ -38,18 +45,17 @@ class TestTheLogReachesTheShareWhileRunning:
         )
         watcher.start()
         try:
-            published = paths.share / "logs" / "task-live.log"
-            eventually(published.is_file)
+            eventually(lambda: "task-live.log" in container)
         finally:
             watcher.stop()
 
-        assert "first thing the wrapper says" in published.read_text()
+        assert b"first thing the wrapper says" in container["task-live.log"]
 
-    def test_later_output_reaches_the_share_too(self, paths, tmp_path, monkeypatch):
+    def test_later_output_reaches_the_store_too(self, paths, tmp_path, monkeypatch, container):
         """One publish at startup would still leave a run's own output stranded."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-live")
         paths.runs.mkdir(parents=True)
-        logger = TaskLogger(tmp_path / "task.log", paths.share)
+        logger = TaskLogger(tmp_path / "task.log", SAS)
 
         watcher = progress.ProgressWatcher(
             paths, logger, interval=9999, publish_log=logger.publish, log_interval=0.01
@@ -57,8 +63,7 @@ class TestTheLogReachesTheShareWhileRunning:
         watcher.start()
         try:
             logger("iteration 200000")
-            published = paths.share / "logs" / "task-live.log"
-            eventually(lambda: published.is_file() and "iteration 200000" in published.read_text())
+            eventually(lambda: b"iteration 200000" in container.get("task-live.log", b""))
         finally:
             watcher.stop()
 
@@ -84,32 +89,37 @@ class TestTheLogReachesTheShareWhileRunning:
 
 
 class TestPublishingIsAffordableOnATimer:
-    def test_an_unchanged_log_is_not_copied_again(self, paths, tmp_path, monkeypatch):
-        """This rewrites the whole 2 MB tail, so a quiet task on a 60s timer
-        would otherwise resend it unchanged all day."""
+    def test_an_unchanged_log_is_not_sent_again(self, paths, tmp_path, monkeypatch):
+        """This sends the whole 2 MB tail, so a quiet task on a 60s timer would
+        otherwise re-upload it unchanged all day.
+
+        Counted as PUTs rather than compared as a timestamp: an object store has
+        no mtime a test can read, and the request is the thing being avoided."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-quiet")
-        logger = TaskLogger(tmp_path / "task.log", paths.share)
+        sent: list[str] = []
+        monkeypatch.setattr(
+            process.blobstore, "put_bytes", lambda _s, name, body: sent.append(name) or len(body)
+        )
+        logger = TaskLogger(tmp_path / "task.log", SAS)
         logger("something")
-        published = paths.share / "logs" / "task-quiet.log"
 
         logger.publish()
-        first = published.stat().st_mtime_ns
         logger.publish()
 
-        assert published.stat().st_mtime_ns == first, "an unchanged log was copied twice"
+        assert sent == ["task-quiet.log"], "an unchanged log was sent twice"
 
-    def test_growth_after_a_skip_is_still_published(self, paths, tmp_path, monkeypatch):
+    def test_growth_after_a_skip_is_still_published(self, paths, tmp_path, monkeypatch, container):
         """The guard must not latch: a task that goes quiet and then speaks
         again is the normal shape of a training run."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "task-quiet")
-        logger = TaskLogger(tmp_path / "task.log", paths.share)
+        logger = TaskLogger(tmp_path / "task.log", SAS)
         logger("before")
         logger.publish()
         logger.publish()
         logger("after")
         logger.publish()
 
-        assert "after" in (paths.share / "logs" / "task-quiet.log").read_text()
+        assert b"after" in container["task-quiet.log"]
 
 
 class TestTheChildIsNotBlockBuffered:
@@ -118,7 +128,7 @@ class TestTheChildIsNotBlockBuffered:
         printing -- so anything the tee sees was flushed rather than drained at
         exit. Without `PYTHONUNBUFFERED` this line does not arrive."""
         seen: list[bytes] = []
-        logger = TaskLogger(tmp_path / "task.log", tmp_path / "share")
+        logger = TaskLogger(tmp_path / "task.log", SAS)
         original = logger.write
 
         def _record(chunk: bytes) -> None:
@@ -144,7 +154,7 @@ class TestTheChildIsNotBlockBuffered:
     def test_the_child_environment_carries_the_flag(self, tmp_path):
         """Pinned directly, so the reason survives someone rewriting the tee."""
         out = tmp_path / "env.txt"
-        logger = TaskLogger(tmp_path / "task.log", tmp_path / "share")
+        logger = TaskLogger(tmp_path / "task.log", SAS)
 
         run_guarded(
             [
@@ -165,7 +175,7 @@ class TestTheChildIsNotBlockBuffered:
         mount -- all arrive that way."""
         monkeypatch.setenv("POKER_SOLVER_MARKER", "kept")
         out = tmp_path / "env.txt"
-        logger = TaskLogger(tmp_path / "task.log", tmp_path / "share")
+        logger = TaskLogger(tmp_path / "task.log", SAS)
 
         run_guarded(
             [

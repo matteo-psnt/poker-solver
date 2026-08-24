@@ -128,7 +128,7 @@ class TestProgressHeartbeat:
         for iteration in (100, 200, 300):
             progress.publish(self._plan(), {"iteration": iteration})
         assert [r["progress"]["done"] for r in recorded] == [100.0, 200.0, 300.0]
-        assert list((paths.share / "legs").glob("*.progress.json")) == []
+        assert not list(paths.work.glob("*.progress.json")), "no file is written"
 
     def test_a_sample_that_cannot_be_taken_never_kills_the_task(self, paths, monkeypatch):
         """A task must not die because the thing DESCRIBING it could not be

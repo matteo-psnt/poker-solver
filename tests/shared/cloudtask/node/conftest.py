@@ -29,7 +29,7 @@ def _one_task_per_test():
 
 @pytest.fixture
 def paths(tmp_path):
-    return NodePaths(work=tmp_path / "work", share=tmp_path / "share", code=tmp_path / "code")
+    return NodePaths(work=tmp_path / "work", code=tmp_path / "code")
 
 
 @pytest.fixture
@@ -58,6 +58,16 @@ def container(monkeypatch):
     )
     monkeypatch.setattr(blobstore, "put_bytes", _put)
     monkeypatch.setattr(blobstore, "read_object", lambda _s, name: store.get(name))
+
+    def _get(_sas, name: str, destination) -> bool:
+        body = store.get(name)
+        if body is None:
+            return False
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / name.rsplit("/", 1)[-1]).write_bytes(body)
+        return True
+
+    monkeypatch.setattr(blobstore, "get_object", _get)
     monkeypatch.setattr(
         blobstore,
         "list_container",
@@ -73,7 +83,7 @@ that omits this asserts against a publisher that deliberately did nothing."""
 
 @pytest.fixture
 def log(paths):
-    logger = TaskLogger(paths.work / "task.log", paths.share)
+    logger = TaskLogger(paths.work / "task.log")
     yield logger
     logger.close()
 
