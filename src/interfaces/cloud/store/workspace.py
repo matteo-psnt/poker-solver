@@ -29,7 +29,7 @@ from src.interfaces.errors import CommandError
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from azure.storage.fileshare import ShareServiceClient
 
@@ -159,6 +159,47 @@ def resolve_published_run(run: str) -> str:
             f"'{run}' is not published. Published runs: {', '.join(published) or '(none)'}"
         )
     return matches[0]
+
+
+def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
+    """Refuse rungs the SHARE does not actually hold, before anything is dispatched.
+
+    Checked against the share's own listing rather than the run's manifest,
+    because the two disagree: pruning removes a snapshot without rewriting the
+    manifest that advertises it, so `runinfo` offers rungs that
+    `fetch_for_evaluation` then cannot find. Unverified, each such rung cost a
+    snapshot upload, a node allocation and a `uv sync` before dying on "the
+    manifest names static-N.zarr but it is not on the share" -- ~26 tasks in the
+    2026-08-23/24 window.
+
+    An empty rung means "the latest checkpoint", which the ladder cannot name in
+    advance and the node resolves itself, so it is not checked here.
+    """
+    wanted = [rung for rung in rungs if rung]
+    if not wanted:
+        return
+    config = CloudConfig.load()
+    service = share.share_client(config)
+    entries = share.list_entries(service, config.share_name, f"{share.ARCHIVE_DIR}/{run_id}")
+    names = {entry.name for entry in entries}
+    available = sorted(
+        name.removeprefix("static-").removesuffix(".zarr")
+        for name in names
+        if name.startswith("static-") and archive.marker_for(name) in names
+    )
+    missing = [
+        rung
+        for rung in wanted
+        if f"static-{rung}.zarr" not in names
+        or archive.marker_for(f"static-{rung}.zarr") not in names
+    ]
+    if missing:
+        raise CommandError(
+            f"{run_id} has no published, complete checkpoint for: {', '.join(missing)}.\n"
+            f"  On the share: {', '.join(available) or '(none)'}\n"
+            "A rung the manifest advertises can still have been pruned -- this checks "
+            "the share itself, so the mismatch surfaces here instead of on a node."
+        )
 
 
 @dataclass
