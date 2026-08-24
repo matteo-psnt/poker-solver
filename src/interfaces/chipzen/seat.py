@@ -191,8 +191,8 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
 def run_seat(
     blueprint_factory,
     *,
-    bot_id: str,
-    token: str,
+    bot_id: str | None,
+    token: str | None,
     env: str,
     use_resolver: bool = False,
     budget_ms: int = DEFAULT_BUDGET_MS,
@@ -203,6 +203,9 @@ def run_seat(
     ``blueprint_factory`` is called at ``match_start``, not here: loading a
     checkpoint takes about a minute and allocates the full table, and their
     handshake will not wait for it.
+
+    ``bot_id`` and ``token`` may each be ``None``, which hands that one to the
+    SDK's own ``chipzen.toml`` discovery rather than to a default.
     """
     try:
         import asyncio  # noqa: PLC0415 -- deferred with the optional SDK below

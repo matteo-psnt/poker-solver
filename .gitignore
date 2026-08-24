@@ -101,3 +101,10 @@ htmlcov/
 
 # Local-only working files; never part of a commit.
 scratch/
+
+# Credentials. Never tracked, and also excluded from the code snapshot a
+# dispatch seals -- see SNAPSHOT_EXCLUDES in interfaces/cloud/store/share.py.
+.env
+.env.*
+chipzen.toml
+.chipzen/
