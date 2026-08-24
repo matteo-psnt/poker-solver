@@ -131,6 +131,7 @@ class CloudConfig:
     batch_endpoint: str
     pool_id: str
     pool_big_id: str
+    pool_huge_id: str
     storage_account: str
     share_name: str
     share_key: str
@@ -147,6 +148,7 @@ class CloudConfig:
             batch_endpoint=endpoint,
             pool_id=_value(str(INFRA_DIR), "pool_id"),
             pool_big_id=_optional_value(str(INFRA_DIR), "pool_big_id"),
+            pool_huge_id=_optional_value(str(INFRA_DIR), "pool_huge_id"),
             storage_account=_value(str(STORE_DIR), "storage_account"),
             share_name=_value(str(STORE_DIR), "share_name"),
             share_key=_value(str(STORE_DIR), "access_key"),

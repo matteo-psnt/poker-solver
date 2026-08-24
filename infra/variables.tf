@@ -68,6 +68,26 @@ variable "pool_big_max_nodes" {
   default     = 2
 }
 
+variable "pool_huge_vm_size" {
+  description = <<-EOT
+    SKU of the `train-huge` pool. D64als_v6 = 32 physical cores x SMT at the
+    $0.043/vCPU-hr line (~$2.75/hr). The kernel is DRAM-latency-bound and the
+    D32/D16 steady-state ratio was 1.76x and rising with run length, so this
+    box projects ~3x a D16; that projection is what the pool exists to test.
+  EOT
+  type        = string
+  default     = "Standard_D64als_v6"
+}
+
+variable "pool_huge_max_nodes" {
+  description = <<-EOT
+    Autoscale ceiling for `train-huge`: 2 x D64als_v6 is ~$5.50/hr. Sized for
+    A/B probes; raise it deliberately if the huge box wins and work moves here.
+  EOT
+  type        = number
+  default     = 2
+}
+
 variable "max_nodes" {
   description = <<-EOT
     Ceiling for the autoscale formula, and the STRONGEST cost control here: no
@@ -207,6 +227,7 @@ variable "allowed_vm_skus" {
     "Standard_D8als_v6",
     "Standard_D16als_v6",
     "Standard_D32als_v6",
+    "Standard_D64als_v6",
     "Standard_D16_v5",
     "Standard_E16-4ads_v5",
     "Standard_NC24ads_A100_v4",
