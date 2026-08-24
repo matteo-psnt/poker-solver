@@ -524,6 +524,20 @@ def published_manifest(source: Path, sas: str = "") -> str:
     return path.read_text() if path.is_file() else ""
 
 
+def is_published(source: Path, sas: str = "") -> bool:
+    """Does this run exist in a store a fetch can reach?
+
+    ASK THE MANIFEST, NOT THE SHARE FOR A DIRECTORY. The directory check was a
+    second opinion that fails for every run whose rungs moved to the container:
+    there is nothing left on the share to find. It gated four node paths, and
+    the quiet one was the worst -- a RESUME skipped its fetch instead of
+    failing, so the trainer started from zero and republished a ladder whose
+    pointer no longer described the run. The same reasoning is already written
+    one level down, for the warm-start RUNG; this is the enclosing question.
+    """
+    return bool(published_manifest(source, sas))
+
+
 def manifest_entries(source: Path, sas: str = "") -> list[tuple[int, str]]:
     """Every (iteration, snapshot name) the manifest CLAIMS, ascending.
 

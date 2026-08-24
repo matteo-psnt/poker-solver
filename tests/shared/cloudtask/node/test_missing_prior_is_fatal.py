@@ -81,7 +81,14 @@ def test_a_missing_prior_fails_the_task(
 def test_a_present_prior_is_fetched(
     paths: node_paths.NodePaths, logger: process.TaskLogger, monkeypatch
 ):
-    (paths.archive / "vec-here").mkdir(parents=True)
+    # A MANIFEST, not just a directory: "present" means the store can answer
+    # for it. An empty directory under `archive/` was never a fetchable prior,
+    # and accepting one is how the old gate stayed green while the rungs moved.
+    prior = paths.archive / "vec-here"
+    prior.mkdir(parents=True)
+    (prior / "STATIC_CHECKPOINT.json").write_text(
+        '{"zarr": "static-1000.ckpt.zst", "iteration": 1000, "retained": []}'
+    )
     fetched: list[str] = []
     monkeypatch.setattr(
         handlers.archive,

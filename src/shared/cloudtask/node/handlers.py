@@ -84,9 +84,9 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
     # less of it.
     if getattr(plan, "warm_start_from", ""):
         prior = paths.archive / plan.warm_start_from
-        if not prior.is_dir():
+        if not archive.is_published(prior, plan.checkpoint_sas):
             log(
-                f"FATAL warm-start prior {plan.warm_start_from} is not on the share; "
+                f"FATAL warm-start prior {plan.warm_start_from} is not published; "
                 "refusing to train an unseeded arm that would look like a control"
             )
             return 1, "missing-prior"
@@ -120,7 +120,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
     _refresh_abstractions(paths, log, plan.checkpoint_sas)
     run_id = plan.train_run_id
     published = paths.archive / run_id
-    if published.is_dir():
+    if archive.is_published(published, plan.checkpoint_sas):
         log(f"fetching published checkpoint for {run_id}")
         archive.fetch_current_rung(published, paths.runs / run_id, log, plan.checkpoint_sas)
 
@@ -162,8 +162,8 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     convergence curve for the price of one.
     """
     published = paths.archive / plan.run_id
-    if not published.is_dir():
-        log(f"FATAL no such run on the share: {plan.run_id}")
+    if not archive.is_published(published, plan.checkpoint_sas):
+        log(f"FATAL no such published run: {plan.run_id}")
         return 1, None
     rungs = _fetch_rungs(plan, paths, published, log)
     if rungs is None:
@@ -271,8 +271,8 @@ def _fetch_mix_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
     if not other:
         return True
     source = paths.archive / other
-    if not source.is_dir():
-        log(f"FATAL --mix-run names no run on the share: {other}")
+    if not archive.is_published(source, plan.checkpoint_sas):
+        log(f"FATAL --mix-run names no published run: {other}")
         return False
     wanted = [options["--mix-at"]] if "--mix-at" in options else []
     destination = paths.runs / other
