@@ -35,6 +35,7 @@ def _with_resolver_overrides(
     max_iterations: int | None,
     root_prior_weight: float | None,
     leaf_rollouts: int | None,
+    blend_alpha: float | None,
 ) -> Any:
     """The run's config, with the two knobs an A/B over leaf valuation needs.
 
@@ -59,6 +60,7 @@ def _with_resolver_overrides(
         "max_iterations": max_iterations,
         "root_prior_weight": root_prior_weight,
         "leaf_rollouts": leaf_rollouts,
+        "policy_blend_alpha": blend_alpha,
     }
     updates: dict[str, Any] = {k: v for k, v in requested.items() if v is not None}
     if not updates:
@@ -76,6 +78,7 @@ def evaluate_run_resolver_gate(
     max_iterations: int | None = None,
     root_prior_weight: float | None = None,
     leaf_rollouts: int | None = None,
+    blend_alpha: float | None = None,
     workers: int = 1,
     allin_runouts: int = 1,
 ) -> EvaluationOutput:
@@ -97,6 +100,7 @@ def evaluate_run_resolver_gate(
         max_iterations=max_iterations,
         root_prior_weight=root_prior_weight,
         leaf_rollouts=leaf_rollouts,
+        blend_alpha=blend_alpha,
     )
     solver, storage = build_static_evaluation_solver(config, checkpoint_dir=run_dir)
     # The factory carries the OVERRIDDEN config, not the run's. A worker built

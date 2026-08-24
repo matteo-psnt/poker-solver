@@ -65,6 +65,7 @@ def evaluate_run_lbr(
     *,
     resolver_iterations: int = 64,
     resolver_root_prior_weight: float | None = None,
+    resolver_blend_alpha: float | None = None,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
 ) -> EvaluationOutput:
@@ -111,6 +112,11 @@ def evaluate_run_lbr(
                     **(
                         {"root_prior_weight": resolver_root_prior_weight}
                         if resolver_root_prior_weight is not None
+                        else {}
+                    ),
+                    **(
+                        {"policy_blend_alpha": resolver_blend_alpha}
+                        if resolver_blend_alpha is not None
                         else {}
                     ),
                 }
