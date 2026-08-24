@@ -94,7 +94,13 @@ class HUResolver:
         """
         if self._ranges is None:
             self._ranges = infer_ranges(state, self.blueprint)
-        self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
+        self._ranges = update_ranges(
+            state,
+            self._ranges,
+            action,
+            self.blueprint,
+            lookup_state=self.range_lookup_state(state),
+        )
         self.observe_public(state, action)
 
     def start_hand(self, state: GameState) -> None:
@@ -108,6 +114,15 @@ class HUResolver:
         which is the fix quietly doing nothing.
         """
         self._shadow.start(state)
+
+    def range_lookup_state(self, state: GameState) -> GameState:
+        """Where a RANGE update should read the blueprint likelihood for ``state``.
+
+        Must be called BEFORE :meth:`observe_public` for the same action, which
+        advances the shadow past it.
+        """
+        actions = list(self.rules.get_legal_actions(state, action_model=self.action_model))
+        return self._lookup_state(state, actions)
 
     def observe_public(self, state: GameState, action: Action) -> None:
         """Advance the on-tree shadow for a realized action, and nothing else.
