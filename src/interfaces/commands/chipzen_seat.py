@@ -32,13 +32,16 @@ if TYPE_CHECKING:
 TOKEN_ENV = "CHIPZEN_EXTBOT_TOKEN"
 BOT_ENV = "CHIPZEN_BOT_ID"
 # Their names, not ours -- the SDK resolves exactly these three and "production"
-# is not one of them. Staging is the default because every external-API
-# instruction in their docs points at staging.chipzen.ai, and their protocol spec
-# says a 404 on the matchmaking endpoints means "not deployed on that environment
-# yet" -- so prod is the likelier first-run 404, on a path that cannot be
-# debugged without an account.
-ENVIRONMENTS = ("staging", "prod", "local")
-DEFAULT_ENV = "staging"
+# is not one of them.
+#
+# `prod`, measured 2026-08-24, against their docs. Every external-API
+# instruction they publish points at staging.chipzen.ai, so this defaulted there
+# first; a real token then returned EXTAPI_INVALID_TOKEN on staging and a live
+# `{"status":"idle"}` on prod, and the prod lobby completed a handshake. Tokens
+# are minted per environment and the division is deployed on prod -- so the
+# documentation is what is stale here, not the platform.
+ENVIRONMENTS = ("prod", "staging", "local")
+DEFAULT_ENV = "prod"
 
 # The SDK's own config, searched in this order. The repo root is on their list
 # and NOT on ours by preference: a snapshot seals the working tree, so a token
@@ -84,8 +87,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--env",
         default=DEFAULT_ENV,
         choices=ENVIRONMENTS,
-        help=f"Chipzen environment (default {DEFAULT_ENV}, the one their "
-        "external-API docs actually document; switch to prod once it is live there).",
+        help=f"Chipzen environment (default {DEFAULT_ENV}, where the division is "
+        "actually deployed; tokens are minted per environment, so a staging token "
+        "is not a prod one).",
     )
     parser.add_argument(
         "--resolver",
