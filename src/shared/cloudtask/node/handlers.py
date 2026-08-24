@@ -100,7 +100,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
         wanted = getattr(plan, "warm_start_at", 0)
         destination = paths.runs / plan.warm_start_from
         if wanted:
-            archive.fetch_metadata(prior, destination)
+            archive.fetch_metadata(prior, destination, plan.checkpoint_sas)
             # THE PRIOR'S MANIFEST NAMES ITS RUNGS, and asking the share for a
             # directory is a second opinion that fails for every migrated run:
             # the rung is in the container and there is no directory to find.

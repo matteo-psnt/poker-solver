@@ -253,6 +253,54 @@ class TestTrain:
         assert handlers._reporting(task, paths).progress_path == ""
 
 
+class TestMetadataComesFromWhereverTheRunIs:
+    """MEASURED on a node, 2026-09-09. `fetch_metadata` iterated the share
+    unconditionally, so with the share emptied a score died three frames into
+    the fetch -- `FileNotFoundError: .../fsmounts/shared/archive/<run>` -- after
+    a pool allocation, a code stage and a `uv sync`, before the evaluator it was
+    setting up ever ran. The gate above it had already passed: the run WAS
+    published, just not where this looked.
+    """
+
+    def test_a_run_with_no_share_directory_is_not_an_error(self, tmp_path, container):
+        container["run-a/STATIC_CHECKPOINT.json"] = b'{"zarr": "static-10.ckpt.zst"}'
+        destination = tmp_path / "node" / "run-a"
+
+        archive.fetch_metadata(tmp_path / "share" / "run-a", destination, SAS)
+
+        assert (destination / "STATIC_CHECKPOINT.json").read_bytes() == (
+            b'{"zarr": "static-10.ckpt.zst"}'
+        )
+
+    def test_it_brings_back_what_the_publish_put_there(self, tmp_path, container):
+        """Symmetric with `publish_run`, which uploads loose metadata beside the
+        rungs -- fetching only the manifest would strand the rest."""
+        container["run-a/STATIC_CHECKPOINT.json"] = b"{}"
+        container["run-a/.run.json"] = b'{"config": "quick_test"}'
+        container["run-a/progress.jsonl"] = b'{"iteration": 10}\n'
+        container["run-a/static-10.ckpt.zst"] = b"RUNG"
+        destination = tmp_path / "node" / "run-a"
+
+        archive.fetch_metadata(tmp_path / "share" / "run-a", destination, SAS)
+
+        assert (destination / ".run.json").exists()
+        assert (destination / "progress.jsonl").exists()
+        assert not (destination / "static-10.ckpt.zst").exists(), "a rung is not metadata"
+
+    def test_the_container_wins_over_a_share_copy(self, tmp_path, container):
+        """A pointer stored in two places drifts, and the container is the one
+        the rungs are in."""
+        source = tmp_path / "share" / "run-a"
+        source.mkdir(parents=True)
+        (source / "STATIC_CHECKPOINT.json").write_text("STALE")
+        container["run-a/STATIC_CHECKPOINT.json"] = b"CURRENT"
+        destination = tmp_path / "node" / "run-a"
+
+        archive.fetch_metadata(source, destination, SAS)
+
+        assert (destination / "STATIC_CHECKPOINT.json").read_text() == "CURRENT"
+
+
 class TestAResumeFindsItsLadder:
     """THE QUIET ONE. The other three share gates fail loudly; this one just
     skipped the fetch, so a resume of a published run started the trainer at
@@ -325,7 +373,14 @@ class TestAbstractionRefresh:
             (into / asked).write_bytes(body)
             return True
 
-        monkeypatch.setattr(archive.blobstore, "list_container", lambda _s: [packed.name])
+        # Prefix-aware, because a metadata fetch lists ONE run and an
+        # abstraction fetch lists the whole container: answering the packed
+        # name to both would hand a run's fetch an abstraction.
+        monkeypatch.setattr(
+            archive.blobstore,
+            "list_container",
+            lambda _s, prefix="": [] if prefix else [packed.name],
+        )
         monkeypatch.setattr(archive.blobstore, "get_object", _get)
         return name
 
