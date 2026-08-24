@@ -129,7 +129,7 @@ def pcs_worker(
     abstraction: BucketingStrategy | None = None,
     chunk_id: int = 0,
     counters: Any = None,
-    merge_lock: Any = None,  # the scalar worker's tally merge; PCS writes stay Hogwild
+    _merge_lock: Any = None,  # the scalar worker's tally merge; PCS writes stay Hogwild
 ) -> None:
     """Sample a board per index in ``indices`` and write its update to the shared table.
 
