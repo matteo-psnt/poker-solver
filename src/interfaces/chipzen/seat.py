@@ -18,6 +18,7 @@ back on for anyone who wants to measure that again.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -273,9 +274,20 @@ def run_seat(
                 action=frame["action"], amount=int(frame.get("params", {}).get("amount", 0))
             )
 
-        def on_match_end(self, results: dict) -> None:  # noqa: ARG002 -- their signature
+        def on_hand_result(self, result: dict) -> None:
+            # One line per hand, at INFO, so a match leaves a record of HOW it
+            # was won rather than only that it was. This is what makes a live
+            # match reviewable against the replay on their site.
+            logger.info("Hand: %s", json.dumps(result, default=str, sort_keys=True))
+
+        def on_match_end(self, results: dict) -> None:
+            # Logged whole rather than picked apart: the tally says the client
+            # worked, and only this says whether the blueprint WON. Their
+            # `match_end` shape is not in the specs we hold, so reading it as
+            # JSON is both the report and the way to learn what is in it.
             if self._seat is not None:
                 logger.info("Match over: %s", self._seat.tally.summary())
+            logger.info("Result: %s", json.dumps(results, default=str, sort_keys=True))
             self._seat = None
 
     asyncio.run(
