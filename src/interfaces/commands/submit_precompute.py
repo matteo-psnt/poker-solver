@@ -41,7 +41,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--workers",
         type=int,
         default=None,
-        help="Worker count on the node. Default is all CPUs.",
+        help="Worker count on the node. Default is all CPUs but one.",
     )
     parser.add_argument(
         "--timeout",
