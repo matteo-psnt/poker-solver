@@ -665,34 +665,18 @@ export interface components {
         };
         /**
          * AutoscalePayload
-         * @description The deployed formula, evaluated against the live pool.
-         *
-         *     `error` is a FIELD, not a failed request: Batch evaluates the formula and
-         *     reports that it did not compute, which is the answer to "why is the pool not
-         *     growing" and must reach the screen rather than blanking the panel.
+         * @description EVERY pool's formula. They are separate formulas on separate pools, so
+         *     checking one and reporting "no error" answers about half the account.
          */
         AutoscalePayload: {
-            error?: components["schemas"]["ResizeError"] | null;
-            /**
-             * Formula
-             * @default
-             */
-            formula: string;
             /**
              * Op
              * @default autoscale-check
              * @constant
              */
             op: "autoscale-check";
-            /** Pool Id */
-            pool_id: string;
-            /**
-             * Variables
-             * @default {}
-             */
-            variables: {
-                [key: string]: string;
-            };
+            /** Results */
+            results: components["schemas"]["AutoscaleView"][];
         };
         /**
          * AutoscaleRun
@@ -709,6 +693,31 @@ export interface components {
             evaluated_at?: string | null;
             /** Interval Seconds */
             interval_seconds?: number | null;
+            /**
+             * Variables
+             * @default {}
+             */
+            variables: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * AutoscaleView
+         * @description One pool's formula, evaluated against that pool.
+         *
+         *     `error` is a FIELD, not a failed request: Batch evaluates the formula and
+         *     reports that it did not compute, which is the answer to "why is the pool not
+         *     growing" and must reach the screen rather than blanking the panel.
+         */
+        AutoscaleView: {
+            error?: components["schemas"]["ResizeError"] | null;
+            /**
+             * Formula
+             * @default
+             */
+            formula: string;
+            /** Pool Id */
+            pool_id: string;
             /**
              * Variables
              * @default {}
@@ -1585,13 +1594,34 @@ export interface components {
         Phase: "queued" | "starting" | "running" | "finished" | "unknown";
         /**
          * PoolPayload
-         * @description What `pool-status` answers: the pool, plus what it costs while up.
+         * @description EVERY configured pool, not the one whose id happens to be `pool_id`.
          *
-         *     Subclasses the shape `batch.pool_status` already produces rather than
-         *     restating its six fields -- the command adds the op tag and the rate, which
-         *     come from config and not from Batch.
+         *     `train-big` ran live work that this command could not see at all, so a
+         *     reader asking "what is the pool doing" was answered about half the account.
          */
         PoolPayload: {
+            /** Burn Per Hour */
+            burn_per_hour?: number | null;
+            /**
+             * Op
+             * @default pool-status
+             * @constant
+             */
+            op: "pool-status";
+            /** Pools */
+            pools: components["schemas"]["PoolView"][];
+            /** Total Nodes */
+            total_nodes: number;
+        };
+        /**
+         * PoolView
+         * @description One pool, plus what it costs while up.
+         *
+         *     Subclasses the shape `batch.pool_status` already produces rather than
+         *     restating its six fields -- what is added is the rate, which comes from
+         *     config and not from Batch.
+         */
+        PoolView: {
             /** Allocation Since */
             allocation_since?: string | null;
             /** Allocation State */
@@ -1608,12 +1638,6 @@ export interface components {
              * @default []
              */
             nodes: components["schemas"]["NodeStatus"][];
-            /**
-             * Op
-             * @default pool-status
-             * @constant
-             */
-            op: "pool-status";
             /** Pool Id */
             pool_id: string;
             /**

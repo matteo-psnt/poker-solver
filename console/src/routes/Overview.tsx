@@ -1,5 +1,5 @@
 import { useNow } from "@/api/queries";
-import type { NodePhase, NodeStatus, Pool, TaskRow } from "@/api/types";
+import type { NodePhase, NodeStatus, PoolView, TaskRow } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
@@ -39,8 +39,14 @@ export function Overview() {
   // payload and re-renders nothing, so "running for" and "next in" would sit
   // still until something else changed.
   const now = useClock(15_000);
+  // Every pool's nodes, not one pool's: work runs on `train` and `train-big`
+  // at once, and a shape built from one of them shows half the account idle.
   const shape = useMemo(
-    () => poolShape(jobsData ?? undefined, poolData?.nodes),
+    () =>
+      poolShape(
+        jobsData ?? undefined,
+        poolData?.pools.flatMap((p) => p.nodes),
+      ),
     [jobsData, poolData],
   );
   // Batch knows which task holds a node; only the task log knows how far along
@@ -62,8 +68,10 @@ export function Overview() {
 
   return (
     <div className="space-y-3">
-      <Panel title="Pool" staleAfterMs={30_000} error={pool?.error ?? null} {...panel}>
-        {poolData && <PoolFacts pool={poolData} now={now} />}
+      <Panel title="Pools" staleAfterMs={30_000} error={pool?.error ?? null} {...panel}>
+        {poolData?.pools.map((p) => (
+          <PoolFacts key={p.pool_id} pool={p} now={now} />
+        ))}
       </Panel>
 
       {/* Batch and the task log answer DIFFERENT questions; they share a table
@@ -159,7 +167,7 @@ function phaseSummary(shape: PoolShape): string {
  * variables are named rather than dumped -- `$TargetDedicatedNodes=7` is a
  * sentence in the formula's language, not the reader's.
  */
-function PoolFacts({ pool, now }: { pool: Pool; now: number }) {
+function PoolFacts({ pool, now }: { pool: PoolView; now: number }) {
   const allocation = pool.allocation_state ?? "—";
   const allocationFor = elapsed(pool.allocation_since, now);
   return (
@@ -211,7 +219,7 @@ function PoolFacts({ pool, now }: { pool: Pool; now: number }) {
  * which is the answer to "why is the pool not growing" rather than the absence
  * of one.
  */
-function Autoscale({ pool, now }: { pool: Pool; now: number }) {
+function Autoscale({ pool, now }: { pool: PoolView; now: number }) {
   const run = pool.autoscale;
   if (!run) {
     return (

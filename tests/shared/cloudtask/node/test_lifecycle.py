@@ -93,6 +93,7 @@ class TestMain:
 
     def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch):
         """An operator-cancelled task still leaves its progress on the share."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")  # the task's own run is run-a
         run_dir = paths.runs / "run-a"
         run_dir.mkdir(parents=True)
         (run_dir / ".run.json").write_text("{}")
@@ -101,6 +102,41 @@ class TestMain:
 
         lifecycle.main()
         assert (paths.archive / "run-a" / ".run.json").exists()
+
+    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch):
+        """A node is reused: runs/ also holds what earlier tasks fetched. Pushing
+        those back took ~30 minutes per training task."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")
+        for name in ("run-a", "run-fetched-by-an-evaluate"):
+            (paths.runs / name).mkdir(parents=True)
+            (paths.runs / name / ".run.json").write_text("{}")
+        monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 0)
+        monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, lambda *a: (0, None))
+
+        lifecycle.main()
+        assert (paths.archive / "run-a" / ".run.json").exists()
+        assert not (paths.archive / "run-fetched-by-an-evaluate").exists()
+
+    def test_an_evaluation_publishes_the_scored_runs_record_and_nothing_else(
+        self, paths, monkeypatch
+    ):
+        """The eval document lands in the SCORED run's evals/ on the node and
+        the exit publish is its only ride to the share -- the first fix here
+        dropped it, and seven clean-exit scores recorded nothing. Neighbouring
+        runs stay untouched, which is the waste the fix removed."""
+        monkeypatch.setenv("RUN_OP", str(TaskName.EVALUATE))
+        monkeypatch.setenv("RUN_ID", "run-scored")
+        scored = paths.runs / "run-scored"
+        (scored / "evals").mkdir(parents=True)
+        (scored / "evals" / "x.json").write_text("{}")
+        (paths.runs / "run-neighbour").mkdir()
+        (paths.runs / "run-neighbour" / ".run.json").write_text("{}")
+        monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 0)
+        monkeypatch.setitem(lifecycle.HANDLERS, TaskName.EVALUATE, lambda *a: (0, None))
+
+        lifecycle.main()
+        assert (paths.archive / "run-scored" / "evals" / "x.json").exists()
+        assert not (paths.archive / "run-neighbour").exists()
 
 
 def _signalled(plan, paths, log):

@@ -18,6 +18,12 @@ from src.pipeline.services.scoring import lbr as services_lbr
 from src.shared.config.loader import load_training_config
 
 
+def _solver() -> SimpleNamespace:
+    """A blueprint stub with the one real attribute the recorder reads: the
+    betting-tree fingerprint that says WHICH GAME the number describes."""
+    return SimpleNamespace(tree=SimpleNamespace(fingerprint=lambda: "treefp0000000000"))
+
+
 def _fake_config(runs_dir: str = "data/runs", abstraction: str = "quick_test") -> SimpleNamespace:
     return SimpleNamespace(
         training=SimpleNamespace(runs_dir=runs_dir, num_iterations=2000),
@@ -203,7 +209,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
-        or (object(), storage),
+        or (_solver(), storage),
     )
     monkeypatch.setattr(
         services_lbr,
@@ -245,7 +251,7 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
-        or (object(), storage),
+        or (_solver(), storage),
     )
     monkeypatch.setattr(
         services_lbr,
@@ -304,7 +310,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
         lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: seen.update(
             abstraction_hash=abstraction_hash
         )
-        or (object(), storage),
+        or (_solver(), storage),
     )
     monkeypatch.setattr(
         services_lbr,
@@ -390,7 +396,7 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (object(), storage),
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (_solver(), storage),
     )
     monkeypatch.setattr(
         services_lbr,

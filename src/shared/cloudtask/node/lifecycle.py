@@ -26,7 +26,7 @@ from src.shared import cache
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, progress
-from src.shared.cloudtask.node.handlers import HANDLERS
+from src.shared.cloudtask.node.handlers import HANDLERS, publish_own_run
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import BadEnvironmentError, parse_environment
 from src.shared.cloudtask.node.process import EXIT_TIMEOUT, Killed, TaskLogger, run_guarded
@@ -203,6 +203,7 @@ def main() -> int:
     _install_signal_handlers()
 
     code, outcome = 1, None
+    plan = None
     try:
         plan = parse_environment()
         log(f"code provenance: {plan.provenance}")
@@ -220,8 +221,10 @@ def main() -> int:
         code = 1
     finally:
         # Publish on ANY exit -- success, failure, or cancellation. An
-        # operator-cancelled task still leaves its progress on the share.
-        archive.publish_all(paths.runs, paths.archive, log)
+        # operator-cancelled task still leaves its progress on the share. Its
+        # OWN run only: the disk also holds what earlier tasks fetched.
+        if plan is not None:
+            publish_own_run(plan, paths, log)
         log.publish()
         _record(paths, task_log.EVENT_FINISHED, code=code, cause=_cause(code, outcome))
         log.close()

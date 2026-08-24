@@ -104,44 +104,24 @@
         "type": "object"
       },
       "AutoscalePayload": {
-        "description": "The deployed formula, evaluated against the live pool.\n\n`error` is a FIELD, not a failed request: Batch evaluates the formula and\nreports that it did not compute, which is the answer to \"why is the pool not\ngrowing\" and must reach the screen rather than blanking the panel.",
+        "description": "EVERY pool's formula. They are separate formulas on separate pools, so\nchecking one and reporting \"no error\" answers about half the account.",
         "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ResizeError"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "formula": {
-            "default": "",
-            "title": "Formula",
-            "type": "string"
-          },
           "op": {
             "const": "autoscale-check",
             "default": "autoscale-check",
             "title": "Op",
             "type": "string"
           },
-          "pool_id": {
-            "title": "Pool Id",
-            "type": "string"
-          },
-          "variables": {
-            "additionalProperties": {
-              "type": "string"
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/AutoscaleView"
             },
-            "default": {},
-            "title": "Variables",
-            "type": "object"
+            "title": "Results",
+            "type": "array"
           }
         },
         "required": [
-          "pool_id"
+          "results"
         ],
         "title": "AutoscalePayload",
         "type": "object"
@@ -191,6 +171,43 @@
           }
         },
         "title": "AutoscaleRun",
+        "type": "object"
+      },
+      "AutoscaleView": {
+        "description": "One pool's formula, evaluated against that pool.\n\n`error` is a FIELD, not a failed request: Batch evaluates the formula and\nreports that it did not compute, which is the answer to \"why is the pool not\ngrowing\" and must reach the screen rather than blanking the panel.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResizeError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "formula": {
+            "default": "",
+            "title": "Formula",
+            "type": "string"
+          },
+          "pool_id": {
+            "title": "Pool Id",
+            "type": "string"
+          },
+          "variables": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Variables",
+            "type": "object"
+          }
+        },
+        "required": [
+          "pool_id"
+        ],
+        "title": "AutoscaleView",
         "type": "object"
       },
       "BatchTask": {
@@ -2177,7 +2194,46 @@
         "type": "string"
       },
       "PoolPayload": {
-        "description": "What `pool-status` answers: the pool, plus what it costs while up.\n\nSubclasses the shape `batch.pool_status` already produces rather than\nrestating its six fields -- the command adds the op tag and the rate, which\ncome from config and not from Batch.",
+        "description": "EVERY configured pool, not the one whose id happens to be `pool_id`.\n\n`train-big` ran live work that this command could not see at all, so a\nreader asking \"what is the pool doing\" was answered about half the account.",
+        "properties": {
+          "burn_per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Burn Per Hour"
+          },
+          "op": {
+            "const": "pool-status",
+            "default": "pool-status",
+            "title": "Op",
+            "type": "string"
+          },
+          "pools": {
+            "items": {
+              "$ref": "#/components/schemas/PoolView"
+            },
+            "title": "Pools",
+            "type": "array"
+          },
+          "total_nodes": {
+            "title": "Total Nodes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pools",
+          "total_nodes"
+        ],
+        "title": "PoolPayload",
+        "type": "object"
+      },
+      "PoolView": {
+        "description": "One pool, plus what it costs while up.\n\nSubclasses the shape `batch.pool_status` already produces rather than\nrestating its six fields -- what is added is the rate, which comes from\nconfig and not from Batch.",
         "properties": {
           "allocation_since": {
             "anyOf": [
@@ -2252,12 +2308,6 @@
             "title": "Nodes",
             "type": "array"
           },
-          "op": {
-            "const": "pool-status",
-            "default": "pool-status",
-            "title": "Op",
-            "type": "string"
-          },
           "pool_id": {
             "title": "Pool Id",
             "type": "string"
@@ -2300,7 +2350,7 @@
           "target_dedicated_nodes",
           "vm_size"
         ],
-        "title": "PoolPayload",
+        "title": "PoolView",
         "type": "object"
       },
       "PrecomputeBody": {

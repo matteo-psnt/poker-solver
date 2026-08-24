@@ -77,6 +77,7 @@ def build_record(
     result_path: Path,
     timestamp: str,
     checkpoint_iteration: int | None = None,
+    eval_tree_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Compose one evaluation entire: provenance, knobs, and full results.
 
@@ -113,6 +114,10 @@ def build_record(
         "eval_git_dirty": is_git_dirty(),
         "eval_git_branch": get_git_branch(),
         "eval_code_snapshot": get_code_snapshot(),
+        # The betting tree the MEASUREMENT walked. `action_config_hash` above is
+        # the tree the RUN was trained on and does not move when the rules change
+        # under a fixed action config -- which the limp fix did.
+        "eval_tree_fingerprint": eval_tree_fingerprint,
         "config_name": provenance.config_name,
         "config_hash": provenance.config_hash,
         "card_abstraction_hash": provenance.card_abstraction_hash,
@@ -170,6 +175,7 @@ def record_evaluation(
         result_path=run_dir / "evals" / f"{slug}.json",
         timestamp=timestamp or datetime.now(UTC).isoformat(),
         checkpoint_iteration=payload.get("checkpoint_iteration"),
+        eval_tree_fingerprint=payload.get("tree_fingerprint"),
     )
     path = write_eval(run_dir, document, slug)
     return path, document
