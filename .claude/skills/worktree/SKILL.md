@@ -32,16 +32,26 @@ worktree lacks all of it. From inside the worktree, with `P` = primary checkout:
 
     uv sync --group dev
 
-    # 1. project skills — a worktree has NONE until linked.
+    # 1. project skills — the worktree already HAS
+    #    `.claude/skills/worktree/SKILL.md`, which is TRACKED, and lacks the
+    #    rest, which are not. Link the missing ones individually: replacing the
+    #    directory with a single symlink deletes the tracked file and stages
+    #    that deletion, which then rides the next commit.
     #    Never symlink `.claude` itself: it contains worktrees/ and would recurse.
-    mkdir -p .claude && ln -sfn "$P/.claude/skills" .claude/skills
+    for s in coding-standards testing tooling verify; do
+        ln -sfn "$P/.claude/skills/$s" ".claude/skills/$s"
+    done
 
-    # 2. BOTH Terraform states. Initialising only infra/ leaves the identical
-    #    error, because config.py reads infra/store too.
+    # 2. ALL THREE Terraform states. Initialising only infra/ leaves the
+    #    identical error, because config.py reads infra/store too — and
+    #    infra/serve is needed by anything touching the blueprint box
+    #    (`just serve-deploy`, `serve-ssh`), which read its `public_ip` output.
     ln -sfn "$P/infra/terraform.tfstate"       infra/terraform.tfstate
     ln -sfn "$P/infra/store/terraform.tfstate" infra/store/terraform.tfstate
+    ln -sfn "$P/infra/serve/terraform.tfstate" infra/serve/terraform.tfstate
     (cd infra       && terraform init -input=false)
     (cd infra/store && terraform init -input=false)
+    (cd infra/serve && terraform init -input=false)
 
 Cloud commands (`pool-status`, `submit`, `score`) work from a worktree once
 those are in place. Symlinking `.terraform` ITSELF does not work — init must
