@@ -221,13 +221,19 @@ class TestLayout:
         assert rows == set(range(tree.num_rows))
 
     def test_slot_ranges_tile_the_array_without_overlap(self, tree):
+        # Layout order is street -> bucket -> node; the ranges must tile the
+        # array exactly in that order, no gap and no overlap.
         cursor = 0
-        for node in tree.nodes:
-            for bucket in range(tree.num_buckets(node.street)):
-                start, end = tree.slots(node.node_id, bucket)
-                assert start == cursor, "slot ranges must be contiguous"
-                assert end - start == node.num_actions
-                cursor = end
+        for street in Street:
+            nodes = [node for node in tree.nodes if node.street == street]
+            if not nodes:
+                continue
+            for bucket in range(tree.num_buckets(street)):
+                for node in nodes:
+                    start, end = tree.slots(node.node_id, bucket)
+                    assert start == cursor, "slot ranges must tile in layout order"
+                    assert end - start == node.num_actions
+                    cursor = end
         assert cursor == tree.num_slots
 
 
@@ -290,7 +296,11 @@ class TestProductionScale:
         # limp (`c-x`, `c-b*` lines), a deliberate lineage break -- every
         # checkpoint written against ca50e2d3291fa227 / 57,604 nodes is
         # unloadable at HEAD by design.
-        assert production_tree.fingerprint() == "b0367ae018a58a2f"
+        # Re-pinned 2026-08-24: bucket-major layout (betting-tree-v2), a
+        # deliberate lineage break -- same game, same totals, but every row
+        # moved address, so checkpoints against b0367ae018a58a2f refuse to
+        # load rather than being read as a permutation.
+        assert production_tree.fingerprint() == "37c7818a12cf353c"
         assert len(production_tree.nodes) == 81_518
         assert production_tree.num_rows == 45_538_298
         assert production_tree.num_slots == 125_463_187
@@ -298,8 +308,10 @@ class TestProductionScale:
     @pytest.mark.slow
     @pytest.mark.timeout(120)
     def test_offsets_are_int64(self, production_tree):
-        assert production_tree.row_offset.dtype == np.int64
-        assert production_tree.slot_offset.dtype == np.int64
+        assert production_tree.row_base.dtype == np.int64
+        assert production_tree.row_stride.dtype == np.int64
+        assert production_tree.slot_base.dtype == np.int64
+        assert production_tree.slot_stride.dtype == np.int64
         assert production_tree.num_actions.dtype == np.int64
 
     @pytest.mark.slow
@@ -310,17 +322,23 @@ class TestProductionScale:
         assert tree.num_slots > np.iinfo(np.int32).max // 32, (
             "production tree unexpectedly small; this test would prove nothing"
         )
-        last = tree.nodes[-1]
-        _, end = tree.slots(last.node_id, tree.num_buckets(last.street) - 1)
+        # Layout-last is the LAST STREET's last node at its top bucket, not
+        # tree.nodes[-1] -- ids are DFS order, the layout is street-major.
+        last_street = [s for s in Street if any(n.street == s for n in tree.nodes)][-1]
+        last = [n for n in tree.nodes if n.street == last_street][-1]
+        _, end = tree.slots(last.node_id, tree.num_buckets(last_street) - 1)
         assert end == tree.num_slots
-        assert tree.row(last.node_id, tree.num_buckets(last.street) - 1) == tree.num_rows - 1
+        assert tree.row(last.node_id, tree.num_buckets(last_street) - 1) == tree.num_rows - 1
 
     @pytest.mark.slow
     @pytest.mark.timeout(120)
     def test_all_slot_offsets_are_monotonic(self, production_tree):
-        """A wrap would show up as a decrease somewhere in the prefix sum."""
-        assert np.all(np.diff(production_tree.slot_offset) >= 0)
-        assert np.all(np.diff(production_tree.row_offset) > 0)
+        """A wrap would show up as a negative base or stride somewhere."""
+        tree = production_tree
+        assert np.all(tree.row_base >= 0)
+        assert np.all(tree.slot_base >= 0)
+        assert np.all(tree.row_stride > 0)
+        assert np.all(tree.slot_stride > 0)
 
 
 class TestPreflopIndex:

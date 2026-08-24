@@ -137,7 +137,10 @@ class BucketVectorCFR:
 
     def _slot_index(self, group: NodeGroup, chunk: slice) -> np.ndarray:
         num_buckets = self.compiled.tree.num_buckets(group.street)
-        span = np.arange(num_buckets * group.num_actions, dtype=np.int64)
+        span = (
+            np.arange(num_buckets, dtype=np.int64)[:, None] * group.slot_stride
+            + np.arange(group.num_actions, dtype=np.int64)[None, :]
+        ).ravel()
         return group.slot_base[chunk][:, None] + span[None, :]
 
     def _strategy_block(

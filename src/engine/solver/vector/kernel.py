@@ -71,7 +71,7 @@ class NodeGroup:
         street: Fixes the bucket count and which bucket map applies.
         actor: 0 when the button acts at these nodes, else 1.
         node_ids: The nodes themselves.
-        slot_base: ``slot_offset`` per node — where its ragged storage begins.
+        slot_base: ``tree.slot_base`` per node — where its ragged storage begins.
         edge_base: ``edge_offset`` per node — where its child pointers begin.
     """
 
@@ -81,6 +81,8 @@ class NodeGroup:
     actor: int
     node_ids: np.ndarray
     slot_base: np.ndarray
+    slot_stride: int
+    # Shared by the whole group: nodes of one street share one stride.
     edge_base: np.ndarray
 
 
@@ -122,7 +124,8 @@ def build_groups(compiled: CompiledTree) -> list[NodeGroup]:
                 street=street,
                 actor=actor,
                 node_ids=node_ids,
-                slot_base=tree.slot_offset[node_ids],
+                slot_base=tree.slot_base[node_ids],
+                slot_stride=int(tree.slot_stride[node_ids[0]]),
                 edge_base=compiled.edge_offset[node_ids],
             )
         )
@@ -238,7 +241,10 @@ class VectorCFR:
     def _slot_index(self, group: NodeGroup, chunk: slice) -> np.ndarray:
         """``(n, B * A)`` storage indices for a chunk's ragged rows."""
         num_buckets = self.compiled.tree.num_buckets(group.street)
-        span = np.arange(num_buckets * group.num_actions, dtype=np.int64)
+        span = (
+            np.arange(num_buckets, dtype=np.int64)[:, None] * group.slot_stride
+            + np.arange(group.num_actions, dtype=np.int64)[None, :]
+        ).ravel()
         return group.slot_base[chunk][:, None] + span[None, :]
 
     def _strategy_block(

@@ -164,10 +164,9 @@ class TestProductionBookkeeping:
         tree = compiled.tree
         for node in tree.nodes:
             present = np.unique(context.buckets_for(node.street))
-            width = int(tree.num_actions[node.node_id])
-            base = int(tree.slot_offset[node.node_id])
             for bucket in present:
-                occupied[base + bucket * width : base + (bucket + 1) * width] = True
+                lo, hi = tree.slots(node.node_id, int(bucket))
+                occupied[lo:hi] = True
         expected = np.where(occupied, discounted, start) + delta
         assert np.allclose(regrets, expected, rtol=1e-4, atol=1e-3)
         assert not occupied.all(), "the fixture occupies every row, so the mask is untested"
@@ -183,10 +182,14 @@ class TestProductionBookkeeping:
         )
         pcs.iterate([contexts[0]], 1)
 
-        actor_of_slot = np.repeat(
-            [0 if node.actor_is_button else 1 for node in compiled.tree.nodes],
-            compiled.tree.buckets_per_node * compiled.tree.num_actions,
-        )
+        # Built through the accessors, not a node-major repeat -- slots are
+        # bucket-major within each street now.
+        actor_of_slot = np.empty(compiled.tree.num_slots, dtype=np.int64)
+        for node in compiled.tree.nodes:
+            actor = 0 if node.actor_is_button else 1
+            for bucket in range(compiled.tree.num_buckets(node.street)):
+                start, end = compiled.tree.slots(node.node_id, bucket)
+                actor_of_slot[start:end] = actor
         assert not regrets[actor_of_slot == 0].any()
         assert not strategy_sum[actor_of_slot == 0].any()
         assert regrets[actor_of_slot == 1].any()

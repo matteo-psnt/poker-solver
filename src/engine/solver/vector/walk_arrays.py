@@ -64,8 +64,10 @@ class WalkArrays:
         "is_preflop",
         "node_actor_is_button",
         "num_actions",
-        "row_offset",
-        "slot_offset",
+        "row_base",
+        "row_stride",
+        "slot_base",
+        "slot_stride",
         "terminal_cards_to_deal",
         "terminal_fold",
         "terminal_is_fold",
@@ -123,8 +125,10 @@ class WalkArrays:
         self.terminal_tie = np.array(tie, dtype=np.float64).reshape(-1, 2)
 
         self.num_actions = np.asarray(tree.num_actions, dtype=np.int64)
-        self.row_offset = np.asarray(tree.row_offset[:count], dtype=np.int64)
-        self.slot_offset = np.asarray(tree.slot_offset[:count], dtype=np.int64)
+        self.row_base = np.asarray(tree.row_base[:count], dtype=np.int64)
+        self.row_stride = np.asarray(tree.row_stride[:count], dtype=np.int64)
+        self.slot_base = np.asarray(tree.slot_base[:count], dtype=np.int64)
+        self.slot_stride = np.asarray(tree.slot_stride[:count], dtype=np.int64)
         self.buckets_per_node = np.asarray(tree.buckets_per_node, dtype=np.int64)
         self.node_actor_is_button = np.array(
             [node.actor_is_button for node in tree.nodes], dtype=np.uint8

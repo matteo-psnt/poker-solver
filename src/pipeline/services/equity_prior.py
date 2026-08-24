@@ -153,13 +153,11 @@ def seed_regrets(tree: BettingTree, weight: float, temperature: float = DEFAULT_
         # bet sizes, and the starting stack is the one scale every node shares.
         axis = action_aggression(node.legal_actions, float(tree.starting_stack))
         buckets = int(tree.buckets_per_node[node_id])
-        base = int(tree.slot_offset[node_id])
-        row0 = int(tree.row_offset[node_id])
         for bucket in range(buckets):
             policy = strength_policy(bucket_strength(bucket, buckets), axis, temperature)
-            start = base + bucket * width
-            regrets[start : start + width] = policy * weight
-            seeded[row0 + bucket] = True
+            start, end = tree.slots(node_id, bucket)
+            regrets[start:end] = policy * weight
+            seeded[tree.row(node_id, bucket)] = True
     return regrets, seeded
 
 

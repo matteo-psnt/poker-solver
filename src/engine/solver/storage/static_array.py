@@ -8,13 +8,13 @@ infoset is writable by every worker from the start, and the traversal's drop
 counter is unreachable through this backend. A nonzero value is worth asserting
 on.
 
-Layout (ragged, zero padding):
+Layout (ragged, zero padding, bucket-major within each street):
 
     regrets/strategy_sum   flat, length tree.num_slots
     reach/utility          flat, length tree.num_rows
 
     infoset (node n, bucket b) owns slots
-        [slot_offset[n] + b*num_actions[n],  ... + num_actions[n])
+        [slot_base[n] + b*slot_stride[n],  ... + num_actions[n])
 
 Ragged rather than a dense ``(num_infosets, max_actions)`` rectangle, which at
 the production tree's mean of ~2.6 actions against ``max_actions=10`` would cost
@@ -266,8 +266,8 @@ class StaticArrayStorage:
     def view(self, node_id: int, bucket: int) -> InfoSet:
         """Same view as :meth:`infoset_at` but without marking coverage.
 
-        The bounds check is not defensive boilerplate. Rows are contiguous per
-        node, so an out-of-range bucket does not fall off the end of the array —
+        The bounds check is not defensive boilerplate. Under ``base + bucket *
+        stride`` an out-of-range bucket does not fall off the end of the array —
         it lands on a perfectly valid row belonging to a *different node*, and
         two unrelated infosets then share storage with no error anywhere. The
         old key-addressed design was immune (a bad bucket just made a distinct,
@@ -300,8 +300,8 @@ class StaticArrayStorage:
 
     def view_at_row(self, row: int) -> InfoSet:
         """Read-only-safe view for a flat row index."""
-        node_id = int(np.searchsorted(self.tree.row_offset, row, side="right") - 1)
-        return self.view(node_id, row - int(self.tree.row_offset[node_id]))
+        node_id, bucket = self.tree.row_to_infoset(row)
+        return self.view(node_id, bucket)
 
     def num_infosets(self) -> int:
         """Total rows in the tree.
@@ -343,10 +343,9 @@ class StaticArrayStorage:
     def iter_touched_infosets(self) -> Iterator[InfoSet]:
         """Only rows the traversal has reached — the useful subset for metrics."""
         for node in self.tree.nodes:
-            base = int(self.tree.row_offset[node.node_id])
-            for bucket in range(self.tree.num_buckets(node.street)):
-                if self.visited[base + bucket]:
-                    yield self.view(node.node_id, bucket)
+            flags = self.tree.node_row_vector(self.visited, node.node_id)
+            for bucket in np.flatnonzero(flags):
+                yield self.view(node.node_id, int(bucket))
 
     # ---- diagnostics -----------------------------------------------------
 
