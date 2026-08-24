@@ -401,7 +401,7 @@ class Config(StrictFrozenModel):
         """
         pruned, dropped = _prune_to_schema(config_dict, cls)
         if dropped:
-            logger.warning(
+            logger.debug(
                 "Ignoring %d legacy config field(s) from persisted run: %s",
                 len(dropped),
                 ", ".join(sorted(dropped)),
