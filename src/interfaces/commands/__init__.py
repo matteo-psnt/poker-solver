@@ -145,6 +145,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Train the board-free vector kernel, stored as an ordinary static checkpoint.",
             ),
             CommandRef(
+                "train-pcs",
+                "Train by public chance sampling: one board per iteration, every hand at once.",
+            ),
+            CommandRef(
                 "vector-sweep",
                 "Exploitability vs iteration for one vector-CFR kernel on one abstraction.",
             ),

@@ -180,6 +180,7 @@ def evaluate_and_record(
                 arm=metadata.arm,
                 parent_run_id=metadata.parent_run_id,
                 config_hash=metadata.config_hash,
+                kernel=metadata.kernel,
             ),
             method=method,
             estimator=estimator,

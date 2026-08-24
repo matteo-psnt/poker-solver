@@ -289,6 +289,9 @@ def train_static_parallel(
     start_iteration: int = 0,
     resume: bool = False,
     on_progress: Callable[[int, int], None] | None = None,
+    worker: Callable[..., None] = _worker_entry,
+    worker_args: tuple[Any, ...] = (),
+    before_checkpoint: Callable[[StaticArrayStorage], None] | None = None,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
 
@@ -296,6 +299,12 @@ def train_static_parallel(
     fans out, waits, then checkpoints. Iterations are split evenly with the
     remainder going to the first workers, so the total is exact rather than
     approximately right.
+
+    ``worker`` is what each process runs -- the scalar kernel by default, and
+    the public-chance-sampling one through the same coordinator, since the
+    chunking, the absolute-``t`` assignment, the counters and the checkpoint
+    per chunk are properties of the shared table rather than of either kernel.
+    ``before_checkpoint`` runs on the coordinator's storage before each write.
 
     ``on_progress`` is called with (absolute iteration, target) on a timer. It
     has to be a timer and it has to come from the workers: the coordinator is
@@ -368,7 +377,7 @@ def train_static_parallel(
             result_queue: mp.Queue = ctx.Queue()
             processes = [
                 ctx.Process(
-                    target=_worker_entry,
+                    target=worker,
                     args=(
                         config,
                         worker_id,
@@ -380,6 +389,7 @@ def train_static_parallel(
                         chunk_id,
                         counters,
                         merge_lock,
+                        *worker_args,
                     ),
                     daemon=False,
                 )
@@ -420,6 +430,8 @@ def train_static_parallel(
             # Checkpoint per chunk, so the bound on loss is the chunk, not the run.
             if checkpoint_dir is not None:
                 write_started = time.time()
+                if before_checkpoint is not None:
+                    before_checkpoint(storage)
                 save_checkpoint(storage, checkpoint_dir, done, retain_every=checkpoint_retain_every)
                 checkpoint_seconds = time.time() - write_started
                 coverage = storage.coverage()

@@ -58,6 +58,7 @@ class TaskPlan:
     sets: tuple[str, ...] = ()
     workers: int = 1
     checkpoint_every: int = 0
+    retain_every: int = 0
     universe_boards: int = 0
     universe_seed: int = 0
     dtype: str = ""

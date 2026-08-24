@@ -98,6 +98,22 @@ VECTOR_CASES = {
     "reporting": _plan(op=TaskName.TRAIN_VECTOR, universe_boards=2000, progress_path=REPORTING),
 }
 
+PCS_CASES = {
+    "bare": _plan(op=TaskName.TRAIN_PCS, workers=8),
+    "full": _plan(
+        op=TaskName.TRAIN_PCS,
+        workers=8,
+        checkpoint_every=200,
+        retain_every=800,
+        experiment="pcs-blueprint",
+        arm="pcs-w8",
+        parent="run-x",
+        sets=("pcs__alternating=true",),
+        run_id="run-a",
+    ),
+    "reporting": _plan(op=TaskName.TRAIN_PCS, workers=8, progress_path=REPORTING),
+}
+
 EVAL_CASES = {
     "at-a-rung": (_plan(op=TaskName.EVALUATE, run_id="run-a"), "1000000"),
     "latest": (_plan(op=TaskName.EVALUATE, run_id="run-a"), ""),
@@ -127,6 +143,16 @@ def test_every_flag_a_board_free_task_passes_is_declared(task):
     assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
     assert not _undeclared(argv), _message(argv)
     assert "--workers" not in argv, "the board-free kernel is ONE process"
+
+
+@pytest.mark.parametrize("task", PCS_CASES.values(), ids=list(PCS_CASES))
+def test_every_flag_a_pcs_task_passes_is_declared(task):
+    """The sampling trainer takes the scalar trainer's `--workers` AND its own
+    `--retain-every`; both must be real flags on `train-pcs`."""
+    argv = task.commands[0]
+    assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
+    assert not _undeclared(argv), _message(argv)
+    assert "--workers" in argv, "the sampling trainer is Hogwild across workers"
 
 
 @pytest.mark.parametrize(("task", "rung"), EVAL_CASES.values(), ids=list(EVAL_CASES))

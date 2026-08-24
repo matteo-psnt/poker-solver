@@ -73,6 +73,10 @@ class RunMetadata:
     # from system.config_name inside the YAML, so a run and its override-variant
     # record the same name. None on pre-hash runs.
     config_hash: str | None = None
+    # Which trainer filled the table: "scalar", "board-free" or "pcs". Nothing
+    # else records it -- the checkpoint layout is identical across them and the
+    # config snapshot is the same YAML -- and the ledger tells lineages apart by it.
+    kernel: str | None = None
 
     def creation_facts(self) -> dict[str, Any]:
         """Everything fixed when the run was created, for the ``created`` event.
@@ -95,6 +99,7 @@ class RunMetadata:
             "arm": self.arm,
             "parent_run_id": self.parent_run_id,
             "config_hash": self.config_hash,
+            "kernel": self.kernel,
             "storage_capacity": self.storage_capacity,
             "config": self.config.to_dict(),
         }
@@ -115,6 +120,7 @@ class RunMetadata:
         experiment_id: str | None = None,
         arm: str | None = None,
         parent_run_id: str | None = None,
+        kernel: str | None = None,
     ) -> RunMetadata:
         storage_capacity = config.storage.initial_capacity if config else 0
         now = datetime.now(UTC).isoformat()
@@ -155,6 +161,7 @@ class RunMetadata:
             arm=arm,
             parent_run_id=parent_run_id,
             config_hash=config.content_hash() if config else None,
+            kernel=kernel,
         )
 
     @classmethod
@@ -235,6 +242,7 @@ class RunMetadata:
             arm=_opt_str(data.get("arm")),
             parent_run_id=_opt_str(data.get("parent_run_id")),
             config_hash=_opt_str(data.get("config_hash")),
+            kernel=_opt_str(data.get("kernel")),
         )
 
     @classmethod
@@ -360,6 +368,7 @@ class RunMetadata:
             "arm": self.arm,
             "parent_run_id": self.parent_run_id,
             "config_hash": self.config_hash,
+            "kernel": self.kernel,
             "config": config_dict,
         }
 

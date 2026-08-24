@@ -134,6 +134,7 @@ class TaskSpec:
     sets: tuple[str, ...] = ()
     workers: int | None = None
     checkpoint_every: int = DEFAULT_CHECKPOINT_EVERY
+    retain_every: int = 0
     timeout: str = DEFAULT_TIMEOUT
     eval_method: str = ""
     eval_at: str = ""

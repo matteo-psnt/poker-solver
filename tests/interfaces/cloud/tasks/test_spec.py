@@ -168,6 +168,7 @@ class TestEnvironment:
             "RUN_EQUITY_PRIOR",
             "RUN_EQUITY_PRIOR_TEMPERATURE",
             "RUN_CHECKPOINT_EVERY",
+            "RUN_RETAIN_EVERY",
             "RUN_GIT_COMMIT",
             "RUN_GIT_DIRTY",
             "RUN_GIT_BRANCH",
