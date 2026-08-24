@@ -112,9 +112,11 @@ def mark_visited_from_strategy(storage: StaticArrayStorage) -> None:
     untrained, and a checkpoint that never set the flag scores like an empty one.
     """
     tree = storage.tree
-    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
+    # tree.row_widths, never a np.repeat over buckets_per_node: that rebuilds
+    # the retired node-major row order and marks the WRONG rows visited under
+    # the bucket-major layout.
     starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(per_row[:-1], out=starts[1:])
+    np.cumsum(tree.row_widths[:-1], out=starts[1:])
     mass = np.add.reduceat(np.asarray(storage.strategy_sum, dtype=np.float64), starts)
     storage.visited[:] = mass > 0.0
 
