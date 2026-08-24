@@ -39,7 +39,9 @@ export function Shell() {
   const pool = { data: view.data?.parts?.pool?.payload };
   const jobs = { data: view.data?.parts?.jobs?.payload };
 
-  const nodes = pool.data?.current_dedicated_nodes ?? null;
+  const nodes = pool.data?.total_nodes ?? null;
+  // Summed over pools for the same reason `nodes` is: two pools, one header.
+  const wanted = pool.data?.pools.reduce((t, p) => t + (p.target_dedicated_nodes ?? 0), 0) ?? null;
   // `?.` past `jobs` as well as past `data`: this is the app SHELL, so a 200
   // whose body lacks the field takes down every page at once rather than one
   // panel. Same one-character gap as `RunPicker`'s `current` had.
@@ -90,14 +92,12 @@ export function Shell() {
               styled as an alarm. */}
           <span>
             pool <span className="tnum text-[var(--fg)]">{count(nodes)}</span>
-            {pool.data?.target_dedicated_nodes != null && (
-              <span className="tnum">/{pool.data.target_dedicated_nodes}</span>
-            )}
+            {wanted != null && <span className="tnum">/{wanted}</span>}
           </span>
           {/* What it costs NOW, not the per-node list price: the rate is the
               same every day and the node count is the thing that moves. */}
           {pool.data?.burn_per_hour != null && (
-            <span title={pool.data.hourly_cost ?? undefined}>
+            <span>
               · <span className="tnum text-[var(--fg)]">${pool.data.burn_per_hour.toFixed(2)}</span>
               /hr
             </span>

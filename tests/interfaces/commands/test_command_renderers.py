@@ -42,7 +42,7 @@ from src.interfaces.commands.curve import CurvePayload
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
-from src.interfaces.commands.pool_status import PoolPayload
+from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.progress import ProgressPayload, ProgressRow
 from src.interfaces.commands.push_code import PushedCodePayload
@@ -484,18 +484,34 @@ PAYLOADS: dict[str, Any] = {
     # the shape the renderer exists to unpack -- Batch reports the generic
     # `AllocationFailed` and hides the actionable half in here.
     "pool-status": PoolPayload(
-        pool_id="train",
-        hourly_cost="$0.80/hr/node",
-        allocation_state="steady",
-        current_dedicated_nodes=0,
-        target_dedicated_nodes=0,
-        vm_size="standard_d16als_v6",
-        resize_errors=[
-            ResizeError(
-                code="AllocationFailed",
-                message="Desired number of dedicated nodes could not be allocated",
-                values={"ErrorJson": '{"code":"AllocationFailed"}', "Plain": "not json"},
-            )
+        total_nodes=2,
+        burn_per_hour=1.376,
+        pools=[
+            PoolView(
+                pool_id="train",
+                hourly_cost="$0.688/hr/node",
+                burn_per_hour=0.688,
+                allocation_state="steady",
+                current_dedicated_nodes=1,
+                target_dedicated_nodes=1,
+                vm_size="standard_d16als_v6",
+                resize_errors=[
+                    ResizeError(
+                        code="AllocationFailed",
+                        message="Desired number of dedicated nodes could not be allocated",
+                        values={"ErrorJson": '{"code":"AllocationFailed"}', "Plain": "not json"},
+                    )
+                ],
+            ),
+            PoolView(
+                pool_id="train-big",
+                hourly_cost="$1.376/hr/node",
+                burn_per_hour=0.688,
+                allocation_state="steady",
+                current_dedicated_nodes=1,
+                target_dedicated_nodes=1,
+                vm_size="standard_d32als_v6",
+            ),
         ],
     ),
     "activity": ActivityPayload(

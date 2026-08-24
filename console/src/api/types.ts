@@ -15,8 +15,9 @@ import type { components } from "./types.gen";
 
 type S = components["schemas"];
 
-/** The pool, and what Batch is running. */
+/** Every pool, and what Batch is running. */
 export type Pool = S["PoolPayload"];
+export type PoolView = S["PoolView"];
 export type NodeStatus = S["NodeStatus"];
 export type NodePhase = S["NodePhase"];
 export type AutoscaleRun = S["AutoscaleRun"];
