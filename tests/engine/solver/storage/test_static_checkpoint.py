@@ -10,8 +10,11 @@ tests below are the only thing standing between that and a silently wrong run.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
+import zarr
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -22,6 +25,7 @@ from src.engine.solver.storage.static_checkpoint import (
     AbstractionMismatchError,
     FingerprintMismatchError,
     StaticCheckpointManifest,
+    _legacy_index_maps,
     load_checkpoint,
     retained_iterations,
     save_checkpoint,
@@ -367,3 +371,52 @@ class TestAbstractionIdentity:
             assert load_checkpoint(storage, tmp_path, abstraction_id="anything") == 100
         finally:
             storage.close()
+
+
+class TestLegacyLayoutTranslation:
+    """A v1 node-major checkpoint of the SAME tree loads by permutation.
+
+    The bucket-major layout moved every row's address without changing its
+    values, so a legacy snapshot is a permutation of a current one — and the
+    share holds nothing but legacy snapshots the day the layout lands.
+    """
+
+    def test_a_node_major_checkpoint_round_trips(self, tree, tmp_path):
+        storage = StaticArrayStorage(tree)
+        rng = np.random.default_rng(7)
+        storage.regrets[:] = rng.standard_normal(tree.num_slots).astype(np.float32)
+        storage.strategy_sum[:] = rng.standard_normal(tree.num_slots).astype(np.float32)
+        storage.reach_counts[:] = rng.integers(0, 9, tree.num_rows)
+        storage.cumulative_utility[:] = rng.standard_normal(tree.num_rows)
+        storage.visited[:] = rng.integers(0, 2, tree.num_rows).astype(np.uint8)
+        expected = {name: getattr(storage, name).copy() for name in _ARRAYS}
+        save_checkpoint(storage, tmp_path, 5)
+        storage.close()
+
+        # Rewrite the snapshot as v1 wrote it: every value scattered back to
+        # its node-major address, both fingerprints stamped with the legacy id.
+        row_source, slot_source = _legacy_index_maps(tree)
+        root = zarr.open(zarr.DirectoryStore(str(tmp_path / "static-5.zarr")), mode="r+")
+        for name in _ARRAYS:
+            gather = slot_source if name in ("regrets", "strategy_sum") else row_source
+            legacy = np.empty_like(expected[name])
+            legacy[gather] = expected[name]
+            root[name][:] = legacy
+        root.attrs["fingerprint"] = tree.legacy_fingerprint()
+        manifest_path = tmp_path / "STATIC_CHECKPOINT.json"
+        raw = json.loads(manifest_path.read_text())
+        raw["fingerprint"] = tree.legacy_fingerprint()
+        manifest_path.write_text(json.dumps(raw))
+
+        fresh = StaticArrayStorage(tree)
+        try:
+            assert load_checkpoint(fresh, tmp_path) == 5
+            for name in _ARRAYS:
+                assert np.array_equal(getattr(fresh, name), expected[name]), name
+        finally:
+            fresh.close()
+
+    def test_the_maps_are_bijections(self, tree):
+        row_source, slot_source = _legacy_index_maps(tree)
+        assert len(np.unique(row_source)) == tree.num_rows
+        assert len(np.unique(slot_source)) == tree.num_slots
