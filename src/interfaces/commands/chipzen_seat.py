@@ -31,6 +31,13 @@ if TYPE_CHECKING:
 
 TOKEN_ENV = "CHIPZEN_EXTBOT_TOKEN"
 BOT_ENV = "CHIPZEN_BOT_ID"
+
+# Where `infra/serve/deploy.sh` actually puts a staged run -- it writes
+# `RUNS_DIR=$WORK/data/runs` into /etc/blueprint.env, and the `data` directory is
+# a symlink the deploy makes because the abstraction resolver scans `<cwd>/data`.
+# `blueprint-serve` defaults to /mnt/work/runs and gets away with it only because
+# systemd passes RUNS_DIR explicitly; nothing passes it to this command.
+BOX_RUNS_DIR = "/mnt/work/data/runs"
 # Their names, not ours -- the SDK resolves exactly these three and "production"
 # is not one of them.
 #
@@ -75,7 +82,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", required=True, help="Run id, fragment, or path to a run dir.")
     parser.add_argument(
         "--runs-dir",
-        default="/mnt/work/runs",
+        default=BOX_RUNS_DIR,
         help="Where runs live on this box. Local disk, never the share.",
     )
     parser.add_argument(

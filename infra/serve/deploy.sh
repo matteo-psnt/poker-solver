@@ -103,7 +103,11 @@ cp -ru "$SHARE/archive/$RUN_ID/." "$WORK/data/runs/$RUN_ID/"
 # --------------------------------------------------------------------------- #
 echo "==> uv sync"
 cd "$WORK/code"
-"$HOME/.local/bin/uv" sync --no-dev
+# `--extra chipzen` because this box is also where `chipzen-seat` holds its
+# WebSocket, and the SDK is an optional extra that a bare `--no-dev` skips --
+# the seat then refuses at import with "the Chipzen SDK is not installed".
+# Harmless when nothing seats: one small pure-Python dependency.
+"$HOME/.local/bin/uv" sync --no-dev --extra chipzen
 
 # --------------------------------------------------------------------------- #
 # point the service at it
