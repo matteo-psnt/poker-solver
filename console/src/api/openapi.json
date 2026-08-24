@@ -2207,6 +2207,17 @@
             ],
             "title": "Burn Per Hour"
           },
+          "max_vcpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Vcpus"
+          },
           "op": {
             "const": "pool-status",
             "default": "pool-status",
@@ -2222,6 +2233,11 @@
           },
           "total_nodes": {
             "title": "Total Nodes",
+            "type": "integer"
+          },
+          "total_vcpus": {
+            "default": 0,
+            "title": "Total Vcpus",
             "type": "integer"
           }
         },
@@ -2300,6 +2316,28 @@
             ],
             "title": "Hourly Cost"
           },
+          "max_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Nodes"
+          },
+          "max_vcpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Vcpus"
+          },
           "nodes": {
             "default": [],
             "items": {
@@ -2330,6 +2368,28 @@
               }
             ],
             "title": "Target Dedicated Nodes"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          },
+          "vcpus_per_node": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus Per Node"
           },
           "vm_size": {
             "anyOf": [

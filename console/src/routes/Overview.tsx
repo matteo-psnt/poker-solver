@@ -177,7 +177,17 @@ function PoolFacts({ pool, now }: { pool: PoolView; now: number }) {
           label="nodes"
           value={`${count(pool.current_dedicated_nodes)} of ${count(
             pool.target_dedicated_nodes,
-          )} wanted`}
+          )} wanted${pool.max_nodes != null ? ` · cap ${pool.max_nodes}` : ""}`}
+        />
+        {/* Where we are capacity-wise, in the unit that compares across pools. */}
+        <Stat
+          label="vCPU"
+          value={
+            pool.vcpus != null
+              ? `${pool.vcpus}${pool.max_vcpus != null ? ` of ${pool.max_vcpus} cap` : ""}`
+              : "—"
+          }
+          title={pool.vcpus_per_node != null ? `${pool.vcpus_per_node} vCPU/node` : undefined}
         />
         {/* `resizing for 4m` is the fact that matters; `steady` needs no clock. */}
         <Stat

@@ -40,8 +40,12 @@ export function Shell() {
   const jobs = { data: view.data?.parts?.jobs?.payload };
 
   const nodes = pool.data?.total_nodes ?? null;
-  // Summed over pools for the same reason `nodes` is: two pools, one header.
-  const wanted = pool.data?.pools.reduce((t, p) => t + (p.target_dedicated_nodes ?? 0), 0) ?? null;
+  // vCPUs, not nodes: pool sizes diverged (D16/D32/D64), so a node count no
+  // longer says how much compute is up. The node count survives in the title.
+  const vcpus = pool.data?.total_vcpus ?? null;
+  // The pools' own formula ceilings, summed server-side; null until every
+  // pool has reported one, so it can never understate capacity.
+  const capacity = pool.data?.max_vcpus ?? null;
   // `?.` past `jobs` as well as past `data`: this is the app SHELL, so a 200
   // whose body lacks the field takes down every page at once rather than one
   // panel. Same one-character gap as `RunPicker`'s `current` had.
@@ -90,9 +94,9 @@ export function Shell() {
         <header className="flex items-center gap-4 border-b border-[var(--border)] px-4 py-2 font-mono text-[11px] text-[var(--fg-muted)]">
           {/* An idle pool at rest is CORRECT and cheap. It is deliberately not
               styled as an alarm. */}
-          <span>
-            pool <span className="tnum text-[var(--fg)]">{count(nodes)}</span>
-            {wanted != null && <span className="tnum">/{wanted}</span>}
+          <span title={nodes != null ? `${nodes} node(s)` : undefined}>
+            pool <span className="tnum text-[var(--fg)]">{count(vcpus)}</span>
+            {capacity != null && <span className="tnum">/{capacity}</span>} vCPU
           </span>
           {/* What it costs NOW, not the per-node list price: the rate is the
               same every day and the node count is the thing that moves. */}

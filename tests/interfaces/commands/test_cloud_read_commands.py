@@ -76,6 +76,46 @@ class TestResizeErrorValuesAreUnpacked:
         assert capsys.readouterr().out == ""
 
 
+class TestVcpuArithmetic:
+    """Pool sizes diverged (D16/D32/D64), so the console reads capacity in
+    vCPUs; both inputs come from what pool-status already fetched, and a SKU
+    or formula that does not carry the number must yield None, not a guess."""
+
+    def test_d_series_core_count_comes_from_the_sku_name(self):
+        assert pool_status.vcpus_per_node("standard_d32als_v6") == 32
+        assert pool_status.vcpus_per_node("STANDARD_D64als_v6") == 64
+
+    def test_non_d_series_and_absent_sku_yield_none(self):
+        # E16-4ads has 4 usable cores, not 16 -- a D-only parse refuses rather
+        # than reading the wrong number off the name.
+        assert pool_status.vcpus_per_node("standard_e16-4ads_v5") is None
+        assert pool_status.vcpus_per_node(None) is None
+
+    def test_ceiling_is_the_formulas_own_max_nodes(self):
+        status = batch.PoolStatus(
+            pool_id="train-big",
+            allocation_state="steady",
+            current_dedicated_nodes=2,
+            target_dedicated_nodes=2,
+            vm_size="standard_d32als_v6",
+            autoscale=batch.AutoscaleRun(variables={"maxNodes": "2", "pending": "10"}),
+        )
+        view = pool_status._view(status, "$1.376/hr/node")
+        assert (view.max_nodes, view.vcpus, view.max_vcpus) == (2, 64, 64)
+
+    def test_no_autoscale_run_means_no_ceiling(self):
+        status = batch.PoolStatus(
+            pool_id="train",
+            allocation_state="steady",
+            current_dedicated_nodes=1,
+            target_dedicated_nodes=1,
+            vm_size="standard_d16als_v6",
+        )
+        view = pool_status._view(status, None)
+        assert (view.max_nodes, view.max_vcpus) == (None, None)
+        assert view.vcpus == 16
+
+
 class TestScorePassthrough:
     """Extra evaluate flags reach the node, and the `--` does not.
 
