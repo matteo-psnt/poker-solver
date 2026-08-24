@@ -369,6 +369,49 @@ class TestWireAction:
             wire_action(Action(ActionType.RAISE, 200), turn, spot)
 
 
+class TestValidActions:
+    """Their `valid_actions` is authoritative and is NOT derivable from the sizes.
+
+    Measured on the first live hand against PluriBot: facing an all-in the frame
+    still carried a positive `max_raise` while offering only fold and call, and
+    four raises were rejected -- after which the SERVER picked a safe default and
+    the blueprint's choice was discarded.
+    """
+
+    @pytest.fixture
+    def spot(self, blueprint, scale):
+        return reconstruct(blueprint, TurnState.parse(turn_payload()), seat=0, scale=scale)
+
+    @pytest.fixture
+    def facing_an_all_in(self):
+        """Positive max_raise, but only fold and call on offer."""
+        return TurnState.parse(
+            turn_payload(to_call=600, max_raise=STACK, valid_actions=["fold", "call"])
+        )
+
+    def test_a_raise_becomes_a_call_when_raising_is_not_offered(self, facing_an_all_in, spot):
+        frame = wire_action(Action(ActionType.RAISE, 200), facing_an_all_in, spot)
+        assert frame == {"action": "call", "params": {}}
+
+    def test_an_all_in_becomes_a_call_too(self, facing_an_all_in, spot):
+        frame = wire_action(Action(ActionType.ALL_IN, 350), facing_an_all_in, spot)
+        assert frame == {"action": "call", "params": {}}
+
+    def test_a_raise_becomes_a_check_when_nothing_is_owed(self, spot):
+        turn = TurnState.parse(turn_payload(to_call=0, valid_actions=["check"]))
+        assert wire_action(Action(ActionType.BET, 50), turn, spot)["action"] == "check"
+
+    def test_a_frame_without_the_field_is_not_filtered(self, spot):
+        """A recorded fixture predating the field still gets a real answer."""
+        turn = TurnState.parse(turn_payload())
+        assert turn.valid_actions == ()
+        assert wire_action(Action(ActionType.RAISE, 200), turn, spot)["action"] == "raise"
+
+    def test_an_offered_raise_still_goes_out_as_one(self, spot):
+        turn = TurnState.parse(turn_payload(valid_actions=["fold", "call", "raise"]))
+        assert wire_action(Action(ActionType.RAISE, 200), turn, spot)["action"] == "raise"
+
+
 class TestPlaceholders:
     def test_two_cards_outside_the_dead_set(self):
         turn = TurnState.parse(turn_payload(board=["2c", "7d", "9h"]))

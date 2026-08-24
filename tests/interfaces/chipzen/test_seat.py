@@ -107,6 +107,36 @@ class TestDecide:
         )
         assert built.tally.off_tree == 1
 
+    def test_the_same_hand_answered_twice_counts_its_drift_once(self, blueprint):
+        """Every turn replays the whole hand, so summing per-turn double-counts.
+
+        Read 66-of-66 on the first live match -- one charge per remaining
+        decision for the same handful of snapped actions.
+        """
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1)
+        payload = turn_payload(
+            your_hole_cards=["Qs", "Qc"],
+            to_call=330,
+            action_history=[SMALL_BLIND_ENTRY, BIG_BLIND_ENTRY, raise_entry(0, 530)],
+        )
+        for _ in range(5):
+            built.decide_frame(payload)
+        assert built.tally.decisions == 5
+        assert built.tally.off_tree == 1
+
+    def test_two_hands_each_contribute_their_own(self, blueprint):
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1)
+        for hand in (1, 2):
+            built.decide_frame(
+                turn_payload(
+                    hand_number=hand,
+                    your_hole_cards=["Qs", "Qc"],
+                    to_call=330,
+                    action_history=[SMALL_BLIND_ENTRY, BIG_BLIND_ENTRY, raise_entry(0, 530)],
+                )
+            )
+        assert built.tally.off_tree == 2
+
 
 class TestItNeverRaises:
     def test_an_unparseable_payload_folds(self, seat):

@@ -49,19 +49,34 @@ DEFAULT_BUDGET_MS = 1200
 class SeatTally:
     """What a seat has seen, for the log line at the end of a match.
 
-    ``off_tree`` counts opponent actions we had to snap to a legal size; it is
-    the drift between the table and the tree, and the first number to look at
-    when arena results and home scores disagree.
+    ``off_tree`` counts opponent actions we had to snap to a legal size -- the
+    drift between the table and the tree, and the first number to look at when
+    arena results and home scores disagree.
+
+    It is a per-hand MAXIMUM summed across hands, not a running total. Every turn
+    replays that hand's whole history, so each reconstruction reports the count
+    for the hand so far; adding those up charged the same action once per
+    remaining decision and read 66-of-66 on the first live match. Within a hand
+    the count only grows, so the last one seen is the true one.
     """
 
     decisions: int = 0
-    off_tree: int = 0
     truncated: int = 0
     fallbacks: int = 0
+    per_hand: dict[int, int] = field(default_factory=dict)
+
+    @property
+    def off_tree(self) -> int:
+        return sum(self.per_hand.values())
+
+    def saw(self, hand: int, off_tree: int) -> None:
+        """Record this hand's off-tree count, keeping the largest seen for it."""
+        self.per_hand[hand] = max(self.per_hand.get(hand, 0), off_tree)
 
     def summary(self) -> str:
         return (
-            f"{self.decisions} decisions, {self.off_tree} off-tree opponent actions, "
+            f"{self.decisions} decisions over {len(self.per_hand)} hands, "
+            f"{self.off_tree} off-tree opponent actions, "
             f"{self.truncated} truncated replays, {self.fallbacks} safe defaults"
         )
 
@@ -136,7 +151,7 @@ class BlueprintSeat:
             self.tally.fallbacks += 1
             return self._pass(turn)
 
-        self.tally.off_tree += spot.off_tree
+        self.tally.saw(turn.hand_number, spot.off_tree)
         if spot.truncated:
             self.tally.truncated += 1
             logger.warning("Replay of hand %s did not land on our seat; passing.", turn.hand_number)
@@ -185,6 +200,8 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
         "min_raise": state.min_raise,
         "max_raise": state.max_raise,
         "action_history": list(state.action_history),
+        # Authoritative, and not derivable from the numbers above.
+        "valid_actions": list(getattr(state, "valid_actions", ()) or ()),
     }
 
 
