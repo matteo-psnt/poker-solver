@@ -34,6 +34,17 @@ dependencies = [
     "httpx>=0.28.1",
 ]
 
+[project.optional-dependencies]
+# Only `chipzen-seat`'s live path imports this, and only a box holding a seat
+# needs it. Kept out of the base install so the pool, which never plays a hand,
+# does not carry a websocket client it will not open.
+chipzen = ["chipzen-bot>=0.3.3"]
+
+[tool.deptry.package_module_name_map]
+# The wheel is `chipzen-bot`; the module it installs is `chipzen`. Without the
+# mapping deptry reports the extra as unused AND its import as undeclared.
+chipzen-bot = "chipzen"
+
 [project.scripts]
 poker-solver = "src.interfaces.cli.headless:main"
 

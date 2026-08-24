@@ -78,9 +78,10 @@ class ReplayedNode:
 def encode_action(action: Action) -> str:
     """Wire token for ``action`` -- ``"c"``, ``"b150"``, ``"A"``.
 
-    Sized actions carry the amount they raise *to*, not by, matching
-    :class:`Action`; a "by" encoding would need the pot to be interpreted and so
-    would not survive being read on its own.
+    The number is :attr:`Action.amount` verbatim, which is *not* a raise-to: on a
+    RAISE it is the chips above the call, and only on a BET is it the total. That
+    is why a token is meaningful only against the state it replays into, and why
+    :func:`match_action` compares it to a legal action rather than to a pot.
     """
     token = _TOKEN_BY_TYPE[action.type]
     return f"{token}{action.amount}" if action.type in _SIZED else token
@@ -176,13 +177,13 @@ def replay(
 
     consumed = 0
     for token in parse_path(path):
-        state, consumed = _advance_chance(state, board, consumed)
+        state, consumed = advance_chance(state, board, consumed)
         if state.is_terminal:
             raise PathError(f"'{token}' comes after the hand has already ended.")
         legal = rules.get_legal_actions(state, action_model=blueprint.action_model)
         state = state.apply_action(match_action(token, legal), rules)
 
-    state, consumed = _advance_chance(state, board, consumed)
+    state, consumed = advance_chance(state, board, consumed)
     terminal = state.is_terminal
     return ReplayedNode(
         state=state,
@@ -194,7 +195,7 @@ def replay(
     )
 
 
-def _advance_chance(
+def advance_chance(
     state: GameState, board: tuple[Card, ...], consumed: int
 ) -> tuple[GameState, int]:
     """Deal from ``board`` for as long as the state is waiting on cards."""

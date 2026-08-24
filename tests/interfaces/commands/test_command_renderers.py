@@ -35,6 +35,7 @@ from src.interfaces.commands.activity import ActivityPayload, CommandActivity, F
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
+from src.interfaces.commands.chipzen_seat import ChipzenSeatPayload
 from src.interfaces.commands.compact_legs import CompactedPayload
 from src.interfaces.commands.configs import ConfigKind, ConfigsPayload
 from src.interfaces.commands.cost import CostPayload
@@ -315,6 +316,23 @@ PAYLOADS: dict[str, Any] = {
         url="http://127.0.0.1:8790",
         host="127.0.0.1",
         port=8790,
+    ),
+    # Replay, not live: holding a seat never returns, so only this mode has a
+    # payload a renderer can be handed. The warning fields are set so the
+    # renderer's three conditional lines are the ones under test.
+    "chipzen-seat": ChipzenSeatPayload(
+        run="run-production-025433-1095",
+        run_dir="/mnt/work/runs/run-production-025433-1095",
+        runs_dir="/mnt/work/runs",
+        mode="replay",
+        resolver=False,
+        budget_ms=1200,
+        decision={"action": "raise", "params": {"amount": 60}},
+        depth_matches=False,
+        their_depth=50.0,
+        our_depth=100.0,
+        off_tree=2,
+        truncated=True,
     ),
     "serve": ServePayload(
         url="http://127.0.0.1:8765",

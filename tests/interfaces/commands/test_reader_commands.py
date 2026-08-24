@@ -19,11 +19,11 @@ from src.interfaces.commands import load_all
 
 # The ones that run ON a box holding a run, rather than answering from the
 # published record. Three are pool tasks that write to /mnt/work before
-# publishing. `blueprint-serve` is NOT a pool task -- it runs on the long-lived
-# reader in `infra/serve/` -- but it belongs here for the same reason: it mmaps a
-# checkpoint and the card abstraction from local disk, which is a place, not a
-# record.
-NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve"})
+# publishing. `blueprint-serve` and `chipzen-seat` are NOT pool tasks -- they run
+# on the long-lived reader in `infra/serve/` -- but they belong here for the same
+# reason: both mmap a checkpoint and the card abstraction from local disk, which
+# is a place, not a record.
+NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve", "chipzen-seat"})
 
 LOCAL_SOURCE_FLAG = "--runs-dir"
 
