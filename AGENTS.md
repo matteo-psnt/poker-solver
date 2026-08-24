@@ -32,10 +32,11 @@ matching file: `commands.md`, `console.md`, `cloud.md`,
 what a cloud job, a shell and an agent drive; the web console is the one a human
 reads. New capability goes in a command; the console gains it by calling one.
 
-**There is no `data/` directory, and nothing recreates one.** A run's rungs
-live in the `checkpoints` blob container and its record in Postgres; the share
-holds manifests, markers and task logs. Regenerable caches go under
-`$POKER_SOLVER_CACHE`, else `$XDG_CACHE_HOME`, else `~/.cache/poker-solver`.
+**There is no `data/` directory, and nothing recreates one.** A run's rungs and
+manifest live in the `checkpoints` blob container, its record in Postgres, its
+logs and profiles in `diagnostics`. **The share holds nothing and nothing writes
+to it** (09-09). Regenerable caches go under `$POKER_SOLVER_CACHE`, else
+`$XDG_CACHE_HOME`, else `~/.cache/poker-solver`.
 
 Config YAML under `config/` is the source of truth for training setups. Tests
 in `tests/` mirror `src/`.

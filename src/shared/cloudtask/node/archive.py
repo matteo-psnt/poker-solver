@@ -1,19 +1,18 @@
-"""Copying a run between the node's data disk and the SMB share.
+"""Moving a run between the node's data disk and the containers.
 
-Four rules, each a production failure rather than a preference, each argued at
+Three rules, each a production failure rather than a preference, each argued at
 the code that honours it:
 
 * publish mid-run -- the node's disk dies with the task
-* manifest LAST -- an interrupted copy must not leave the share naming a rung
-  that is only half there
-* a completion marker per snapshot -- manifest-last cannot protect a single
-  directory's copy
-* no timestamps, no modes -- the SMB mount refuses ``utime``, and reports it
-  as failure only AFTER copying the data
+* manifest LAST -- a manifest that lands before the rung it names advertises a
+  checkpoint nothing can fetch, which every training tick used to do
+* presence is completeness -- one rung is one atomically-committed object, so
+  there is no half-written state and no completion marker to keep in step
 
-The last one is the trap for an editor: every copy here must stay
-:func:`shutil.copyfile`, NOT :func:`shutil.copytree`, whose default
-``copy_function`` is ``copy2`` and would reintroduce it.
+The share was the fourth: it could not preserve timestamps and reported that
+only AFTER copying, so every copy had to stay :func:`shutil.copyfile` rather
+than :func:`shutil.copytree`. Nothing is published there now, and what is left
+of ``copy_tree`` serves the FETCH direction, onto the node's own disk.
 """
 
 from __future__ import annotations
