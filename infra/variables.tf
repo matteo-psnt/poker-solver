@@ -46,6 +46,28 @@ variable "pool_vm_size" {
   default     = "Standard_D16als_v6"
 }
 
+variable "pool_big_vm_size" {
+  description = <<-EOT
+    SKU of the `train-big` pool. D32als_v6 = 16 physical cores x SMT at
+    $1.376/hr (the measured $0.043/vCPU-hr line). The worker curve on a D16
+    is linear per PHYSICAL core (08-23), so this box should ~2x a D16;
+    that claim is what the pool exists to test. D48/D64 additionally need
+    `allowed_vm_skus` extended.
+  EOT
+  type        = string
+  default     = "Standard_D32als_v6"
+}
+
+variable "pool_big_max_nodes" {
+  description = <<-EOT
+    Autoscale ceiling for `train-big`, and its burn bound: 2 x D32als_v6 is
+    ~$2.75/hr. Sized for A/B probes, not campaigns -- raise it deliberately
+    if the big box wins and work moves here.
+  EOT
+  type        = number
+  default     = 2
+}
+
 variable "max_nodes" {
   description = <<-EOT
     Ceiling for the autoscale formula, and the STRONGEST cost control here: no

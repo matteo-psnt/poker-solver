@@ -48,6 +48,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Config override, repeatable (e.g. --set solver__cfr_plus=true).",
     )
     parser.add_argument(
+        "--pool",
+        choices=("train", "big"),
+        default="train",
+        help="Which pool runs it: train (D16) or big (the train-big D32 pool, "
+        "for worker-scaling past one D16's cores).",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=None,
@@ -189,7 +196,8 @@ def run(args: argparse.Namespace) -> SubmitPayload:
     # node cannot match. A fresh run's id does not exist yet.
     run_id = resolve_published_run(args.run) if args.run else args.run
     payload = dispatch.stage_and_queue(
-        lambda snapshot: [
+        pool=args.pool,
+        make_tasks=lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
                 op=TaskName.TRAIN if args.kernel == "scalar" else TaskName.TRAIN_VECTOR,
@@ -213,7 +221,7 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 equity_prior_weight=args.equity_prior_weight,
                 equity_prior_temperature=args.equity_prior_temperature,
             )
-        ]
+        ],
     )
     return payload.extend(SubmitPayload, target_iteration=args.to)
 

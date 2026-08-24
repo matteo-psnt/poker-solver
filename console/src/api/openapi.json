@@ -3409,6 +3409,17 @@
             ],
             "title": "Parent"
           },
+          "pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool"
+          },
           "run": {
             "anyOf": [
               {

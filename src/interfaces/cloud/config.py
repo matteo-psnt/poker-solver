@@ -104,6 +104,19 @@ def _value(chdir: str, name: str) -> str:
     return str(entry["value"])
 
 
+def _optional_value(chdir: str, name: str) -> str:
+    """An output that may predate the current infra -- absent reads as "".
+
+    `pool_big_id` exists only after the `train-big` pool has been applied;
+    every command that does not name that pool must keep working against the
+    older state.
+    """
+    try:
+        return _value(chdir, name)
+    except CloudConfigError:
+        return ""
+
+
 @dataclass(frozen=True)
 class CloudConfig:
     """Everything the control plane needs to talk to Azure.
@@ -117,6 +130,7 @@ class CloudConfig:
 
     batch_endpoint: str
     pool_id: str
+    pool_big_id: str
     storage_account: str
     share_name: str
     share_key: str
@@ -132,6 +146,7 @@ class CloudConfig:
         return cls(
             batch_endpoint=endpoint,
             pool_id=_value(str(INFRA_DIR), "pool_id"),
+            pool_big_id=_optional_value(str(INFRA_DIR), "pool_big_id"),
             storage_account=_value(str(STORE_DIR), "storage_account"),
             share_name=_value(str(STORE_DIR), "share_name"),
             share_key=_value(str(STORE_DIR), "access_key"),

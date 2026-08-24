@@ -273,3 +273,42 @@ class TestQueueLoop:
         self._stub(monkeypatch, [])
         with pytest.raises(CommandError, match="Nothing to submit"):
             dispatch.stage_and_queue(lambda snap: [])
+
+
+class TestPoolBinding:
+    """`--pool big` must land on the big pool's OWN job -- a Batch job is bound
+    to one pool at creation, so reusing the daily job would run a D32 spec on
+    the D16 pool silently."""
+
+    @staticmethod
+    def _stub(monkeypatch, calls, big=""):
+        config = SimpleNamespace(share_name="share", pool_id="pool", pool_big_id=big)
+        monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
+        monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
+        monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
+        monkeypatch.setattr(
+            dispatch.batch,
+            "ensure_job",
+            lambda _client, pool_id, _now, suffix="": calls.append((pool_id, suffix)) or "job",
+        )
+        monkeypatch.setattr(dispatch.batch, "submit_task", lambda *a, **k: None)
+
+    def test_big_selects_the_big_pool_and_its_own_job(self, monkeypatch):
+        calls: list = []
+        self._stub(monkeypatch, calls, big="pool-big")
+        dispatch.stage_and_queue(lambda snap: [_task()], pool="big")
+        assert calls == [("pool-big", "-big")]
+
+    def test_the_default_stays_on_the_training_pool(self, monkeypatch):
+        calls: list = []
+        self._stub(monkeypatch, calls, big="pool-big")
+        dispatch.stage_and_queue(lambda snap: [_task()])
+        assert calls == [("pool", "")]
+
+    def test_big_without_the_applied_infra_refuses_before_staging(self, monkeypatch):
+        calls: list = []
+        self._stub(monkeypatch, calls)
+        with pytest.raises(CommandError, match="train-big"):
+            dispatch.stage_and_queue(lambda snap: [_task()], pool="big")
+        assert calls == []

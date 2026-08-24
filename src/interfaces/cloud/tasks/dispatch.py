@@ -76,7 +76,7 @@ class Dispatched(BaseModel):
 
 
 def stage_and_queue(
-    make_tasks: Callable[[str], list[TaskSpec]], *, root: Path = CHECKOUT_ROOT
+    make_tasks: Callable[[str], list[TaskSpec]], *, root: Path = CHECKOUT_ROOT, pool: str = "train"
 ) -> Dispatched:
     """Snapshot the tree, open a job, and queue every task against that snapshot.
 
@@ -108,7 +108,8 @@ def stage_and_queue(
         raise CommandError("Nothing to submit.")
 
     client = batch.client(config)
-    job_id = batch.ensure_job(client, config.pool_id, now)
+    pool_id, pool_suffix = _pool_binding(config, pool)
+    job_id = batch.ensure_job(client, pool_id, now, pool_suffix)
     queued = []
     # The index, not only a random nonce, separates ids within one submission.
     # Every task here shares a single `now`, so a 30-rung score relied entirely
@@ -126,6 +127,21 @@ def stage_and_queue(
     return Dispatched(
         code_snapshot=snapshot, job_id=job_id, tasks=[item.task_id for item in queued]
     )
+
+
+def _pool_binding(config: CloudConfig, pool: str) -> tuple[str, str]:
+    """The pool's id and its job-id suffix -- a Batch job binds to ONE pool at
+    creation, so the big pool's tasks live under `poker-<date>-big`."""
+    if pool == "train":
+        return config.pool_id, ""
+    if pool == "big":
+        if not config.pool_big_id:
+            raise CommandError(
+                "The big-box pool is not in the Terraform state. Apply infra/ "
+                "(it adds `train-big`), then re-run; `--pool train` works now."
+            )
+        return config.pool_big_id, "-big"
+    raise CommandError(f"Unknown pool {pool!r}; expected 'train' or 'big'.")
 
 
 def _stamped(task: TaskSpec) -> TaskSpec:

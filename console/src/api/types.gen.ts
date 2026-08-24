@@ -2066,6 +2066,8 @@ export interface components {
             kernel?: string | null;
             /** Parent */
             parent?: string | null;
+            /** Pool */
+            pool?: string | null;
             /** Run */
             run?: string | null;
             /** Sets */
