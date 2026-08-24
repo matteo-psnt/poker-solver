@@ -77,6 +77,17 @@ class HUResolver:
         # Decisions where solve() raised and act() fell back to the blueprint.
         # Harnesses read this directly; the warning below is for humans only.
         self.fallback_count: int = 0
+        # Why a blueprint lookup did not land on a trained node. Counted because
+        # "my translator falls back a lot" was a code-reading claim, and the
+        # deployed-vs-blueprint gap is 2394 mbb/hand of SOMETHING.
+        self.lookup_calls: int = 0
+        self.lookup_used_shadow: int = 0
+        self.lookup_fell_back_menu: int = 0
+        self.lookup_fell_back_bucket: int = 0
+        self.lookup_on_tree: int = 0
+        self.lookup_fell_back_broken: int = 0
+        self.rows_uniform: int = 0
+        self.rows_total: int = 0
         # An on-tree parallel state, so ONE off-menu size from the opponent does
         # not turn every later blueprint lookup on the hand into a uniform row.
         self._shadow = TreeShadow(rules, action_model)
@@ -309,13 +320,22 @@ class HUResolver:
         combos (`_blueprint_strategy_matrix` walks all 1,326), and returning the
         shadow verbatim answered every one of them for the hand actually held.
         """
+        self.lookup_calls += 1
         shadow = self._shadow.state_for(state)
         if shadow is state:
+            # Two very different cases: still ON the abstract tree (nothing to
+            # translate, the real state IS the answer) versus a shadow that
+            # broke and left us keying off an off-tree node.
+            if self._shadow.broken:
+                self.lookup_fell_back_broken += 1
+            else:
+                self.lookup_on_tree += 1
             return state
         shadow_actions = self.rules.get_legal_actions(shadow, action_model=self.action_model)
-        if len(shadow_actions) != len(actions):
-            return state
-        if any(a.type is not b.type for a, b in zip(actions, shadow_actions, strict=True)):
+        if len(shadow_actions) != len(actions) or any(
+            a.type is not b.type for a, b in zip(actions, shadow_actions, strict=True)
+        ):
+            self.lookup_fell_back_menu += 1
             return state
         actor = state.current_player
         lookup = replace_actor_hole_cards(shadow, actor=actor, combo=tuple(state.hole_cards[actor]))
@@ -326,7 +346,9 @@ class HUResolver:
             # board the abstraction never enumerated. That used to escape here,
             # OUTSIDE `TreeShadow`'s fail-soft, and killed a whole evaluation:
             # losing sharpness on one lookup is the cheaper failure.
+            self.lookup_fell_back_bucket += 1
             return state
+        self.lookup_used_shadow += 1
         return lookup
 
     def _blueprint_strategy(
@@ -363,7 +385,9 @@ class HUResolver:
         distribution = blueprint_action_distribution(
             infoset, state, self.rules, actions, use_average=use_average
         )
+        self.rows_total += 1
         if distribution is None:
+            self.rows_uniform += 1
             return np.full(len(actions), 1.0 / len(actions), dtype=np.float64)
 
         slot_counts: dict[Action, int] = {}
