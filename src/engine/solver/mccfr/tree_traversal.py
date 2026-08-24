@@ -245,7 +245,10 @@ def _walk_node(walk: _Walk, node_id: int, board: tuple[Card, ...], known: int) -
     row = row_base + bucket
     start = slot_base + bucket * num_actions
     end = start + num_actions
-    walk.visited[row] = 1
+    # Test-then-set, mirroring `compiled_walk`: identical arrays either way,
+    # but the store only happens on first touch.
+    if walk.visited[row] == 0:
+        walk.visited[row] = 1
 
     regrets = walk.regrets[start:end]
     strategy = regret_matching(regrets)
