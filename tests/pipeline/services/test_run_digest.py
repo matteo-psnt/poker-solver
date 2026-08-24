@@ -167,6 +167,52 @@ class TestCurveJoin:
         assert any("unscored ladder rungs" in g for g in digest.gaps)
 
 
+class TestPhantomRungs:
+    """A run that reads `completed` but cannot be scored: a mid-publish failure
+    left the manifest naming a rung the share never received, and the only
+    symptom was every score of it dying minutes into a task (gamma3-s103)."""
+
+    def _ladder(self, run_dir: Path) -> None:
+        (run_dir / "STATIC_CHECKPOINT.json").write_text(
+            json.dumps(
+                {
+                    "iteration": 2000,
+                    "zarr": "static-2000.zarr",
+                    "fingerprint": "abc123",
+                    "retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}],
+                }
+            )
+        )
+
+    def test_a_rung_with_no_marker_is_named(self, tmp_path):
+        run_dir = _run(tmp_path)
+        self._ladder(run_dir)
+        (run_dir / ".complete-static-1000.zarr").touch()
+
+        gaps = _digest(run_dir, tmp_path).gaps
+
+        assert any("static-2000.zarr" in g and "cannot supply" in g for g in gaps), gaps
+        assert not any("static-1000.zarr" in g for g in gaps), gaps
+
+    def test_a_run_with_no_markers_at_all_says_nothing(self, tmp_path):
+        """A local run, or a share read that never listed markers -- absence of
+        every marker is "no evidence", not "every rung is missing"."""
+        run_dir = _run(tmp_path)
+        self._ladder(run_dir)
+
+        assert not any("cannot supply" in g for g in _digest(run_dir, tmp_path).gaps)
+
+    def test_published_rungs_with_no_manifest_are_named(self, tmp_path):
+        """gamma3-s103's real state: five marked rungs on the share and no
+        STATIC_CHECKPOINT.json, so nothing could name a rung to score."""
+        run_dir = _run(tmp_path)
+        (run_dir / ".complete-static-1000.zarr").touch()
+
+        gaps = _digest(run_dir, tmp_path).gaps
+
+        assert any("no manifest names them" in g for g in gaps), gaps
+
+
 class TestMalformedInput:
     def test_a_missing_run_dir_raises_rather_than_reporting_nothing(self, tmp_path):
         with pytest.raises((FileNotFoundError, ValueError)):

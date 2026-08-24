@@ -15,7 +15,8 @@ from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
-from src.shared import run_events, task_history
+from src.shared import records, run_events, task_history
+from src.shared.cloudtask.node import archive
 
 
 class CurvePoint(BaseModel):
@@ -207,7 +208,7 @@ def run_digest(
         coverage_flat_from=run_events.plateau_iteration(progress),
         curve=curve,
         tasks=tasks,
-        gaps=_digest_gaps(metadata, progress, curve, tasks),
+        gaps=_digest_gaps(metadata, progress, curve, tasks, run_dir),
     )
 
 
@@ -216,6 +217,7 @@ def _digest_gaps(
     progress: list[dict[str, Any]],
     curve: CurveOutput,
     tasks: list[task_history.TaskRow],
+    run_dir: Path,
 ) -> list[str]:
     """What this run cannot yet support a conclusion about.
 
@@ -243,6 +245,7 @@ def _digest_gaps(
             else f" (+{len(curve.missing_iterations) - 6} more)"
         )
         gaps.append(f"unscored ladder rungs: {rungs}{more}")
+    gaps += _ladder_gaps(run_dir)
     if metadata.card_abstraction_hash is None:
         gaps.append("no abstraction hash recorded — this run cannot be evaluated faithfully")
     if metadata.git_dirty:
@@ -255,3 +258,40 @@ def _digest_gaps(
             f"{len(unresolved)} task(s) with no terminal record — `poker-solver tasks` to reconcile"
         )
     return gaps
+
+
+def _ladder_gaps(run_dir: Path) -> list[str]:
+    """What the published ladder cannot supply, said here instead of on a node.
+
+    Answered off the completion MARKERS, which `pull_metadata` recreates from
+    the share's own listing: a marker is written only once a rung has fully
+    landed, so its absence is exactly what a fetch refuses on. Without this a
+    run reads `completed` and every score of it dies minutes into a task with
+    no diagnostic anywhere (gamma3-s103). A local run has no markers and no
+    share, so it reports nothing.
+    """
+    published = {name[len(archive.MARKER_PREFIX) :] for name in _marker_names(run_dir)}
+    if not published:
+        return []
+    # `archive.read_manifest`, not `StaticCheckpointManifest.read`: a torn
+    # manifest must degrade to "nothing to say" here, not take `runinfo` down.
+    manifest = archive.read_manifest(run_dir / records.STATIC_CHECKPOINT)
+    if not manifest:
+        return [
+            f"{len(published)} rung(s) are published but no manifest names them — "
+            f"scoring will refuse. Re-publish from the node that trained the run."
+        ]
+    entries = [manifest, *(e for e in manifest.get("retained") or [] if isinstance(e, dict))]
+    named = {str(e["zarr"]) for e in entries if isinstance(e.get("zarr"), str)}
+    unusable = sorted(named - published)
+    if not unusable:
+        return []
+    return [
+        f"the manifest names {', '.join(unusable)}, which the share cannot supply "
+        f"(no completion marker) — scoring those rungs will be refused. Re-publish "
+        f"from the node that trained them."
+    ]
+
+
+def _marker_names(run_dir: Path) -> list[str]:
+    return [path.name for path in run_dir.glob(f"{archive.MARKER_PREFIX}*")]

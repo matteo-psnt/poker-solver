@@ -32,6 +32,7 @@ def fake(monkeypatch):
             "archive/run-a/STATIC_CHECKPOINT.json": json.dumps({"iteration": 1000}),
             "archive/run-a/evals/slug1.json": json.dumps({"run_id": "run-a"}),
             "archive/run-a/static-1000.zarr/0.0": "BULK",
+            "archive/run-a/.complete-static-1000.zarr": "",
             "archive/run-b/run.jsonl": json.dumps({"event": "created", "run_id": "run-b"}) + "\n",
         }
     )
@@ -86,7 +87,15 @@ class TestPullMetadata:
     def test_never_pulls_checkpoint_data(self, fake, tmp_path):
         """~540 MB of zarr chunks that no reading command opens."""
         workspace.pull_metadata(fake, "s", tmp_path)
-        assert not list(tmp_path.rglob("*.zarr*"))
+        assert not (tmp_path / "run-a" / "static-1000.zarr").exists()
+
+    def test_completion_markers_are_recreated_rather_than_downloaded(self, fake, tmp_path):
+        """A marker's whole content is that it exists, so its name in the
+        listing is the entire fact -- and it is what says whether a rung the
+        manifest advertises can actually be scored."""
+        workspace.pull_metadata(fake, "s", tmp_path)
+        marker = tmp_path / "run-a" / ".complete-static-1000.zarr"
+        assert marker.is_file()
 
     def test_one_run_pulls_only_that_run(self, fake, tmp_path):
         workspace.pull_metadata(fake, "s", tmp_path, run="run-a")
