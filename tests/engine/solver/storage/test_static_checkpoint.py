@@ -27,6 +27,7 @@ from src.engine.solver.storage.static_checkpoint import (
     StaticCheckpointManifest,
     _legacy_index_maps,
     load_checkpoint,
+    read_strategy_sum,
     retained_iterations,
     save_checkpoint,
 )
@@ -468,6 +469,104 @@ class TestTheAbstractionGuardIsArmed:
 
 #: The two arrays addressed per SLOT rather than per row.
 _SLOTTED = ("regrets", "strategy_sum")
+
+
+class TestALadderStraddlingTheLayoutChange:
+    """MEASURED 09-09. A run that was training when the bucket-major layout
+    landed holds v1 rungs and v2 rungs under ONE manifest, whose fingerprint can
+    only describe the rung that was current when it was last written.
+
+    Deciding the vintage from that manifest refused every older rung of five
+    published ladders -- 18 rungs, and always the EARLY ones, so what it cost
+    was the left half of a within-run convergence curve for the four 100M
+    abstraction arms. The rung says what layout it is; the manifest does not
+    speak for it.
+    """
+
+    def _straddling(self, tree, tmp_path):
+        """Rung 5 node-major, rung 10 bucket-major, manifest naming rung 10."""
+        storage = StaticArrayStorage(tree)
+        rng = np.random.default_rng(11)
+        storage.regrets[:] = rng.standard_normal(tree.num_slots).astype(np.float32)
+        storage.strategy_sum[:] = rng.standard_normal(tree.num_slots).astype(np.float32)
+        storage.reach_counts[:] = rng.integers(0, 9, tree.num_rows)
+        storage.cumulative_utility[:] = rng.standard_normal(tree.num_rows)
+        storage.visited[:] = rng.integers(0, 2, tree.num_rows).astype(np.uint8)
+        early = {name: getattr(storage, name).copy() for name in _ARRAYS}
+
+        # Rung 10 is written the way the trainer writes today, and its manifest
+        # carries the CURRENT fingerprint.
+        storage.regrets[:] = rng.standard_normal(tree.num_slots).astype(np.float32)
+        late = {name: getattr(storage, name).copy() for name in _ARRAYS}
+        save_checkpoint(storage, tmp_path, 10)
+        storage.close()
+
+        row_source, slot_source = _legacy_index_maps(tree)
+        _write_legacy_zarr(
+            tmp_path / "static-5.zarr",
+            {
+                name: _scatter(early[name], slot_source if name in _SLOTTED else row_source)
+                for name in _ARRAYS
+            },
+            {"iteration": 5, "fingerprint": tree.legacy_fingerprint()},
+        )
+        manifest_path = tmp_path / "STATIC_CHECKPOINT.json"
+        raw = json.loads(manifest_path.read_text())
+        raw["retained"] = [
+            {"iteration": 5, "zarr": "static-5.zarr"},
+            {"iteration": 10, "zarr": raw["zarr"]},
+        ]
+        manifest_path.write_text(json.dumps(raw))
+        return early, late
+
+    def test_the_older_node_major_rung_still_loads(self, tree, tmp_path):
+        early, _late = self._straddling(tree, tmp_path)
+        fresh = StaticArrayStorage(tree)
+        try:
+            assert load_checkpoint(fresh, tmp_path, at_iteration=5) == 5
+            for name in _ARRAYS:
+                assert np.array_equal(getattr(fresh, name), early[name]), name
+        finally:
+            fresh.close()
+
+    def test_the_current_bucket_major_rung_still_loads(self, tree, tmp_path):
+        """The other half: fixing the old rung must not permute the new one."""
+        _early, late = self._straddling(tree, tmp_path)
+        fresh = StaticArrayStorage(tree)
+        try:
+            assert load_checkpoint(fresh, tmp_path, at_iteration=10) == 10
+            for name in _ARRAYS:
+                assert np.array_equal(getattr(fresh, name), late[name]), name
+        finally:
+            fresh.close()
+
+    def test_read_strategy_sum_reads_the_old_rung_in_this_order(self, tree, tmp_path):
+        """A windowed average combines rungs, so this reader must translate per
+        rung too -- combining a v1 and a v2 rung in one ORDER would silently
+        average two different addressings."""
+        early, _late = self._straddling(tree, tmp_path)
+        fresh = StaticArrayStorage(tree)
+        try:
+            values = read_strategy_sum(fresh, tmp_path, 5)
+            assert np.array_equal(values, early["strategy_sum"])
+        finally:
+            fresh.close()
+
+    def test_a_rung_of_a_third_tree_is_still_refused(self, tree, tmp_path):
+        """The permission is exactly two layouts of THIS tree, not any snapshot
+        that happens to be beside a manifest that passed."""
+        self._straddling(tree, tmp_path)
+        _write_legacy_zarr(
+            tmp_path / "static-5.zarr",
+            {name: np.zeros_like(getattr(StaticArrayStorage(tree), name)) for name in _ARRAYS},
+            {"iteration": 5, "fingerprint": "deadbeefdeadbeef"},
+        )
+        fresh = StaticArrayStorage(tree)
+        try:
+            with pytest.raises(FingerprintMismatchError, match="neither this tree"):
+                load_checkpoint(fresh, tmp_path, at_iteration=5)
+        finally:
+            fresh.close()
 
 
 def _scatter(values, gather):
