@@ -79,10 +79,37 @@ class TreeShadow:
         is unchanged; the shadow once it has diverged; the real state again if
         the shadow broke, which restores exactly the old behaviour rather than
         inventing a new one.
+
+        Syncs the board first: only the BETTING history is shadowed, and a
+        street can be dealt between the last :meth:`observe` and this call.
         """
+        self._sync_board(real_state)
         if self._shadow is None or self._broken or not self._diverged:
             return real_state
         return self._shadow
+
+    def _sync_board(self, real_state: GameState) -> None:
+        """Mirror the real public cards onto the shadow, or break trying.
+
+        The board is public and shared; the shadow deals none of its own, so it
+        enters a new street with the previous street's cards -- or with none at
+        all, measured as ``KeyError: Board () ... not found for FLOP`` when the
+        blueprint was asked to bucket it. Streets can also come apart (an
+        all-in on one side, a proxy that closed betting on the other), and
+        mirroring across that mismatch asks for a board of the wrong length.
+        """
+        shadow = self._shadow
+        if shadow is None or self._broken or not self._diverged:
+            return
+        if shadow.board == real_state.board:
+            return
+        if shadow.street is not real_state.street:
+            self._broken = True
+            return
+        try:
+            self._shadow = shadow.replace(board=real_state.board)
+        except (ValueError, KeyError, AssertionError):
+            self._broken = True
 
     def observe(self, real_state: GameState, action: Action) -> None:
         """Advance the shadow by an on-menu proxy of a realized ``action``."""
@@ -90,23 +117,14 @@ class TreeShadow:
             self.start(real_state)
         if self._broken:
             return
-        assert self._shadow is not None
 
-        # A new street was dealt since the last observe. Street advancement is
-        # driven by action TYPE, which the proxy preserves, so ordinarily only
-        # the public cards differ -- but only while the two streets agree. They
-        # can come apart (an all-in on one side, a proxy that closed betting on
-        # the other), and mirroring across that mismatch asks for a board of the
-        # wrong length: measured as "Board should have 3 cards on flop, got 0".
-        if self._diverged and self._shadow.board != real_state.board:
-            if self._shadow.street is not real_state.street:
-                self._broken = True
-                return
-            try:
-                self._shadow = self._shadow.replace(board=real_state.board)
-            except (ValueError, KeyError, AssertionError):
-                self._broken = True
-                return
+        # The shadow's OWN `apply_action` needs the right board to advance a
+        # street and judge legality, so this is not redundant with the sync
+        # `state_for` does for the blueprint's benefit -- both, not either.
+        self._sync_board(real_state)
+        if self._broken:
+            return
+        assert self._shadow is not None
 
         shadow = self._shadow
         if shadow.is_terminal:
