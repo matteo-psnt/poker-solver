@@ -31,6 +31,10 @@ output "pool_big_id" {
   value = azurerm_batch_pool.train_big.name
 }
 
+output "pool_huge_id" {
+  value = azurerm_batch_pool.train_huge.name
+}
+
 output "resource_group" {
   value = azurerm_resource_group.main.name
 }
