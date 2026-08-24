@@ -94,9 +94,35 @@ cp -ru "$SHARE/combo_abstraction/." "$WORK/data/combo_abstraction/"
 # --------------------------------------------------------------------------- #
 # the checkpoint
 # --------------------------------------------------------------------------- #
+# ONE RUNG, not the run directory -- the same rule `blueprint/staging.py` states
+# and this script used to ignore. A published run keeps its whole retained
+# ladder: the 300M control run is 60 rungs, ~51 GB in ~330,000 files, about six
+# hours at this box's file rate. The reader loads exactly one of them. Copying
+# the lot bought nothing and made staging a run an afternoon's job.
+#
+# $AT names a rung to stage instead of the head, mirroring `--at`.
 echo "==> checkpoint (thousands of small files, a few minutes on first copy)"
 mkdir -p "$WORK/data/runs/$RUN_ID"
-cp -ru "$SHARE/archive/$RUN_ID/." "$WORK/data/runs/$RUN_ID/"
+cp -u "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" "$WORK/data/runs/$RUN_ID/"
+cp -u "$SHARE/archive/$RUN_ID/run.jsonl" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
+cp -ru "$SHARE/archive/$RUN_ID/evals" "$WORK/data/runs/$RUN_ID/" 2>/dev/null || true
+
+rung=$(AT="${AT:-}" python3 - "$SHARE/archive/$RUN_ID/STATIC_CHECKPOINT.json" <<'PY'
+import json, os, sys
+manifest = json.load(open(sys.argv[1]))
+rungs = manifest.get("checkpoints") or []
+at = os.environ.get("AT") or ""
+if at:
+    match = [r for r in rungs if str(r.get("iteration")) == at]
+    if not match:
+        sys.exit(f"no rung at iteration {at}")
+    print(match[0]["zarr"])
+else:
+    print(manifest.get("zarr") or rungs[-1]["zarr"])
+PY
+)
+echo "==> rung $rung"
+cp -ru "$SHARE/archive/$RUN_ID/$rung" "$WORK/data/runs/$RUN_ID/"
 
 # --------------------------------------------------------------------------- #
 # dependencies
