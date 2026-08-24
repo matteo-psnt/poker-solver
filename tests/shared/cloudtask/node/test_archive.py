@@ -65,20 +65,95 @@ class TestPublish:
         destination = tmp_path / "archive" / "run-a"
 
         order: list[str] = []
-        real = archive.copy_file
+        copy_file, write_one = archive.copy_file, archive._write_one
 
-        def record(source, target):
-            # Loose files and manifests arrive via their atomic `.partial`
-            # sibling; the ORDER is what this test pins, so record the final
-            # name the replace will give them.
+        def record_copy(source, target):
+            # Loose files arrive via their atomic `.partial` sibling; the ORDER
+            # is what this test pins, so record the name the replace will give.
             order.append(target.name.removesuffix(".partial"))
-            real(source, target)
+            copy_file(source, target)
+
+        def record_write(body, target, log):
+            order.append(target.name)
+            return write_one(body, target, log)
 
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(archive, "copy_file", record)
+            patch.setattr(archive, "copy_file", record_copy)
+            patch.setattr(archive, "_write_one", record_write)
             assert archive.publish_run(run_dir, destination)
 
         assert order[-1] == records.STATIC_CHECKPOINT, order
+
+    def test_a_rung_committed_mid_publish_is_not_advertised(self, tmp_path):
+        """The manifest is read BEFORE the ladder and written after it. Read at
+        the end instead and it names the rung the trainer committed during the
+        copy -- which this pass never saw, so the share advertises a rung that
+        is not on it and every fetch of the run refuses."""
+        run_dir = _run(tmp_path)
+        _snapshot(run_dir, "static-1000.zarr")
+        _manifest(run_dir, "static-1000.zarr", iteration=1000)
+        destination = tmp_path / "archive" / "run-a"
+        real = archive.copy_tree
+
+        def commit_a_new_rung(source, target, **kwargs):
+            copied = real(source, target, **kwargs)
+            _snapshot(run_dir, "static-2000.zarr")
+            _manifest(run_dir, "static-2000.zarr", retained=(1000,), iteration=2000)
+            return copied
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(archive, "copy_tree", commit_a_new_rung)
+            assert archive.publish_run(run_dir, destination)
+
+        published = json.loads((destination / records.STATIC_CHECKPOINT).read_text())
+        assert published["zarr"] == "static-1000.zarr"
+        assert not (destination / "static-2000.zarr").exists()
+
+    def test_a_manifest_naming_a_rung_the_share_lacks_is_refused(self, tmp_path):
+        """The rung was pruned from the node before it ever published, so no
+        later pass can supply it. Advertising it turns every fetch into a
+        refusal several minutes into a task; the WARN says so at the source."""
+        run_dir = _run(tmp_path)
+        _snapshot(run_dir, "static-2000.zarr")
+        _manifest(run_dir, "static-2000.zarr", retained=(1000,), iteration=2000)
+        destination = tmp_path / "archive" / "run-a"
+        lines: list[str] = []
+
+        assert not archive.publish_run(run_dir, destination, lines.append)
+
+        assert not (destination / records.STATIC_CHECKPOINT).exists()
+        assert any("static-1000.zarr" in line and "WARN" in line for line in lines), lines
+
+    def test_every_rung_is_reported_as_it_lands(self, tmp_path):
+        """A 750 MB rung is minutes of SMB with nothing on stdout; a 300M run's
+        ladder was 8+ hours of a task that looked hung."""
+        run_dir = _run(tmp_path)
+        _snapshot(run_dir, "static-1000.zarr")
+        _manifest(run_dir, "static-1000.zarr", iteration=1000)
+        lines: list[str] = []
+
+        assert archive.publish_run(run_dir, tmp_path / "archive" / "run-a", lines.append)
+
+        assert any(line.startswith("publishing static-1000.zarr") for line in lines), lines
+        assert any(line.startswith("published static-1000.zarr:") for line in lines), lines
+
+    def test_the_copy_is_the_same_tree_at_any_worker_count(self, tmp_path, monkeypatch):
+        """Parallel only to hide SMB latency: 16 threads and 1 must agree."""
+        run_dir = _run(tmp_path)
+        _snapshot(run_dir, "static-1000.zarr", *(f"chunk-{i}" for i in range(40)))
+
+        monkeypatch.setenv(archive.COPY_WORKERS_ENV, "1")
+        assert archive.publish_run(run_dir, tmp_path / "serial")
+        monkeypatch.setenv(archive.COPY_WORKERS_ENV, "16")
+        assert archive.publish_run(run_dir, tmp_path / "parallel")
+
+        chunks = tmp_path / "serial" / "static-1000.zarr" / "regrets" / "0"
+        assert [f.read_text() for f in sorted(chunks.iterdir())] == [
+            f.read_text()
+            for f in sorted(
+                (tmp_path / "parallel" / "static-1000.zarr" / "regrets" / "0").iterdir()
+            )
+        ]
 
     def test_a_failed_snapshot_suppresses_the_manifest(self, tmp_path):
         """The whole point of the ordering: the share keeps describing the last
