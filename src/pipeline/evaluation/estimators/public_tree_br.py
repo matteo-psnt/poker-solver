@@ -48,6 +48,7 @@ import resource
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -533,18 +534,22 @@ class PublicTreeBestResponse:
             done = self._branches_done - len(jobs)
             self._joined = {}
             if jobs:
-                self._joined, peak = _run_jobs(
+                workers = _ram_safe_workers(min(self._config.num_workers, len(jobs)), self._config)
+                self._joined, peak, anon = _run_jobs(
                     jobs,
-                    workers=min(self._config.num_workers, len(jobs)),
+                    workers=workers,
                     init=(factory, self._config, self._starting_stack),
                     publish=publish,
                     done=done,
                     total=self.branch_total,
                 )
                 logger.info(
-                    "public-tree BR fork-join: %d flop jobs, peak worker RSS %.2f GB",
+                    "public-tree BR fork-join: %d flop jobs over %d workers, "
+                    "peak worker RSS %.2f GB of which private %.2f GB",
                     len(jobs),
+                    workers,
                     peak / 2**30,
+                    anon / 2**30,
                 )
             self._branches_done = 0
             parts = []
@@ -1097,10 +1102,86 @@ def _init_worker(
     _ENGINE = PublicTreeBestResponse(factory(), config, starting_stack=starting_stack)
 
 
-def _flop_worker(job: _FlopJob) -> tuple[_FlopPart, int]:
+def _flop_worker(job: _FlopJob) -> tuple[_FlopPart, int, int]:
     assert _ENGINE is not None, "worker used before _init_worker"
     part = _ENGINE.flop_part(job)
-    return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, _rss_anon_kb()
+
+
+def _proc_kb(path: str, field: str) -> int:
+    """One ``field: N kB`` line of a /proc file, Linux only; 0 elsewhere."""
+    try:
+        lines = Path(path).read_text(encoding="ascii").splitlines()
+    except OSError:
+        return 0
+    return next((int(line.split()[1]) for line in lines if line.startswith(field)), 0)
+
+
+def _rss_anon_kb() -> int:
+    """Private (anonymous) resident memory of this process.
+
+    ``ru_maxrss`` also counts file-backed pages every worker shares through
+    the page cache, so it overstates what sixteen workers cost the node. The
+    checkpoint arrays a scoring blueprint holds are ``np.zeros`` (process
+    local), so they ARE here, and so is the card abstraction.
+    """
+    return _proc_kb("/proc/self/status", "RssAnon:")
+
+
+# A worker's peak over its steady footprint. `load_checkpoint` reads each
+# zarr array into a private copy before writing it into the storage's array,
+# and the walk's own tables grow on top: measured 4.13 GB peak against a
+# 1.67 GB parent on the production tree and 5.4 GB against 2.25 GB on the
+# 45.5M-row limp-fix tree, so 2.4.
+_LOAD_PEAK = 2.4
+# Per sampled board a worker caches a bucket vector and, on the river, a
+# RunoutEvaluator: ~a dozen int64 arrays over the ~1081 alive combos.
+_PER_BOARD_BYTES = 120 * 1024
+# Left to the OS and the page cache the checkpoint is read through.
+_HEADROOM_BYTES = 2 * 2**30
+
+
+def _ram_safe_workers(
+    requested: int,
+    config: PublicBRConfig,
+    *,
+    footprint: int | None = None,
+    available: int | None = None,
+) -> int:
+    """``requested`` lowered to what free RAM holds; ``--workers`` is a ceiling.
+
+    Every worker rebuilds the blueprint, so this process's private RSS -- it
+    holds the same blueprint and has walked only the preflop tree -- is the
+    steady cost of one worker, scaled for the load peak and the board caches
+    the tier will fill. Measured here rather than tabulated so a bigger tree
+    sizes itself: 16 workers on a 32 GB node died of the OOM killer at 4/8/8
+    on the production tree and at 4/4/4 on one 1.4x its size.
+    """
+    footprint = _rss_anon_kb() * 1024 if footprint is None else footprint
+    available = (
+        _proc_kb("/proc/meminfo", "MemAvailable:") * 1024 if available is None else available
+    )
+    if footprint <= 0 or available <= 0:
+        return requested
+    flops = min(config.num_flops, 1755)
+    turns = min(config.num_turns, 49)
+    rivers = min(config.num_rivers, 48)
+    boards = flops * (turns + turns * rivers)
+    per_worker = footprint * _LOAD_PEAK + boards * _PER_BOARD_BYTES
+    fits = max(1, int((available - _HEADROOM_BYTES) // per_worker))
+    workers = min(requested, fits)
+    logger.info(
+        "public-tree BR fork-join: %d workers of %d requested -- %.2f GB private per worker "
+        "(x%.1f load peak, +%.2f GB caches for %d boards) against %.2f GB available",
+        workers,
+        requested,
+        footprint / 2**30,
+        _LOAD_PEAK,
+        boards * _PER_BOARD_BYTES / 2**30,
+        boards,
+        available / 2**30,
+    )
+    return workers
 
 
 def _run_jobs(
@@ -1111,26 +1192,28 @@ def _run_jobs(
     publish: Callable[[int, int], None] | None,
     done: int,
     total: int,
-) -> tuple[dict[tuple[int, int, int], _FlopPart], int]:
-    """Every flop job on a pool, parts keyed for the join; peak worker RSS in bytes.
+) -> tuple[dict[tuple[int, int, int], _FlopPart], int, int]:
+    """Every flop job on a pool, parts keyed for the join; peak worker RSS and
+    private RSS in bytes.
 
     Submitted all at once and collected as they land, so the bar moves from the
     first finished subtree. ``ru_maxrss`` is kilobytes on Linux and bytes on
-    macOS; the pool runs on Linux and the figure sizes the NEXT tier's worker
-    count, which is the only reason it is collected.
+    macOS; the pool runs on Linux and the figures size the NEXT tier's worker
+    count, which is the only reason they are collected.
     """
     parts: dict[tuple[int, int, int], _FlopPart] = {}
-    peak = 0
+    peak = anon = 0
     with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker, initargs=init) as pool:
         futures = {pool.submit(_flop_worker, job): job for job in jobs}
         for future in as_completed(futures):
-            part, rss = future.result()
+            part, rss, rss_anon = future.result()
             parts[futures[future].key] = part
             peak = max(peak, rss)
+            anon = max(anon, rss_anon)
             done += 1
             if publish is not None:
                 publish(done, total)
-    return parts, peak * 1024
+    return parts, peak * 1024, anon * 1024
 
 
 def compute_public_tree_br(

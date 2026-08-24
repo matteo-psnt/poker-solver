@@ -74,6 +74,46 @@ class TestForkJoinMatchesSerial:
         assert forked.missing_policy_mass == serial.missing_policy_mass
 
 
+class TestRamSafeCap:
+    """`--workers` is a ceiling: sixteen blueprints do not fit a 32 GB node once
+    the tree or the board caches grow, and the OOM killer reports that as a
+    BrokenProcessPool twenty minutes in."""
+
+    GB = 2**30
+
+    def test_lowers_to_what_fits(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _ram_safe_workers
+
+        tier = PublicBRConfig(num_flops=4, num_turns=8, num_rivers=8)
+        # 2.25 GB steady -> 5.4 GB at the measured peak, plus 288 boards of
+        # cache: (30 - 2) / 5.43 = 5, not 16 -- the count measured safe on the
+        # 45.5M-row tree, where a probe's worker peaked at 4.82 GB private.
+        assert (
+            _ram_safe_workers(16, tier, footprint=int(2.25 * self.GB), available=30 * self.GB) == 5
+        )
+
+    def test_board_caches_count(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _ram_safe_workers
+
+        small = PublicBRConfig(num_flops=4, num_turns=4, num_rivers=4)
+        full = PublicBRConfig(num_flops=4, num_turns=49, num_rivers=48)
+        kw = {"footprint": int(0.8 * self.GB), "available": 30 * self.GB}
+        assert _ram_safe_workers(16, small, **kw) > _ram_safe_workers(16, full, **kw)
+
+    def test_never_raises_the_request_and_never_below_one(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _ram_safe_workers
+
+        tier = PublicBRConfig(num_flops=4, num_turns=4, num_rivers=4)
+        assert _ram_safe_workers(4, tier, footprint=self.GB, available=64 * self.GB) == 4
+        assert _ram_safe_workers(16, tier, footprint=10 * self.GB, available=8 * self.GB) == 1
+
+    def test_unmeasurable_means_uncapped(self):
+        from src.pipeline.evaluation.estimators.public_tree_br import _ram_safe_workers
+
+        tier = PublicBRConfig(num_flops=4, num_turns=4, num_rivers=4)
+        assert _ram_safe_workers(16, tier, footprint=0, available=30 * self.GB) == 16
+
+
 @pytest.mark.slow
 @pytest.mark.timeout(600)
 class TestParallelMatchesSerial:
