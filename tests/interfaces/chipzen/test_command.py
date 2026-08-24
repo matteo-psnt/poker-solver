@@ -52,26 +52,61 @@ class TestTheRecordedTurnFixture:
         assert turn.round_wager(1) == 0  # the flop is a fresh betting round
 
 
+@pytest.fixture
+def unconfigured(monkeypatch):
+    """A machine with no `chipzen.toml` anywhere on the SDK's search path.
+
+    Without this the refusal tests pass only on a machine that has never been
+    set up: `sdk_config_path` reads the real `~/.chipzen/`, so writing a genuine
+    credential file there turned both of them red. A test that depends on the
+    developer's home directory is a test that reports the wrong thing twice.
+    """
+    monkeypatch.setattr(chipzen_seat, "CONFIG_SEARCH", ())
+
+
+@pytest.fixture
+def configured(monkeypatch, tmp_path):
+    """A machine whose `chipzen.toml` carries both credentials."""
+    config = tmp_path / "chipzen.toml"
+    config.write_text('[external_api]\ntoken = "cz_extbot_x"\nbot_id = "b"\n')
+    monkeypatch.setattr(chipzen_seat, "CONFIG_SEARCH", (config,))
+
+
 class TestRefusals:
     def test_a_missing_run_refuses_before_anything_loads(self, tmp_path):
         args = parsed(run="nope", runs_dir=str(tmp_path))
         with pytest.raises(CommandError, match="Run not found"):
             chipzen_seat.run(args)
 
-    def test_a_missing_bot_id_refuses(self, tmp_path, monkeypatch):
+    def test_a_missing_bot_id_refuses(self, tmp_path, monkeypatch, unconfigured):
         monkeypatch.delenv(chipzen_seat.BOT_ENV, raising=False)
         (tmp_path / "run-1").mkdir()
         args = parsed(run="run-1", runs_dir=str(tmp_path))
         with pytest.raises(CommandError, match="--bot-id"):
             chipzen_seat.run(args)
 
-    def test_a_missing_token_refuses(self, tmp_path, monkeypatch):
+    def test_a_missing_token_refuses(self, tmp_path, monkeypatch, unconfigured):
         monkeypatch.setenv(chipzen_seat.BOT_ENV, "a-bot")
         monkeypatch.delenv(chipzen_seat.TOKEN_ENV, raising=False)
         (tmp_path / "run-1").mkdir()
         args = parsed(run="run-1", runs_dir=str(tmp_path))
         with pytest.raises(CommandError, match="cz_extbot_"):
             chipzen_seat.run(args)
+
+    def test_a_config_file_stands_in_for_both_env_vars(self, tmp_path, monkeypatch, configured):
+        """The setup we actually ship: credentials in the SDK's own toml."""
+        monkeypatch.delenv(chipzen_seat.BOT_ENV, raising=False)
+        monkeypatch.delenv(chipzen_seat.TOKEN_ENV, raising=False)
+        (tmp_path / "run-1").mkdir()
+        args = parsed(run="run-1", runs_dir=str(tmp_path))
+        payload = chipzen_seat.run(args)
+        assert payload.mode == "live"
+        # Left as None on purpose: the SDK reads it from the file it just found.
+        assert payload.bot_id is None
+
+    def test_the_default_environment_is_where_the_division_lives(self):
+        """Measured: a token valid on prod is rejected by staging."""
+        assert chipzen_seat.DEFAULT_ENV == "prod"
 
     def test_the_token_is_never_a_flag(self):
         """It is shown once and cannot be read back; a shell history is the wrong place."""
