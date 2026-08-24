@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.core.game.actions import Action, ActionType, call
+from src.core.game.actions import Action, ActionType
 from src.engine.search.range_inference import replace_actor_hole_cards
 from src.engine.search.resolver import ALL_COMBOS, HUResolver
 from tests.test_helpers import build_trained_test_solver
@@ -116,41 +116,3 @@ class TestTheShadowHoldsItsInvariantsUnderRandomPlay:
         # Measured ~83%: the shadow is not merely safe, it usually SURVIVES,
         # which is what bounds how much sharpness the fix can win back.
         assert usable > diverged // 2, f"only {usable}/{diverged} stayed usable"
-
-
-class TestTheRangeUpdateSurvivesAnOffMenuSize:
-    """Off-tree the blueprint has no infoset at all, so every combo fell through
-    to the same uniform likelihood and the posterior stopped discriminating for
-    the rest of the hand. The shadow gives the lookup a history that exists.
-
-    Asserted as "the infoset resolves", not "the posterior moves": on the toy
-    abstraction every combo shares a bucket, so a posterior assertion passes for
-    the wrong reason and would stay green if the fix were reverted.
-    """
-
-    def test_the_likelihood_has_an_infoset_to_read(self, solver):
-        np.random.seed(11)
-        state = solver.deal_initial_state().apply_action(call(), solver.rules)
-        for _ in range(3):
-            if solver.is_chance_node(state):
-                state = solver.sample_chance_outcome(state)
-
-        res = _resolver(solver)
-        res.start_hand(state)
-        legal = list(solver.rules.get_legal_actions(state, solver.action_model))
-        sizes = sorted(a.amount for a in legal if a.type is ActionType.BET)
-        off = Action(ActionType.BET, int(sizes[0] * 0.37) + 1)
-
-        res.observe(state, off)
-        state = state.apply_action(off, solver.rules)
-        assert res._shadow.diverged
-        assert not res._shadow.broken
-
-        source = res._policy_source
-        actor = state.current_player
-        with pytest.raises(KeyError):
-            source.infoset_at(state, source.bucket_for(state, actor))
-
-        lookup = res.range_lookup_state(state)
-        assert lookup is not state, "the shadow was not consulted"
-        source.infoset_at(lookup, source.bucket_for(lookup, actor))

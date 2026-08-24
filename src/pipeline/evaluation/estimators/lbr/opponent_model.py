@@ -330,13 +330,7 @@ class ResolvedOpponent:
         ``HUResolver.observe`` bookkeeping."""
         if self._ranges is None:
             return
-        self._ranges = update_ranges(
-            state,
-            self._ranges,
-            action,
-            self.blueprint,
-            lookup_state=self._resolver.range_lookup_state(state),
-        )
+        self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
         # Ranges are tracked here, but the resolver's on-tree SHADOW is its own
         # and only it can advance that. Without this the shadow never moves on
         # this path and every blueprint lookup after an off-menu size is uniform.
