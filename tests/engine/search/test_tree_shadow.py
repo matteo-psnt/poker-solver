@@ -5,19 +5,34 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.core.game.actions import Action, ActionType, call
+from src.core.game.actions import Action, ActionType
+from src.core.game.state import Street
 from src.engine.search.resolver import HUResolver
 from src.engine.search.tree_shadow import TreeShadow
 from tests.test_helpers import build_trained_test_solver
 
 
 def _flop_node(solver):
+    """A real flop node: pass passively until the board is dealt.
+
+    Not "call, then sample chance": preflop no longer closes on the SB call --
+    the BB has its option -- so that recipe silently returned a PREFLOP state
+    and every test here quietly stopped testing the flop.
+    """
     np.random.seed(11)
-    state = solver.deal_initial_state().apply_action(call(), solver.rules)
-    for _ in range(3):
+    state = solver.deal_initial_state()
+    for _ in range(12):
         if solver.is_chance_node(state):
             state = solver.sample_chance_outcome(state)
-    return state
+            if state.street is Street.FLOP and state.board:
+                return state
+            continue
+        legal = solver.rules.get_legal_actions(state, solver.action_model)
+        passive = next(
+            (a for a in legal if a.type in (ActionType.CHECK, ActionType.CALL)), legal[0]
+        )
+        state = state.apply_action(passive, solver.rules)
+    raise AssertionError("never reached a dealt flop")
 
 
 def _resolver(solver):
