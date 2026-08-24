@@ -34,6 +34,8 @@ CONTAINER = "checkpoints"
 _PARALLEL_DOWNLOADS = 32
 ABSTRACTIONS = "abstractions"
 
+DIAGNOSTICS = "diagnostics"
+
 # The ops that PUT anything. Everything else fetches, and a fetch has no
 # business holding a credential that can overwrite what it read. PRECOMPUTE is
 # here because it publishes the card abstraction it builds. Kept beside the
@@ -87,6 +89,36 @@ def container_sas(account: str, key: str, *, write: bool) -> str:
         expiry=now + SAS_LIFETIME,
     )
     return f"https://{account}.blob.core.windows.net/{CONTAINER}?{token}"
+
+
+def diagnostics_sas(account: str, key: str) -> str:
+    """A WRITABLE credential for the diagnostics container, for every task.
+
+    Separate from the checkpoint SAS because that one is an ACCOUNT token, so
+    its `write=False` -- which is what stops a score overwriting the rung it
+    read -- also stripped write on diagnostics. The effect was that no
+    evaluate, score or duel could publish its log tail: the PUT came back 403
+    and the only account of the failure was the one thing that could not be
+    written. Every score failure was invisible through `poker-solver logs`.
+
+    Scoped to ONE CONTAINER, so widening it back does not touch the rungs. No
+    `delete`: a task removes nothing, here or anywhere.
+    """
+    from azure.storage.blob import (  # noqa: PLC0415 -- Azure only when dispatching
+        ContainerSasPermissions,
+        generate_container_sas,
+    )
+
+    now = datetime.now(UTC)
+    token = generate_container_sas(
+        account_name=account,
+        container_name=DIAGNOSTICS,
+        account_key=key,
+        permission=ContainerSasPermissions(read=True, list=True, write=True, create=True),
+        start=now - CLOCK_SKEW,
+        expiry=now + SAS_LIFETIME,
+    )
+    return f"https://{account}.blob.core.windows.net/{DIAGNOSTICS}?{token}"
 
 
 def abstractions_uri(checkpoint_sas: str) -> str:
@@ -229,9 +261,6 @@ def _client(config: Any, run_id: str, object_name: str) -> Any:
         credential=config.share_key,
     )
     return service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
-
-
-DIAGNOSTICS = "diagnostics"
 
 
 def read_task_log(config: Any, task_id: str) -> str | None:

@@ -167,6 +167,7 @@ class TestEnvironment:
             "CODE_SNAPSHOT",
             "POKER_SOLVER_RECORD_DSN",
             "POKER_SOLVER_CHECKPOINT_SAS",
+            "POKER_SOLVER_DIAGNOSTICS_SAS",
             "POKER_SOLVER_CODE_URL",
             "RUN_OP",
             "RUN_CONFIG",

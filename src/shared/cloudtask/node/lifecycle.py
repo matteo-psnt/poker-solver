@@ -97,8 +97,18 @@ def _diagnostics_sas() -> str:
     the plan is parsed, and the very failures worth reading are the ones that
     happen first.
     """
-    sas = os.environ.get("POKER_SOLVER_CHECKPOINT_SAS", "")
-    return blobstore.sibling_container(sas, archive.DIAGNOSTICS_CONTAINER) if sas else ""
+    sas = os.environ.get("POKER_SOLVER_DIAGNOSTICS_SAS", "")
+    if sas:
+        return sas
+    # A task sealed before the diagnostics credential existed. Its checkpoint
+    # token reaches the container only when it carries write, which is exactly
+    # the case that never needed the fallback.
+    checkpoint = os.environ.get("POKER_SOLVER_CHECKPOINT_SAS", "")
+    # Guarded, because `sibling_container("")` yields a truthy "/diagnostics":
+    # the logger would take that for a credential and stop writing anywhere.
+    return (
+        blobstore.sibling_container(checkpoint, archive.DIAGNOSTICS_CONTAINER) if checkpoint else ""
+    )
 
 
 def _install_signal_handlers() -> None:

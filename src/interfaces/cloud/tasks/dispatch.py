@@ -175,13 +175,17 @@ def _with_checkpoint_access(config: CloudConfig, specs: Sequence[TaskSpec]) -> l
     """
     minted: dict[bool, str] = {}
     sealed = []
+    # EVERY task, writable, and container-scoped. The checkpoint token above is
+    # an account SAS, so its `write=False` also stripped write on diagnostics
+    # and a read-only task could not publish the log explaining its own death.
+    diagnostics = blob.diagnostics_sas(config.storage_account, config.share_key)
     for task in specs:
         write = task.op in blob.WRITES_BLOBS
         if write not in minted:
             minted[write] = blob.container_sas(
                 config.storage_account, config.share_key, write=write
             )
-        sealed.append(replace(task, checkpoint_sas=minted[write]))
+        sealed.append(replace(task, checkpoint_sas=minted[write], diagnostics_sas=diagnostics))
     return sealed
 
 

@@ -178,6 +178,10 @@ KEYS: tuple[Key, ...] = (
     # task COMMAND LINE (`curl | tar`) before any of this code exists on the
     # node; carried here so it is declared beside the other two credentials
     # and never appears in a Batch listing.
+    # Every task carries this, writable and scoped to one container -- see
+    # `blob.diagnostics_sas`. A task that cannot write here cannot say why it
+    # died, which is the one thing a failing task must always manage.
+    Key("POKER_SOLVER_DIAGNOSTICS_SAS", "diagnostics_sas", "diagnostics_sas"),
     Key("POKER_SOLVER_CODE_URL", "code_url", "code_url"),
     Key("RUN_OP", "op", "op"),
     Key("RUN_CONFIG", "config", "config"),

@@ -204,6 +204,12 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
         "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
         "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
     ),
+    # Container-scoped and WRITABLE, on every task: a read-only checkpoint
+    # token could not publish the log tail explaining the task's own death.
+    "POKER_SOLVER_DIAGNOSTICS_SAS": (
+        "https://acct.blob.core.windows.net/diagnostics?sv=2021-08-06&sig=xyz%3D",
+        "https://acct.blob.core.windows.net/diagnostics?sv=2021-08-06&sig=xyz%3D",
+    ),
     # One blob, read-only: the tarball the command line already fetched.
     "POKER_SOLVER_CODE_URL": (
         "https://acct.blob.core.windows.net/code/code-20260904_120000.tar.gz?sp=r&sig=abc%3D",
