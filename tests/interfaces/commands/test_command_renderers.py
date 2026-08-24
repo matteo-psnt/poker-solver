@@ -32,7 +32,7 @@ from src.interfaces.commands.abstraction_coupling import (
     ConstantGap,
 )
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
-from src.interfaces.commands.autoscale_check import AutoscalePayload
+from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.compact_legs import CompactedPayload
@@ -569,9 +569,18 @@ PAYLOADS: dict[str, Any] = {
         ],
     ),
     "autoscale-check": AutoscalePayload(
-        pool_id="train",
-        formula="$TargetDedicatedNodes = min(maxNodes, pending);",
-        variables={"$TargetDedicatedNodes": "0", "pending": "0"},
+        results=[
+            AutoscaleView(
+                pool_id="train",
+                formula="$TargetDedicatedNodes = min(maxNodes, pending);",
+                variables={"$TargetDedicatedNodes": "0", "pending": "0"},
+            ),
+            AutoscaleView(
+                pool_id="train-big",
+                formula="$TargetDedicatedNodes = min(maxNodes, pending);",
+                variables={"$TargetDedicatedNodes": "2", "pending": "19"},
+            ),
+        ]
     ),
     "submit": SubmitPayload(
         target_iteration=25_000_000,

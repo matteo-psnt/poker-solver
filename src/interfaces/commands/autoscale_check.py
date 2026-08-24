@@ -10,7 +10,10 @@ free, safe and instant.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
@@ -24,37 +27,56 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver autoscale-check`. It takes none."""
 
 
-class AutoscalePayload(batch.AutoscaleResult):
-    """The deployed formula, evaluated against the live pool.
+class AutoscaleView(batch.AutoscaleResult):
+    """One pool's formula, evaluated against that pool.
 
     `error` is a FIELD, not a failed request: Batch evaluates the formula and
     reports that it did not compute, which is the answer to "why is the pool not
     growing" and must reach the screen rather than blanking the panel.
     """
 
-    op: Literal["autoscale-check"] = "autoscale-check"
     pool_id: str
 
 
+class AutoscalePayload(BaseModel):
+    """EVERY pool's formula. They are separate formulas on separate pools, so
+    checking one and reporting "no error" answers about half the account."""
+
+    op: Literal["autoscale-check"] = "autoscale-check"
+    results: list[AutoscaleView]
+
+
 def run(args: argparse.Namespace) -> AutoscalePayload:  # noqa: ARG001
-    """Evaluate the deployed formula against the live pool."""
+    """Evaluate each deployed formula against its own pool, concurrently."""
     config = CloudConfig.load()
-    result = batch.evaluate_autoscale(batch.client(config), config.pool_id)
-    return AutoscalePayload(pool_id=config.pool_id, **result.model_dump())
+    client = batch.client(config)
+    wanted = [pool_id for pool_id in (config.pool_id, config.pool_big_id) if pool_id]
+    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
+        evaluated = list(
+            pool.map(lambda pool_id: batch.evaluate_autoscale(client, pool_id), wanted)
+        )
+    return AutoscalePayload(
+        results=[
+            AutoscaleView(pool_id=pool_id, **result.model_dump())
+            for pool_id, result in zip(wanted, evaluated, strict=True)
+        ]
+    )
 
 
 def render(payload: AutoscalePayload) -> None:
-    if payload.error is None:
-        print("  no error")
-    else:
-        print(f"  ERROR: {payload.error.code}")
-        if payload.error.message:
-            print(f"    {payload.error.message}")
-        for name, value in payload.error.values.items():
-            print(f"    {name}: {value}")
-        print("  (variables below are PARTIAL — the formula did not fully evaluate)")
-    for name, value in payload.variables.items():
-        print(f"    {name} = {value}")
+    for view in payload.results:
+        print(f"Pool {view.pool_id}")
+        if view.error is None:
+            print("  no error")
+        else:
+            print(f"  ERROR: {view.error.code}")
+            if view.error.message:
+                print(f"    {view.error.message}")
+            for name, value in view.error.values.items():
+                print(f"    {name}: {value}")
+            print("  (variables below are PARTIAL — the formula did not fully evaluate)")
+        for name, value in view.variables.items():
+            print(f"    {name} = {value}")
 
 
 COMMAND = Command(

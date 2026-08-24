@@ -46,9 +46,10 @@ SNAPSHOT_PREFIXES = ("static-", "checkpoint-", "keys-")
 MARKER_PREFIX = ".complete-"
 
 # A zarr rung is thousands of small files and a single-stream SMB copy is
-# latency-bound, not bandwidth-bound: ~750 MB took ~9 minutes (1.4 MB/s) with
-# one thread. Override with `POKER_SOLVER_PUBLISH_WORKERS` -- 1 is the serial
-# arm a throughput measurement compares against.
+# latency-bound, not bandwidth-bound: MEASURED on a pool node at ~93 ms per
+# file either way, so a 300M rung's 5,508 files are ~8.5 minutes serial and
+# ~1.2 at 16 threads (7.0x over a 478 MB ladder, 2026-08-24). Override with
+# `POKER_SOLVER_PUBLISH_WORKERS`; 1 is the serial arm that was measured.
 COPY_WORKERS_ENV = "POKER_SOLVER_PUBLISH_WORKERS"
 DEFAULT_COPY_WORKERS = 16
 
