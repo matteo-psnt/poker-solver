@@ -120,8 +120,11 @@ directory, so re-running past the target is a no-op. That is what makes a
 scheduler retry converge instead of training twice; there is no separate
 `resume`.
 
-`--workers` is a pure throughput knob here. Unlike the old backend it does not
-raise memory: the table is shared and there are no per-worker key maps.
+`--workers` is a throughput knob with one bounded memory cost: the regret and
+strategy tables are shared and there are no per-worker key maps, but each
+worker keeps private reach/utility tallies (16 bytes per row, merged once per
+chunk) so the counts survive Hogwild races — ~270 MB per worker at production
+row counts.
 
 Experiment bookkeeping goes through `--experiment` / `--arm` / `--parent`, with
 `--set key=value` for config overrides.
