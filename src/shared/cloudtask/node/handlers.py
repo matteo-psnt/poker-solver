@@ -164,6 +164,8 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     rungs = _fetch_rungs(plan, paths, published, log)
     if rungs is None:
         return 1, None
+    if not _fetch_mix_run(plan, paths, log):
+        return 1, None
     # Same boot-order trap as training: evaluation resolves the abstraction the
     # checkpoint is PINNED to, so a node that predates that abstraction cannot
     # score the run at all.
@@ -244,6 +246,34 @@ def _fetch_rungs(
             log("FATAL a rung the reassembled average reads is missing")
             return None
     return fetched
+
+
+def _fetch_mix_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
+    """Pull down the OTHER run a `--mix-run` evaluation blends in.
+
+    Rung fetching is per-run and this one is a different run entirely, so
+    without it the mixture dies in the loader the same way a windowed average
+    did before its support rungs were fetched.
+    """
+    options = dict(itertools.pairwise(plan.eval_flags))
+    other = options.get("--mix-run")
+    if not other:
+        return True
+    source = paths.archive / other
+    if not source.is_dir():
+        log(f"FATAL --mix-run names no run on the share: {other}")
+        return False
+    wanted = [options["--mix-at"]] if "--mix-at" in options else []
+    destination = paths.runs / other
+    if wanted:
+        fetched = archive.fetch_for_evaluation(source, destination, wanted, log)
+    else:
+        fetched = ["current"] if archive.fetch_current_rung(source, destination, log) else []
+    if not fetched:
+        log(f"FATAL could not fetch the mixture partner {other}")
+        return False
+    log(f"mixing in {other} at rung {wanted[0] if wanted else 'current'}")
+    return True
 
 
 def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str]) -> list[str]:

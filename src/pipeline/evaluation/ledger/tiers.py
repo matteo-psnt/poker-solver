@@ -44,6 +44,11 @@ CONDITIONAL_TIER_KNOBS = (
     "policy_iterate",
     "avg_window_from",
     "avg_gamma",
+    # A mixture is a different STRATEGY, not a different estimator, so it splits
+    # the tier exactly as a reweighted average does.
+    "mix_run",
+    "mix_at",
+    "mix_weight",
     # Resolver knobs. These decide what the resolver PLAYS, so two rows across
     # any of them measure different strategies -- `policy_blend_alpha` most of
     # all (alpha=0 scored +2140 where the shipped alpha scored -781.6). Both
@@ -143,6 +148,9 @@ def build_exact_br_knobs_from_params(
     policy_iterate: str = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix_run: str | None = None,
+    mix_at: int | None = None,
+    mix_weight: float = 0.5,
 ) -> dict[str, Any]:
     """Canonical exact-BR knob tier: the board plan IS the comparison tier.
 
@@ -174,6 +182,10 @@ def build_exact_br_knobs_from_params(
         knobs["avg_window_from"] = int(avg_window_from)
     if avg_gamma is not None:
         knobs["avg_gamma"] = float(avg_gamma)
+    if mix_run is not None:
+        knobs["mix_run"] = str(mix_run)
+        knobs["mix_at"] = mix_at
+        knobs["mix_weight"] = float(mix_weight)
     return knobs
 
 

@@ -155,6 +155,11 @@ class PublicBRConfig:
     """Reweight the average as if training had used this `dcfr_gamma`, band by
     retained band. Reads the whole ladder off the share once per PROCESS, so
     score it at `num_workers=1`. A separate tier."""
+    mix_run: Path | None = None
+    """Blend another run's average into this one. Both must bucket by the same
+    abstraction; the mixture is scored plain. A separate tier."""
+    mix_at: int | None = None
+    mix_weight: float = 0.5
 
 
 @dataclass(frozen=True)
