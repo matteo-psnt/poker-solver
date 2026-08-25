@@ -128,17 +128,28 @@ def train_pcs(
         rules, action_model, abstraction, starting_stack=config.game.starting_stack
     )
     compiled = compile_tree(tree, rules)
-    shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1)
-    safe = pcs_parallel.ram_safe_workers(tree, compiled.num_terminals, shared_bytes=shared)
+    if config.pcs.cfr_br != "off" and config.pcs.alternating:
+        raise ValueError(
+            "pcs.alternating and pcs.cfr_br cannot both be on: CFR-BR already updates one "
+            "seat at a time against that seat's own best-responding opponent, and alternating "
+            "on top of it would halve each seat's updates for nothing."
+        )
+    extra = pcs_parallel.trunk_arrays(config, tree)
+    shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1) + 4 * sum(extra.values())
+    safe = pcs_parallel.ram_safe_workers(
+        tree, compiled.num_terminals, shared_bytes=shared, br_streets=config.pcs.cfr_br
+    )
     requested = num_workers or (os.cpu_count() or 1)
     workers = min(requested, safe)
     logger.info(
-        "[pcs] %d workers (%d requested, %d RAM-safe at %.2f GB each), %d runouts per flop",
+        "[pcs] %d workers (%d requested, %d RAM-safe at %.2f GB each), %d runouts per flop, "
+        "cfr_br=%s",
         workers,
         requested,
         safe,
-        pcs_parallel.worker_bytes(tree, compiled.num_terminals) / 1e9,
+        pcs_parallel.worker_bytes(tree, compiled.num_terminals, br_streets=config.pcs.cfr_br) / 1e9,
         config.pcs.runouts_per_flop,
+        config.pcs.cfr_br,
     )
     # The kernel is numpy and numba on one core per worker; BLAS threads on
     # top of that only oversubscribe the node.
@@ -161,6 +172,7 @@ def train_pcs(
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             worker=pcs_parallel.pcs_worker,
             before_checkpoint=pcs_parallel.mark_visited_from_strategy,
+            extra_arrays=extra,
         )
     except Exception:
         tracker.mark_failed(cleanup_if_empty=True)

@@ -26,6 +26,7 @@ import numpy as np
 from src.core.game.rules import GameRules
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.vector import compile_tree
+from src.engine.solver.vector.cfr_br import BR_REGIONS, CFRBestResponse, TrunkLayout
 from src.engine.solver.vector.hand_context import enumerate_live_hands
 from src.engine.solver.vector.kernel import DTYPE, MAX_BLOCK_ELEMENTS
 from src.engine.solver.vector.pcs import PublicChanceSamplingCFR
@@ -78,17 +79,36 @@ def sample_boards(rng: np.random.Generator, runouts: int) -> list[np.ndarray]:
 
 def iteration_contexts(
     rng: np.random.Generator, abstraction: BucketingStrategy, runouts: int
-) -> list[HandContext]:
-    return [build_hand_context(board, abstraction) for board in sample_boards(rng, runouts)]
+) -> tuple[list[HandContext], list[np.ndarray]]:
+    """Contexts and the boards behind them; CFR-BR needs the cards themselves."""
+    boards = sample_boards(rng, runouts)
+    return [build_hand_context(board, abstraction) for board in boards], boards
 
 
-def worker_bytes(tree: BettingTree, num_terminals: int) -> int:
+TRUNK_ARRAY = "trunk_regrets"
+
+
+def trunk_arrays(config: Config, tree: BettingTree) -> dict[str, int]:
+    """The extra shared arrays a run needs -- CFR-BR's opponent table, or none."""
+    if config.pcs.cfr_br == "off":
+        return {}
+    return {TRUNK_ARRAY: TrunkLayout(tree, BR_REGIONS[config.pcs.cfr_br]).num_slots}
+
+
+def worker_bytes(tree: BettingTree, num_terminals: int, *, br_streets: str = "off") -> int:
     """Private bytes one worker's kernel allocates, from the tree's shape."""
     per_hand = 4 * LIVE_HANDS * np.dtype(DTYPE).itemsize
     scratch = (len(tree) + num_terminals) * per_hand  # reach, value, both players
     cache = tree.num_slots * np.dtype(DTYPE).itemsize  # bucket-space strategy cache
     temporaries = 6 * MAX_BLOCK_ELEMENTS * np.dtype(DTYPE).itemsize  # one chunk's blocks
-    return scratch + cache + temporaries + WORKER_OVERHEAD_BYTES
+    picks = 0
+    if br_streets != "off":
+        # One int8 action per (best-response node, live hand), held from the
+        # backward pass that chose it to the forward pass that plays it.
+        streets = frozenset(BR_REGIONS[br_streets])
+        nodes = sum(1 for node in tree.nodes if node.street in streets)
+        picks = nodes * LIVE_HANDS
+    return scratch + cache + temporaries + picks + WORKER_OVERHEAD_BYTES
 
 
 def node_memory_bytes() -> int:
@@ -96,12 +116,17 @@ def node_memory_bytes() -> int:
 
 
 def ram_safe_workers(
-    tree: BettingTree, num_terminals: int, *, shared_bytes: int, memory: int | None = None
+    tree: BettingTree,
+    num_terminals: int,
+    *,
+    shared_bytes: int,
+    memory: int | None = None,
+    br_streets: str = "off",
 ) -> int:
     """How many workers this node can hold, from the arithmetic above."""
     total = node_memory_bytes() if memory is None else memory
     available = total - shared_bytes - NODE_HEADROOM_BYTES
-    return max(1, int(available // worker_bytes(tree, num_terminals)))
+    return max(1, int(available // worker_bytes(tree, num_terminals, br_streets=br_streets)))
 
 
 def mark_visited_from_strategy(storage: StaticArrayStorage) -> None:
@@ -138,33 +163,70 @@ def pcs_worker(
     storage = None
     try:
         _, abstraction, tree = _build_local(config, abstraction)
-        storage = StaticArrayStorage(tree, session_id=session_id, attach=True)
+        extra = trunk_arrays(config, tree)
+        storage = StaticArrayStorage(tree, session_id=session_id, attach=True, extra=extra)
         compiled = compile_tree(tree, GameRules(config.game.small_blind, config.game.big_blind))
         solver, pcs = config.solver, config.pcs
-        kernel = PublicChanceSamplingCFR(
-            compiled,
-            storage.regrets,
-            storage.strategy_sum,
-            weighting=solver.iteration_weighting,
-            dcfr_alpha=solver.dcfr_alpha,
-            dcfr_beta=solver.dcfr_beta,
-            dcfr_gamma=solver.dcfr_gamma,
-            cfr_plus=solver.cfr_plus,
-            alternating=pcs.alternating,
-            showdown=pcs.showdown,
-        )
+        kernel: PublicChanceSamplingCFR | CFRBestResponse
+        if pcs.cfr_br == "off":
+            kernel = PublicChanceSamplingCFR(
+                compiled,
+                storage.regrets,
+                storage.strategy_sum,
+                weighting=solver.iteration_weighting,
+                dcfr_alpha=solver.dcfr_alpha,
+                dcfr_beta=solver.dcfr_beta,
+                dcfr_gamma=solver.dcfr_gamma,
+                cfr_plus=solver.cfr_plus,
+                alternating=pcs.alternating,
+                showdown=pcs.showdown,
+            )
+        else:
+            kernel = CFRBestResponse(
+                compiled,
+                storage.regrets,
+                storage.strategy_sum,
+                storage.extra_array(TRUNK_ARRAY),
+                br_streets=BR_REGIONS[pcs.cfr_br],
+                weighting=solver.iteration_weighting,
+                dcfr_alpha=solver.dcfr_alpha,
+                dcfr_beta=solver.dcfr_beta,
+                dcfr_gamma=solver.dcfr_gamma,
+                cfr_plus=solver.cfr_plus,
+                showdown=pcs.showdown,
+                num_boards=pcs.runouts_per_flop,
+            )
+            logger.info(
+                "[cfr-br worker %d] hybrid opponent best-responds on %s; "
+                "trunk table %d slots (%.0f MB), %d shared blueprint slots",
+                worker_id,
+                pcs.cfr_br,
+                storage.extra_array(TRUNK_ARRAY).shape[0],
+                storage.extra_array(TRUNK_ARRAY).nbytes / 1e6,
+                tree.num_slots,
+            )
         rng = np.random.default_rng(worker_seed(base_seed, worker_id, chunk_start))
 
         started = time.time()
         banked = int(counters[worker_id]) if counters is not None else 0
         count = 0
         for iteration in indices:
-            contexts = iteration_contexts(rng, abstraction, pcs.runouts_per_flop)
-            kernel.iterate(contexts, int(iteration))
+            contexts, boards = iteration_contexts(rng, abstraction, pcs.runouts_per_flop)
+            if isinstance(kernel, CFRBestResponse):
+                kernel.iterate(contexts, int(iteration), boards=boards)
+            else:
+                kernel.iterate(contexts, int(iteration))
             count += 1
             if counters is not None:
                 counters[worker_id] = banked + count
         elapsed = time.time() - started
+        if isinstance(kernel, CFRBestResponse):
+            logger.info(
+                "[cfr-br worker %d] %d best responses recorded, %d trunk rows nonzero",
+                worker_id,
+                kernel.best_responses,
+                int(np.count_nonzero(storage.extra_array(TRUNK_ARRAY))),
+            )
         # Measured, because the worker count is sized from an estimate of this
         # number and the task log is the only place the estimate can be checked.
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -196,10 +258,12 @@ def pcs_worker(
 
 __all__ = (
     "LIVE_HANDS",
+    "TRUNK_ARRAY",
     "iteration_contexts",
     "mark_visited_from_strategy",
     "pcs_worker",
     "ram_safe_workers",
     "sample_boards",
+    "trunk_arrays",
     "worker_bytes",
 )

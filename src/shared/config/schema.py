@@ -359,6 +359,12 @@ class PcsConfig(StrictFrozenModel):
     # values to float rounding; an EPYC core does the product in seconds, the
     # walk in a fraction of one.
     showdown: Literal["walk", "matmul"] = Field(default="walk")
+    # CFR-BR: where the opponent plays an exact per-hand best response instead
+    # of regret matching (Johanson et al. 2012). One sampled board per iteration
+    # supports `river` and nothing wider -- past it the responder is choosing
+    # with the runout in hand. `turn_river`/`postflop` are ablations that price
+    # exactly that. Costs ~3 tree passes an iteration instead of one.
+    cfr_br: Literal["off", "river", "turn_river", "postflop"] = Field(default="off")
 
 
 # ---------------------------------------------------------------------------
