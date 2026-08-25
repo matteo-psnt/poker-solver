@@ -16,6 +16,7 @@ import pytest
 
 from src.interfaces.chipzen.seat import (
     TIGHT_CLOCK_MS,
+    WARM_BUDGET_MS,
     BlueprintSeat,
     budget_for,
     sdk_state_payload,
@@ -137,6 +138,29 @@ class TestWarmUp:
     Comfortable on the 30 s casual clock, an auto-fold on the 2,000 ms ranked and
     tournament one.
     """
+
+    def test_warming_does_not_spend_the_match_budget(self, blueprint):
+        """It compiles code paths; it does not need to think.
+
+        Sizing it from the budget forfeited a live match: a 30 s clock gave a
+        9 s budget, the resolver spent all of it inside `on_match_start` on the
+        event loop, the lobby heartbeat starved, and the reconnect collided with
+        our own still-live socket as `duplicate_participant`.
+        """
+        relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
+        seen: list[int] = []
+        original = BlueprintSeat.decide_frame
+
+        def record(self, payload):
+            seen.append(self.budget_ms)
+            return original(self, payload)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(BlueprintSeat, "decide_frame", record)
+            built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
+
+        assert seen == [WARM_BUDGET_MS], "the warm decision must not use the match budget"
+        assert built.budget_ms == 9000, "and the match budget must survive it"
 
     def test_a_seat_arrives_already_warm(self, blueprint, caplog):
         with caplog.at_level(logging.INFO, logger="src.interfaces.chipzen.seat"):
