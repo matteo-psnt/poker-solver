@@ -100,7 +100,9 @@ class TestBudget:
     """
 
     def test_a_stated_clock_sizes_the_budget(self, blueprint):
-        relaxed = {**MATCH_INFO, "decision_timeout_ms": 30_000}
+        """THEIR name is `turn_timeout_ms`; `decision_timeout_ms` is not a field
+        the SDK ever sends, so pinning it made this test assert nothing."""
+        relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
         built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
         assert built.budget_ms == 9000
 
@@ -110,7 +112,7 @@ class TestBudget:
         assert built.budget_ms == 600
 
     def test_an_explicit_budget_wins(self, blueprint):
-        relaxed = {**MATCH_INFO, "decision_timeout_ms": 30_000}
+        relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
         built = BlueprintSeat.for_match(
             blueprint, relaxed, seat=0, use_resolver=False, budget_ms=250
         )
