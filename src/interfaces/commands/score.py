@@ -48,6 +48,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Wall-clock ceiling on each scoring process.",
     )
     parser.add_argument(
+        "--pool",
+        choices=("train", "big", "huge"),
+        default="train",
+        help="Which pool runs it. `exact_br`'s fork-join is sized by FREE RAM, "
+        "so a bigger box buys workers, not just cores: a 91M-row checkpoint got "
+        "2 workers of 8 on a D16 and the walk is linear in that.",
+    )
+    parser.add_argument(
         "flags",
         nargs=argparse.REMAINDER,
         # Declared, though argparse supplies `[]` for an unmatched REMAINDER on
@@ -118,7 +126,8 @@ def run(args: argparse.Namespace) -> ScorePayload:
                 timeout=args.timeout,
             )
             for rung in rungs
-        ]
+        ],
+        pool=args.pool,
     )
     return payload.extend(ScorePayload, run_id=run_id, method=args.method, rungs=rungs)
 

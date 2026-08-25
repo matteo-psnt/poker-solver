@@ -2019,6 +2019,8 @@ export interface components {
             flags?: string[] | null;
             /** Method */
             method?: string | null;
+            /** Pool */
+            pool?: string | null;
             /** Run */
             run: string;
             /** Timeout */
