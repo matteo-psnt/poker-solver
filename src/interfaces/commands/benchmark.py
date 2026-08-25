@@ -160,6 +160,72 @@ class BenchmarkPayload(BaseModel):
     z_score: float | None = None
 
 
+# Below this an expectation check cannot fail honestly: the standard error is
+# estimated off the same few samples, so a run that measured almost nothing
+# reports agreement. MEASURED: an empty tally has an INFINITE standard error,
+# which drives the z-score to zero -- 2,000 hands that all 409'd printed
+# "matches the published check-call at 0.0σ".
+MIN_EXPECT_HANDS = 200
+
+
+def _check_expectation(
+    args: argparse.Namespace, tally: session.Tally
+) -> tuple[bool | None, float | None]:
+    """How far the probe sits from the published figure, or why it cannot say.
+
+    Separate from `run` so both refusals are testable without a live server.
+    """
+    if not args.expect:
+        return None, None
+    within: bool | None = None
+    z_score: float | None = None
+    published, published_se = agents.PUBLISHED[args.expect]
+    # A probe that measured nothing must not report agreement. With no
+    # hands the standard error is infinite, so the z-score is 0.0 and the
+    # run PASSES: 2,000 hands that all failed on a 409 printed "matches the
+    # published check-call at 0.0σ". The whole point of this gate is to
+    # catch a silent failure, so it cannot have one of its own.
+    if tally.played < MIN_EXPECT_HANDS:
+        raise CommandError(
+            f"The {args.expect} probe played {tally.played} hands; an expectation "
+            f"check needs at least {MIN_EXPECT_HANDS}. Below that the standard error "
+            "is itself an estimate off a handful of samples, and a few hands that "
+            "happen to agree make the band arbitrarily tight. If nothing played at "
+            "all, note their cap is 20 hands in progress at once -- abandoned hands "
+            "hold slots until they finish."
+        )
+    combined = (published_se**2 + tally.aivat_std_bb_per_100**2) ** 0.5
+    # And it must be able to FAIL. A handful of hands makes the band so wide
+    # that a doubled or halved score sits inside it -- agreement then says
+    # only that the sample was small. Require the band to be narrower than
+    # half the published figure, which is the size of the scale errors this
+    # is here to find.
+    band = args.sigma * combined
+    if not band < abs(published) / 2:
+        raise CommandError(
+            f"The {args.expect} probe is too noisy to check anything: ±{band:.1f} "
+            f"at {args.sigma:g}σ over {tally.played} hands, against a published "
+            f"{published:.2f}. A doubled or halved score would sit inside that "
+            "band. Run more hands."
+        )
+    z_score = abs(tally.aivat_bb_per_100 - published) / combined
+    within = z_score <= args.sigma
+    if not within:
+        # A refusal, not a traceback: the run happened and every hand is in
+        # `--log`; what failed is the claim that this reproduces a published
+        # figure. Raised HERE rather than in the renderer, which is pure
+        # formatting and must stay that way.
+        raise CommandError(
+            f"The {args.expect} probe scored {tally.aivat_bb_per_100:.2f} "
+            f"± {tally.aivat_std_bb_per_100:.2f} over {tally.played} hands, "
+            f"against a published {published:.2f} ± {published_se:.2f} — "
+            f"{z_score:.1f} combined standard errors out. The wire encoding, the "
+            "cumulative-bet convention or the hand loop is wrong. Fix that before "
+            "reading any blueprint score."
+        )
+    return within, z_score
+
+
 def run(args: argparse.Namespace) -> BenchmarkPayload:
     """Play hands against GTO Wizard AI and report the score."""
     key = os.environ.get(KEY_ENV)
@@ -179,26 +245,7 @@ def run(args: argparse.Namespace) -> BenchmarkPayload:
             log_path=log_path,
         )
 
-    within: bool | None = None
-    z_score: float | None = None
-    if args.expect:
-        published, published_se = agents.PUBLISHED[args.expect]
-        combined = (published_se**2 + tally.aivat_std_bb_per_100**2) ** 0.5
-        z_score = abs(tally.aivat_bb_per_100 - published) / combined
-        within = z_score <= args.sigma
-        if not within:
-            # A refusal, not a traceback: the run happened and every hand is in
-            # `--log`; what failed is the claim that this reproduces a published
-            # figure. Raised HERE rather than in the renderer, which is pure
-            # formatting and must stay that way.
-            raise CommandError(
-                f"The {args.expect} probe scored {tally.aivat_bb_per_100:.2f} "
-                f"± {tally.aivat_std_bb_per_100:.2f} over {tally.played} hands, "
-                f"against a published {published:.2f} ± {published_se:.2f} — "
-                f"{z_score:.1f} combined standard errors out. The wire encoding, the "
-                "cumulative-bet convention or the hand loop is wrong. Fix that before "
-                "reading any blueprint score."
-            )
+    within, z_score = _check_expectation(args, tally)
 
     return BenchmarkPayload(
         agent=args.agent,
