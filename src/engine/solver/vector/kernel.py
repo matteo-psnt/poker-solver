@@ -98,6 +98,7 @@ class NodeGroup:
     actor: int  # 0 when the button acts at these nodes, else 1
     node_ids: np.ndarray
     walk_ids: np.ndarray
+    slot_ids: np.ndarray
     slot_base: np.ndarray
     slot_stride: int
     edge_base: np.ndarray
@@ -114,16 +115,19 @@ def slot_index(compiled: CompiledTree, group: NodeGroup, chunk: slice) -> np.nda
 
 
 def child_targets(
-    compiled: CompiledTree, group: NodeGroup, chunk: slice
+    compiled: CompiledTree, group: NodeGroup, chunk: slice, *, ring: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
     """Per-action child ids and a terminal mask, shaped ``(n, A)``.
 
-    Node children come back in WALK space, terminals as terminal ids -- the
-    space reach/value are indexed in, which is every caller's use for them.
+    Node children come back as their slot WITHIN their own level, terminals as
+    terminal ids. A node child is always one level below its parent, so the ring
+    buffer holding it is ``(group.level + 1) & 1`` and the slot indexes it
+    directly.
     """
     base = group.edge_base[chunk]
     edges = base[:, None] + np.arange(group.num_actions, dtype=np.int64)[None, :]
-    return compiled.walk_target[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
+    source = compiled.slot_target if ring else compiled.walk_target
+    return source[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
 
 
 def regret_match(block: np.ndarray, uniform: np.floating) -> np.ndarray:
@@ -182,6 +186,7 @@ def build_groups(compiled: CompiledTree) -> list[NodeGroup]:
                 actor=actor,
                 node_ids=node_ids,
                 walk_ids=compiled.walk_index[node_ids],
+                slot_ids=compiled.level_slot[node_ids],
                 slot_base=tree.slot_base[node_ids],
                 slot_stride=int(tree.slot_stride[node_ids[0]]),
                 edge_base=compiled.edge_offset[node_ids],
@@ -237,7 +242,13 @@ class VectorCFR:
 
         self.groups = build_groups(compiled) if groups is None else groups
 
-        shape = (2, compiled.num_nodes, self.num_hands)
+        # Frontier ring, not the whole tree: the walk is level-ordered and only
+        # two adjacent levels are ever live. Level k lives in buffer k & 1, in
+        # both directions -- forward reads k and writes k + 1, backward reads
+        # k + 1 and writes k -- so the parity belongs to the level, not the pass.
+        # At 200 bb this is 0.67 GB where the full tree was 1.40, per array.
+        widest = int(np.diff(compiled.level_offset).max())
+        shape = (2, 2, widest, self.num_hands)
         self.reach = np.zeros(shape, dtype=DTYPE)
         self.value = np.zeros(shape, dtype=DTYPE)
         self.terminal_reach = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
@@ -329,15 +340,17 @@ class VectorCFR:
         """
         self.reach[:] = 0.0
         self.terminal_reach[:] = 0.0
-        self.reach[0, 0] = initial_range
-        self.reach[1, 0] = initial_range
+        # The root is the only node at level 0, so buffer 0, slot 0.
+        self.reach[0, 0, 0] = initial_range
+        self.reach[0, 1, 0] = initial_range
         self.strategy_cache = []
 
         for group in self.groups:
             actor, other = group.actor, 1 - group.actor
             buckets = self.context.buckets_for(group.street)
             for chunk in self.chunks(group):
-                walk = group.walk_ids[chunk]
+                here, below = group.level & 1, (group.level + 1) & 1
+                slots = group.slot_ids[chunk]
                 position = len(self.strategy_cache)
                 if self.opponent is not None and actor == self.opponent.player:
                     bucket_strategy, per_hand = self.opponent.block(group, chunk, position)
@@ -347,7 +360,7 @@ class VectorCFR:
                 self.strategy_cache.append((bucket_strategy, per_hand))
                 targets, is_terminal = self.child_targets(group, chunk)
 
-                own_reach = self.reach[actor, walk]
+                own_reach = self.reach[here][actor, slots]
                 if per_hand:
                     actor_reach = np.zeros((*own_reach.shape, group.num_actions), dtype=DTYPE)
                     np.put_along_axis(
@@ -360,7 +373,7 @@ class VectorCFR:
                     actor_reach = own_reach[:, :, None] * bucket_strategy[:, buckets, :]
                     if not use_average:
                         self._accumulate_strategy_sum(group, chunk, bucket_strategy)
-                other_reach = self.reach[other, walk]
+                other_reach = self.reach[here][other, slots]
 
                 for action in range(group.num_actions):
                     target = targets[:, action]
@@ -375,7 +388,7 @@ class VectorCFR:
                     )
                     inner = ~terminal
                     self._deposit(
-                        self.reach,
+                        self.reach[below],
                         target[inner],
                         actor,
                         other,
@@ -467,12 +480,13 @@ class VectorCFR:
             buckets = self.context.buckets_for(group.street)
 
             for chunk in reversed(self.chunks(group)):
-                walk = group.walk_ids[chunk]
+                here, below = group.level & 1, (group.level + 1) & 1
+                slots = group.slot_ids[chunk]
                 block, per_hand = next(cached)
                 targets, is_terminal = self.child_targets(group, chunk)
 
-                actor_children = self.gather_children(targets, is_terminal, actor)
-                other_children = self.gather_children(targets, is_terminal, other)
+                actor_children = self.gather_children(targets, is_terminal, actor, below)
+                other_children = self.gather_children(targets, is_terminal, other, below)
 
                 if per_hand:
                     actor_value = np.take_along_axis(
@@ -480,16 +494,20 @@ class VectorCFR:
                     )[:, :, 0]
                 else:
                     actor_value = (block[:, buckets, :] * actor_children).sum(axis=-1)
-                self.value[actor, walk] = actor_value
-                self.value[other, walk] = other_children.sum(axis=-1)
+                self.value[here][actor, slots] = actor_value
+                self.value[here][other, slots] = other_children.sum(axis=-1)
 
                 self._scatter_to_buckets(group, chunk, actor_children, actor_value)
 
     def gather_children(
-        self, targets: np.ndarray, is_terminal: np.ndarray, player: int
+        self, targets: np.ndarray, is_terminal: np.ndarray, player: int, below: int
     ) -> np.ndarray:
-        """``(n, H, A)`` child values, reading node or terminal storage per edge."""
-        node_values = self.value[player]
+        """``(n, H, A)`` child values, reading node or terminal storage per edge.
+
+        ``below`` is the ring parity of the children's level -- one below the
+        group's, and already written by the time backward reads it.
+        """
+        node_values = self.value[below][player]
         terminal_values = self.terminal_value[player]
         out = np.empty((targets.shape[0], self.context.num_hands, targets.shape[1]), dtype=DTYPE)
         for action in range(targets.shape[1]):
@@ -585,8 +603,9 @@ class VectorCFR:
         if group.actor not in self.update_players:
             return
         segments = self.segments[group.street]
-        walk = group.walk_ids[chunk]
-        reach = self.reach[group.actor, walk][:, segments.hand_order]
+        reach = self.reach[group.level & 1][group.actor, group.slot_ids[chunk]][
+            :, segments.hand_order
+        ]
         collapsed = np.add.reduceat(reach, segments.segment_start, axis=1)
 
         num_buckets = self.compiled.tree.num_buckets(group.street)
@@ -652,20 +671,22 @@ class VectorCFR:
 
         for group in reversed(self.groups):
             for chunk in reversed(self.chunks(group)):
-                walk = group.walk_ids[chunk]
+                here, below = group.level & 1, (group.level + 1) & 1
+                slots = group.slot_ids[chunk]
                 targets, is_terminal = self.child_targets(group, chunk)
-                children = self.gather_children(targets, is_terminal, br_player)
+                children = self.gather_children(targets, is_terminal, br_player, below)
 
                 if group.actor == br_player:
-                    self.value[br_player, walk] = (
+                    self.value[here][br_player, slots] = (
                         children.max(axis=-1) if unconstrained else self._maximise(group, children)
                     )
                 else:
                     # The actor's own probabilities already rode down in the
                     # reach vector, so the responder's value sums over actions.
-                    self.value[br_player, walk] = children.sum(axis=-1)
+                    self.value[here][br_player, slots] = children.sum(axis=-1)
 
-        return self.value[br_player, 0]
+        # The root: level 0, so buffer 0, slot 0.
+        return self.value[0][br_player, 0]
 
     def _maximise(self, group: NodeGroup, actor_children: np.ndarray) -> np.ndarray:
         """Per-hand value of the best action, chosen once per bucket.

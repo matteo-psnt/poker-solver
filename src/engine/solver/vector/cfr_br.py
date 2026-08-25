@@ -457,33 +457,35 @@ class CFRBestResponse:
         for position in range(len(self.plan) - 1, -1, -1):
             group, chunk = self.plan[position]
             actor, other = group.actor, 1 - group.actor
-            walk = group.walk_ids[chunk]
+            here, below = group.level & 1, (group.level + 1) & 1
+            slots = group.slot_ids[chunk]
             actor_children, other_children = {}, {}
             for index in members:
                 kernel = self._use(index)
                 targets, is_terminal = kernel.child_targets(group, chunk)
-                actor_children[index] = kernel.gather_children(targets, is_terminal, actor)
-                other_children[index] = kernel.gather_children(targets, is_terminal, other)
+                actor_children[index] = kernel.gather_children(targets, is_terminal, actor, below)
+                other_children[index] = kernel.gather_children(targets, is_terminal, other, below)
 
             if group.street in self.br_streets:
-                self._maximise(group, position, actor, walk, actor_children)
+                self._maximise(group, position, actor, here, slots, actor_children)
             else:
-                self._mix_trunk(group, chunk, actor, walk, actor_children)
+                self._mix_trunk(group, chunk, actor, here, slots, actor_children)
 
             for index, children in other_children.items():
-                self._use(index).value[other, walk] = children.sum(axis=-1)
+                self._use(index).value[here][other, slots] = children.sum(axis=-1)
 
     def _maximise(
         self,
         group: NodeGroup,
         position: int,
         actor: int,
-        walk: np.ndarray,
+        here: int,
+        slots: np.ndarray,
         children: dict[int, np.ndarray],
     ) -> None:
         """Per-hand argmax, joint over boards this street cannot tell apart.
 
-        ``walk`` indexes `value`, not storage -- see `_mix_trunk`.
+        ``here``/``slots`` index the frontier ring, not storage -- see `_mix_trunk`.
         """
         for group_members in self._partition[group.street]:
             members = [index for index in group_members if index in children]
@@ -504,7 +506,7 @@ class CFRBestResponse:
             for index, chosen in per_board.items():
                 self.agents[index][actor].picks[position] = chosen
                 self.best_responses += 1
-                self._use(index).value[actor, walk] = np.take_along_axis(
+                self._use(index).value[here][actor, slots] = np.take_along_axis(
                     children[index], chosen.astype(np.int64)[:, :, None], axis=2
                 )[:, :, 0]
 
@@ -513,25 +515,27 @@ class CFRBestResponse:
         group: NodeGroup,
         chunk: slice,
         actor: int,
-        walk: np.ndarray,
+        here: int,
+        slots: np.ndarray,
         children: dict[int, np.ndarray],
     ) -> None:
         """Trunk value under regret matching, and the trunk regret this leaves.
 
-        ``walk`` indexes `value`; the trunk rows come from `group.node_ids` via
-        `trunk_strategy`. Two spaces, and only one of them is a storage index.
+        ``here``/``slots`` index the frontier ring; the trunk rows come from
+        `group.node_ids` via `trunk_strategy`. Two spaces, and only one of them
+        is a storage index.
         """
         agent = self.agents[0][actor]
         strategy = agent.trunk_strategy(group, chunk)
         num_buckets = self.compiled.tree.num_buckets(group.street)
-        block = np.zeros((walk.shape[0], num_buckets, group.num_actions), dtype=DTYPE)
+        block = np.zeros((slots.shape[0], num_buckets, group.num_actions), dtype=DTYPE)
         occupied: set[int] = set()
 
         for index, child in children.items():
             kernel = self._use(index)
             segments = kernel.segments[group.street]
             value = (strategy[:, kernel.context.buckets_for(group.street), :] * child).sum(axis=-1)
-            kernel.value[actor, walk] = value
+            kernel.value[here][actor, slots] = value
             collapsed = np.add.reduceat(
                 child[:, segments.hand_order, :], segments.segment_start, axis=1
             )
