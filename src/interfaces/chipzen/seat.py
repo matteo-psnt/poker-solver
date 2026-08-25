@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -121,7 +122,7 @@ class BlueprintSeat:
                 scale.their_depth,
                 scale.our_depth,
             )
-        return cls(
+        seated = cls(
             blueprint=blueprint,
             config=config,
             scale=scale,
@@ -129,6 +130,57 @@ class BlueprintSeat:
             use_resolver=use_resolver,
             budget_ms=budget_ms,
         )
+        seated.warm()
+        return seated
+
+    def warm(self) -> None:
+        """Take one throwaway decision, so the first real one is not the slow one.
+
+        Measured live: 4,109 ms for a match's opening decision and ~118 ms for
+        every one after -- numba compiling and caches filling on first use. That
+        is comfortable on the 30 s casual clock and fatal on the 2,000 ms ranked
+        and tournament one, where hand one would auto-fold. Doing it here spends
+        the cost inside ``match_start``, which has no per-decision clock on it.
+
+        Never raises: a seat that cannot warm is still a seat that can play.
+        """
+        opening = {
+            "hand_number": 0,
+            "phase": "preflop",
+            "board": [],
+            "your_hole_cards": ["Ah", "Kd"],
+            "pot": self.config.small_blind + self.config.big_blind,
+            "your_stack": self.config.starting_stack - self.config.small_blind,
+            "opponent_stacks": [self.config.starting_stack - self.config.big_blind],
+            "to_call": self.config.big_blind - self.config.small_blind,
+            "min_raise": 2 * self.config.big_blind,
+            "max_raise": self.config.starting_stack,
+            "action_history": [
+                {
+                    "seat": self.seat,
+                    "action": "post_small_blind",
+                    "amount": self.config.small_blind,
+                    "phase": "preflop",
+                    "is_timeout": False,
+                },
+                {
+                    "seat": 1 - self.seat,
+                    "action": "post_big_blind",
+                    "amount": self.config.big_blind,
+                    "phase": "preflop",
+                    "is_timeout": False,
+                },
+            ],
+        }
+        started = time.perf_counter()
+        try:
+            self.decide_frame(opening)
+        except Exception:
+            logger.exception("Warm-up decision failed; play continues cold.")
+        finally:
+            # The throwaway must not show up as a real decision.
+            self.tally = SeatTally()
+        logger.info("Warmed the decision path in %.0f ms.", (time.perf_counter() - started) * 1000)
 
     def decide_frame(self, state_payload: dict[str, Any]) -> dict[str, Any]:
         """The ``turn_action`` payload answering one ``turn_request.state``.

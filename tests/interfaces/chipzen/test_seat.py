@@ -8,6 +8,7 @@ raising. Anything else loses a match to an exception.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -69,6 +70,41 @@ class TestSeatConstruction:
     def test_the_resolver_is_off_unless_asked_for(self, seat):
         """Off-tree play is where the resolver has been measured to collapse."""
         assert seat.use_resolver is False
+
+
+class TestWarmUp:
+    """The opening decision must not be the slow one.
+
+    Measured live: 4,109 ms for a match's first decision, ~118 ms thereafter.
+    Comfortable on the 30 s casual clock, an auto-fold on the 2,000 ms ranked and
+    tournament one.
+    """
+
+    def test_a_seat_arrives_already_warm(self, blueprint, caplog):
+        with caplog.at_level(logging.INFO, logger="src.interfaces.chipzen.seat"):
+            BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0)
+        assert "Warmed the decision path" in caplog.text
+
+    def test_the_throwaway_leaves_no_trace_in_the_tally(self, seat):
+        """Otherwise every match would report a phantom first decision."""
+        assert seat.tally.decisions == 0
+        assert seat.tally.fallbacks == 0
+        assert seat.tally.per_hand == {}
+
+    def test_the_first_real_decision_is_still_answered(self, seat):
+        assert seat.decide_frame(turn_payload())["action"] in LEGAL
+        assert seat.tally.decisions == 1
+
+    def test_a_seat_that_cannot_warm_still_plays(self, blueprint, monkeypatch, caplog):
+        """Warming is best-effort; a failure there must not cost us the match."""
+        monkeypatch.setattr(
+            BlueprintSeat,
+            "decide_frame",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("cold")),
+        )
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0)
+        assert "play continues cold" in caplog.text
+        assert built.tally.decisions == 0
 
 
 class TestDecide:
