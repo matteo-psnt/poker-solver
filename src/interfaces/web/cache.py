@@ -146,7 +146,7 @@ class TtlCache:
         def _run() -> None:
             try:
                 context.run(self._produce, key, produce)
-            except Exception:  # noqa: BLE001 -- a thread has nobody to raise to
+            except Exception:  # a thread has nobody to raise to
                 logger.warning("background refresh of %r failed", key, exc_info=True)
 
         thread = threading.Thread(target=_run, name=f"refresh:{key!r}", daemon=True)

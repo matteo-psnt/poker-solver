@@ -21,7 +21,7 @@ repos:
 
   # Ruff - fast auto-fix linting followed by formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.9
+    rev: v0.16.4
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -30,6 +30,15 @@ repos:
   # Type checking with ty
   - repo: local
     hooks:
+      # The lock is what actually pins `ty`, `numpy` and `numba` -- see the
+      # comments beside them in `pyproject.toml`. Scoped: a commit that touches
+      # neither file cannot have drifted them.
+      - id: uv-lock-check
+        name: uv lock (in sync with pyproject)
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
       - id: ty
         name: ty
         entry: uv run ty
@@ -65,6 +74,15 @@ repos:
         entry: uv run python -m src.interfaces.web.schema
         language: system
         pass_filenames: false
+      # `infra/` is code the cloud path depends on and no other hook reads it.
+      # Formatting only: `terraform validate` needs an initialised backend, which
+      # a hook has no business creating.
+      - id: terraform-fmt
+        name: terraform fmt
+        entry: terraform fmt -check -recursive infra
+        language: system
+        pass_filenames: false
+        files: ^infra/.*\.tf$
       # The console's gate. Its own toolchain -- ruff/ty/deptry/vulture never
       # see JavaScript -- but it runs beside them so one command still answers
       # "is this repo clean". `files:` spares a Python-only checkout: with no

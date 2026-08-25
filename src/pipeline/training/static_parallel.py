@@ -273,7 +273,7 @@ def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
     """
     try:
         run_events.append(checkpoint_dir, run_events.CHECKPOINT, **fields)
-    except Exception:  # noqa: BLE001 -- telemetry must not fail a checkpoint already written
+    except Exception:  # telemetry must not fail a checkpoint already written
         logger.warning("Could not record the checkpoint event; training continues.", exc_info=True)
 
 

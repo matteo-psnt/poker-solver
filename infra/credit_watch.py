@@ -195,6 +195,7 @@ def az_json(args: list[str], what: str) -> dict:
                 capture_output=True,
                 text=True,
                 timeout=120,
+                check=False,
             )
         except FileNotFoundError as exc:
             raise UnevaluableError("the `az` CLI is not installed or not on PATH") from exc
