@@ -127,7 +127,7 @@ class TestParallelMatchesSerial:
         )
         run_dir = tmp_path / out.run_id
         metadata = load_run_metadata(run_dir)
-        solver, _ = build_blueprint_for(run_dir, metadata, metadata.card_abstraction_hash, None)
+        solver, _, _ = build_blueprint_for(run_dir, metadata, metadata.card_abstraction_hash, None)
         return solver, metadata, run_dir
 
     def _score(self, solver, metadata, run_dir, workers: int) -> tuple[float, int]:

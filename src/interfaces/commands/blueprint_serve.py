@@ -121,7 +121,7 @@ def render(payload: BlueprintServePayload) -> None:
     def _build(directory: Path, at_iteration: int | None):
         """A run directory on local disk -> a blueprint. ~1 min in production."""
         metadata = RunTracker.load(directory).metadata
-        solver, _storage = build_blueprint_for(
+        solver, _storage, _policy = build_blueprint_for(
             directory,
             metadata,
             abstraction_hash=metadata.card_abstraction_hash,

@@ -106,7 +106,7 @@ def evaluate_run_resolver_gate(
     # Pinned like every other estimator: resolving by config NAME would silently
     # rebucket the checkpoint if the abstraction was recomputed since training.
     effective_hash = effective_abstraction_hash(run_dir, metadata, None)
-    solver, storage = build_static_evaluation_solver(
+    solver, storage, _ = build_static_evaluation_solver(
         config, checkpoint_dir=run_dir, abstraction_hash=effective_hash
     )
     # The factory carries the OVERRIDDEN config, not the run's. A worker built
@@ -179,12 +179,12 @@ def evaluate_blueprint_match(
             f"{metadata_b.config.game}); a chip match would be meaningless."
         )
 
-    solver_a, storage_a = build_static_evaluation_solver(
+    solver_a, storage_a, _ = build_static_evaluation_solver(
         metadata_a.config,
         checkpoint_dir=run_dir_a,
         abstraction_hash=metadata_a.card_abstraction_hash,
     )
-    solver_b, storage_b = build_static_evaluation_solver(
+    solver_b, storage_b, _ = build_static_evaluation_solver(
         metadata_b.config,
         checkpoint_dir=run_dir_b,
         abstraction_hash=metadata_b.card_abstraction_hash,

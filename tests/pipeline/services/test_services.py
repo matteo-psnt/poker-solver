@@ -206,8 +206,8 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (
-            seen.update(abstraction_hash=abstraction_hash) or (_solver(), storage)
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None, **kw: (
+            seen.update(abstraction_hash=abstraction_hash) or (_solver(), storage, {})
         ),
     )
     monkeypatch.setattr(
@@ -247,8 +247,8 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (
-            seen.update(abstraction_hash=abstraction_hash) or (_solver(), storage)
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None, **kw: (
+            seen.update(abstraction_hash=abstraction_hash) or (_solver(), storage, {})
         ),
     )
     monkeypatch.setattr(
@@ -305,8 +305,8 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (
-            seen.update(abstraction_hash=abstraction_hash) or (_solver(), storage)
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None, **kw: (
+            seen.update(abstraction_hash=abstraction_hash) or (_solver(), storage, {})
         ),
     )
     monkeypatch.setattr(
@@ -393,7 +393,11 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
     monkeypatch.setattr(
         services_shared,
         "build_static_evaluation_solver",
-        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None: (_solver(), storage),
+        lambda cfg, checkpoint_dir, abstraction_hash=None, at_iteration=None, **kw: (
+            _solver(),
+            storage,
+            {},
+        ),
     )
     monkeypatch.setattr(
         services_lbr,

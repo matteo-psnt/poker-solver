@@ -39,6 +39,11 @@ CONDITIONAL_TIER_KNOBS = (
     "policy_threshold",
     "purify",
     "conditional_chance",
+    # WHICH strategy of the checkpoint was scored -- the average, the current
+    # iterate, or a late window of the average. Same arrays, different policy.
+    "policy_iterate",
+    "avg_window_from",
+    "avg_gamma",
     # Resolver knobs. These decide what the resolver PLAYS, so two rows across
     # any of them measure different strategies -- `policy_blend_alpha` most of
     # all (alpha=0 scored +2140 where the shipped alpha scored -781.6). Both
@@ -135,6 +140,9 @@ def build_exact_br_knobs_from_params(
     policy_threshold: float = 0.0,
     purify: bool = False,
     conditional_chance: bool = False,
+    policy_iterate: str = "average",
+    avg_window_from: int | None = None,
+    avg_gamma: float | None = None,
 ) -> dict[str, Any]:
     """Canonical exact-BR knob tier: the board plan IS the comparison tier.
 
@@ -160,6 +168,12 @@ def build_exact_br_knobs_from_params(
         knobs["policy_threshold"] = policy_threshold
     if conditional_chance:
         knobs["conditional_chance"] = True
+    if policy_iterate != "average":
+        knobs["policy_iterate"] = policy_iterate
+    if avg_window_from is not None:
+        knobs["avg_window_from"] = int(avg_window_from)
+    if avg_gamma is not None:
+        knobs["avg_gamma"] = float(avg_gamma)
     return knobs
 
 
