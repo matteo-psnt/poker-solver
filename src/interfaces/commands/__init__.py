@@ -186,6 +186,7 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "runinfo",
                 "Everything recorded about a run: provenance, curve, scores, tasks, gaps.",
             ),
+            CommandRef("chart", "A run's preflop strategy as a 13x13 grid."),
         ),
     ),
 )

@@ -46,6 +46,8 @@ NODE_ONLY: dict[str, str] = {
     "train-static": "compute, run BY the node wrapper — `submit` is the console's door",
     "precompute": "compute, run BY the node wrapper — `submit-precompute` is the door",
     "evaluate": "compute, run BY the node wrapper — `score` is the door",
+    "chart": "reads one node out of a LOADED blueprint, so it needs the box that "
+    "holds one; the console reaches a loaded run through `blueprint_proxy`",
     "vector-sweep": "compute, run BY the node wrapper — `submit-vector` is the door",
     "train-vector": "compute, run BY the node wrapper — `submit --kernel board-free` is the door",
     "train-pcs": "compute, run BY the node wrapper — `submit --kernel pcs` is the door",

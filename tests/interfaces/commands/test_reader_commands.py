@@ -21,9 +21,12 @@ from src.interfaces.commands import load_all
 # published record. Three are pool tasks that write to /mnt/work before
 # publishing. `blueprint-serve` and `chipzen-seat` are NOT pool tasks -- they run
 # on the long-lived reader in `infra/serve/` -- but they belong here for the same
-# reason: both mmap a checkpoint and the card abstraction from local disk, which
-# is a place, not a record.
-NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve", "chipzen-seat"})
+# reason: they mmap a checkpoint and the card abstraction from local disk, which
+# is a place, not a record. `chart` is the same -- it reads one node out of a
+# loaded blueprint, which means having the blueprint.
+NODE_SIDE = frozenset(
+    {"train-static", "precompute", "evaluate", "blueprint-serve", "chipzen-seat", "chart"}
+)
 
 LOCAL_SOURCE_FLAG = "--runs-dir"
 
