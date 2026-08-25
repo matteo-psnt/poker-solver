@@ -87,7 +87,16 @@ export function Charts() {
         aside={<Line steps={steps} bigBlind={bigBlind} onJump={(p) => set({ path: p })} />}
         // A short board is the page's own question, answered right below with
         // the deck. Routing it here would grey the panel and file it as a fault.
-        error={needsBoard ? null : (node.error && String(node.error.message)) || null}
+        // `combos` too: it is fetched once with staleTime Infinity and is not
+        // retried, so a 503 from the blueprint box would otherwise blank the
+        // grid for the life of the tab with no reason given anywhere.
+        error={
+          needsBoard
+            ? null
+            : (node.error && String(node.error.message)) ||
+              (combos.error && String(combos.error.message)) ||
+              null
+        }
         loading={node.isFetching && !node.data}
         empty={node.data?.terminal ? "Nobody acts here — the hand is already over." : null}
       >

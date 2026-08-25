@@ -186,7 +186,10 @@ const useDispatch = <T>(path: string) => {
   return useMutation<T, Error, Record<string, unknown>>({
     mutationFn: (body) => send<T>(path, body),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      // `["view"]`, not the `["jobs"]` key the deleted `useJobs` owned: the
+      // Overview and the status bar both read queued work through the composed
+      // view, so invalidating a key nothing subscribes to refreshed nothing.
+      queryClient.invalidateQueries({ queryKey: ["view"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
   });
@@ -215,7 +218,10 @@ export const useCompactLegs = () => {
   const queryClient = useQueryClient();
   return useMutation<Compacted, Error, Record<string, unknown>>({
     mutationFn: (body) => send("/api/compact-legs", body),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["view"] });
+    },
   });
 };
 
@@ -320,10 +326,17 @@ export const useBox = () =>
     },
   });
 
-export const useBoxAction = () =>
-  useMutation<Box, Error, "start" | "stop">({
+export const useBoxAction = () => {
+  const queryClient = useQueryClient();
+  return useMutation<Box, Error, "start" | "stop">({
     mutationFn: (action) => send(`/api/box/${action}`),
+    // The POST returns the box's NEW power, and discarding it left the page
+    // reading a poll up to 30s old: the control flipped back to "start
+    // deallocated" on a box that was already waking, and the 5s cadence that
+    // exists to watch a transition did not engage until the next slow poll.
+    onSuccess: (box) => queryClient.setQueryData(["blueprint", "box"], box),
   });
+};
 
 /**
  * Cancel one task. Invalidates the task list rather than patching it: the
@@ -334,6 +347,9 @@ export const useCancelTask = () => {
   return useMutation<Cancelled, Error, { job: string; task: string }>({
     mutationFn: ({ job, task }) =>
       send(`/api/tasks/${encodeURIComponent(job)}/${encodeURIComponent(task)}/cancel`),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["view"] });
+    },
   });
 };
