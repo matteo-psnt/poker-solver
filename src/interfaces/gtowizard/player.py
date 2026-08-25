@@ -36,10 +36,9 @@ logger = logging.getLogger(__name__)
 class BlueprintPlayer:
     """Plays one blueprint against GTO Wizard AI.
 
-    ``allow_depth_mismatch`` exists to be left alone. Their game is 200 bb and
-    every blueprint we have is cut for 100, so the scale guard refuses by
-    default -- a 100 bb strategy fielded at 200 bb is off our tree from the
-    first action, and a score from it would separate nothing.
+    ``allow_depth_mismatch`` exists to be left alone. Their game is 200 bb, and
+    a 100 bb strategy fielded there is off our tree from the first action, so a
+    score from it would separate nothing.
     """
 
     name = "blueprint"

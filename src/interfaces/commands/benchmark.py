@@ -17,15 +17,14 @@ pins the blinds, the seats and the hand accounting against a sharp number;
 check-call pins the multi-street path. `--expect` reports the z-score and
 refuses past 3, so the strength of the check is legible rather than a boolean.
 
-**Then the blueprint.** `--agent blueprint --run <id>`. Their game is 200 bb and
-every blueprint we have is cut for 100, so this refuses until a 200 bb arm
-exists; `--allow-depth-mismatch` fields one anyway and the result is a
-translation probe, not a score.
+**Then the blueprint.** `--agent blueprint --run <id>`. Their game is 200 bb, so
+an arm cut for another depth is refused; `--allow-depth-mismatch` fields one
+anyway and the result is a translation probe, not a score.
 
 There is deliberately no `--key`: it is the whole credential, it cannot be
 rotated from here, and a shell history is a bad place for it. Supply it through
 ``$GTOWIZARD_API_KEY``, never a file in this tree -- a dispatch seals the
-working tree and would upload it to the share.
+working tree and would carry it to every node.
 """
 
 from __future__ import annotations
@@ -112,8 +111,8 @@ def _agent(args: argparse.Namespace) -> agents.Agent:
     if not args.run:
         raise CommandError("--agent blueprint needs --run.")
     # Imported here, not at module scope: the engine and its numba kernels are
-    # the expensive half of start-up, and `--help` and the baseline probe -- the
-    # thing this command is FOR until a 200 bb arm exists -- must not pay it.
+    # the expensive half of start-up, and `--help` and the keyless
+    # baseline probe -- which needs no blueprint at all -- must not pay it.
     from src.adapters.postgres import connect  # noqa: PLC0415 -- see above
     from src.interfaces.gtowizard.player import BlueprintPlayer  # noqa: PLC0415
     from src.pipeline.services.scoring._shared import build_blueprint_for  # noqa: PLC0415
