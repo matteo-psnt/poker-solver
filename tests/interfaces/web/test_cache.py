@@ -177,7 +177,7 @@ class TestSingleFlight:
         def _fails() -> str:
             raise RuntimeError("Azure said no")
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="Azure said no"):
             cache.get("pool", _fails)
 
         done = threading.Event()
