@@ -13,18 +13,18 @@ and ``max(regret, 0)`` under it IS regret matching.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-import zarr
 
 from src.engine.solver.storage.static_checkpoint import (
-    FingerprintMismatchError,
     StaticCheckpointManifest,
+    read_strategy_sum,
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from src.engine.solver.storage.static_array import StaticArrayStorage
 
 PolicyIterate = Literal["average", "current"]
@@ -35,11 +35,6 @@ PolicyIterate = Literal["average", "current"]
 # no window evidence shrinks back toward the average, which is the honest
 # answer where the window has nothing to say.
 WINDOW_SHRINKAGE = 1e-3
-
-# Slots per streamed block. The window variant never holds the earlier array
-# whole: on the XL tree that is ~1 GB per worker on top of a load peak the
-# fork-join's RAM cap already sizes from a steady footprint.
-_BLOCK_SLOTS = 8_000_000
 
 
 def assemble_policy(
@@ -80,38 +75,16 @@ def _apply_window(
     storage: StaticArrayStorage, checkpoint_dir: Path, window_from: int
 ) -> dict[str, Any]:
     """``SS(T) - SS(t0)``, shrunk back toward ``SS(t0)`` where the window is empty."""
-    manifest = StaticCheckpointManifest.read(checkpoint_dir)
-    if manifest is None:
-        raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
-    entry = manifest.entry_for(window_from)
-    root = zarr.open(zarr.DirectoryStore(Path(checkpoint_dir) / entry["zarr"]), mode="r")
-    expected = storage.tree.fingerprint()
-    if root.attrs.get("fingerprint") != expected:
-        raise FingerprintMismatchError(
-            f"Window base {entry['zarr']} carries fingerprint "
-            f"{root.attrs.get('fingerprint')}, expected {expected}."
-        )
-    earlier_sum = root["strategy_sum"]
-    if earlier_sum.shape != storage.strategy_sum.shape:
-        raise ValueError(
-            f"Window base holds {earlier_sum.shape} slots, storage expects "
-            f"{storage.strategy_sum.shape} — fingerprints matched, so this is a format bug."
-        )
-    empty = 0
-    trained = 0
-    for start in range(0, storage.strategy_sum.shape[0], _BLOCK_SLOTS):
-        stop = min(start + _BLOCK_SLOTS, storage.strategy_sum.shape[0])
-        earlier = earlier_sum[start:stop]
-        # A basic slice is a view, so the in-place ops below rewrite the table.
-        block = storage.strategy_sum[start:stop]
-        np.subtract(block, earlier, out=block)
-        np.maximum(block, 0, out=block)
-        had = earlier > 0
-        trained += int(np.count_nonzero(had))
-        empty += int(np.count_nonzero(had & (block <= 0)))
-        block += WINDOW_SHRINKAGE * earlier
+    earlier = read_strategy_sum(storage, checkpoint_dir, window_from)
+    window = storage.strategy_sum
+    had = earlier > 0
+    np.subtract(window, earlier, out=window)
+    np.maximum(window, 0, out=window)
+    trained = int(np.count_nonzero(had))
+    empty = int(np.count_nonzero(had & (window <= 0)))
+    window += WINDOW_SHRINKAGE * earlier
     return {
-        "avg_window_from": int(entry["iteration"]),
+        "avg_window_from": int(window_from),
         "avg_window_shrinkage": WINDOW_SHRINKAGE,
         # How much of the trained table the window has nothing to say about,
         # and so falls back to the full average. A large share means the arm
@@ -151,11 +124,11 @@ def _apply_gamma(
 ) -> dict[str, Any]:
     """Reweight the average from `t^source_gamma` to `t^target_gamma`.
 
-    Each retained rung's window sum is a difference of two rungs, so the
-    reweighted average is a positive combination of the rungs themselves
-    (Abel summation) -- one streamed pass per rung, never the whole ladder in
-    memory at once. Run it at ``--workers 1``: every fork-join worker would
-    otherwise re-read the entire ladder off the share.
+    Each retained rung's band is a difference of two rungs, so the reweighted
+    average is a positive combination of the rungs themselves (Abel summation)
+    -- read one at a time, never the whole ladder at once. Run it at
+    ``--workers 1``: every fork-join worker would otherwise re-read the ladder
+    off the share.
     """
     manifest = StaticCheckpointManifest.read(checkpoint_dir)
     if manifest is None:
@@ -171,7 +144,7 @@ def _apply_gamma(
     weights = [coefficients[k] - coefficients[k + 1] for k in range(len(rungs) - 1)]
     storage.strategy_sum *= np.float32(coefficients[-1])
     for rung, weight in zip(rungs[:-1], weights, strict=True):
-        _accumulate(storage, checkpoint_dir, manifest, rung, weight)
+        _accumulate(storage, checkpoint_dir, rung, weight)
     # A target above the source makes some weight negative; a negative stored
     # row is not a strategy, and the normaliser reads it as one.
     np.maximum(storage.strategy_sum, 0, out=storage.strategy_sum)
@@ -179,25 +152,10 @@ def _apply_gamma(
 
 
 def _accumulate(
-    storage: StaticArrayStorage,
-    checkpoint_dir: Path,
-    manifest: StaticCheckpointManifest,
-    rung: int,
-    weight: float,
+    storage: StaticArrayStorage, checkpoint_dir: Path, rung: int, weight: float
 ) -> None:
-    """``strategy_sum += weight * SS(rung)``, streamed a block at a time."""
-    entry = manifest.entry_for(rung)
-    root = zarr.open(zarr.DirectoryStore(Path(checkpoint_dir) / entry["zarr"]), mode="r")
-    expected = storage.tree.fingerprint()
-    if root.attrs.get("fingerprint") != expected:
-        raise FingerprintMismatchError(
-            f"Ladder rung {entry['zarr']} carries fingerprint "
-            f"{root.attrs.get('fingerprint')}, expected {expected}."
-        )
-    source = root["strategy_sum"]
-    for start in range(0, storage.strategy_sum.shape[0], _BLOCK_SLOTS):
-        stop = min(start + _BLOCK_SLOTS, storage.strategy_sum.shape[0])
-        storage.strategy_sum[start:stop] += np.float32(weight) * source[start:stop]
+    """``strategy_sum += weight * SS(rung)``."""
+    storage.strategy_sum += np.float32(weight) * read_strategy_sum(storage, checkpoint_dir, rung)
 
 
 __all__ = ("WINDOW_SHRINKAGE", "PolicyIterate", "assemble_policy")

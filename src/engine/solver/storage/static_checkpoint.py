@@ -268,15 +268,7 @@ def load_checkpoint(
         )
 
     entry = manifest.entry_for(at_iteration)
-    root = zarr.open(zarr.DirectoryStore(checkpoint_dir / entry["zarr"]), mode="r")
-
-    stored = root.attrs.get("fingerprint")
-    if stored != (legacy if translate else expected):
-        raise FingerprintMismatchError(
-            f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected "
-            f"{legacy if translate else expected}. "
-            "The manifest and the arrays disagree; the directory is corrupt."
-        )
+    root = _open_snapshot(checkpoint_dir, entry, legacy if translate else expected)
 
     row_source, slot_source = _legacy_index_maps(storage.tree) if translate else (None, None)
     if translate:
@@ -301,6 +293,52 @@ def load_checkpoint(
         f"({storage.num_touched_infosets():,} rows touched, tree {expected})"
     )
     return loaded
+
+
+def _open_snapshot(checkpoint_dir: Path, entry: dict, expected: str):
+    """One rung's zarr group, refusing arrays the manifest disagrees with."""
+    root = zarr.open(zarr.DirectoryStore(Path(checkpoint_dir) / entry["zarr"]), mode="r")
+    stored = root.attrs.get("fingerprint")
+    if stored != expected:
+        raise FingerprintMismatchError(
+            f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected {expected}. "
+            "The manifest and the arrays disagree; the directory is corrupt."
+        )
+    return root
+
+
+def read_strategy_sum(storage: StaticArrayStorage, checkpoint_dir: Path, iteration: int):
+    """One retained rung's ``strategy_sum``, in THIS storage's slot order.
+
+    Exists because a second rung is a legitimate INPUT -- a windowed or
+    reweighted average is a combination of rungs -- and every published run
+    predates the bucket-major layout, so a reader that skipped the v1
+    permutation would silently combine two different orderings.
+    """
+    checkpoint_dir = Path(checkpoint_dir)
+    manifest = StaticCheckpointManifest.read(checkpoint_dir)
+    if manifest is None:
+        raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
+    expected = storage.tree.fingerprint()
+    legacy = storage.tree.legacy_fingerprint()
+    translate = manifest.fingerprint == legacy
+    if manifest.fingerprint != expected and not translate:
+        raise FingerprintMismatchError(
+            f"Checkpoint in {checkpoint_dir} was written against betting tree "
+            f"{manifest.fingerprint}, but this storage indexes tree {expected}."
+        )
+    root = _open_snapshot(
+        checkpoint_dir, manifest.entry_for(iteration), legacy if translate else expected
+    )
+    values = root["strategy_sum"][:]
+    if values.shape != storage.strategy_sum.shape:
+        raise ValueError(
+            f"Rung {iteration} holds {values.shape} slots, storage expects "
+            f"{storage.strategy_sum.shape} — fingerprints matched, so this is a format bug."
+        )
+    if translate:
+        values = values[_legacy_index_maps(storage.tree)[1]]
+    return values
 
 
 def _legacy_index_maps(tree) -> tuple[np.ndarray, np.ndarray]:
