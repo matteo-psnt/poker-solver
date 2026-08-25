@@ -29,6 +29,7 @@ from src.engine.solver.storage.policy_assembly import (
 )
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import (
+    AbstractionMismatchError,
     _legacy_index_maps,
     load_checkpoint,
     save_checkpoint,
@@ -305,3 +306,71 @@ def test_a_window_at_the_source_gamma_matches_the_plain_window(tree, tmp_path):
     assemble_policy(b, tmp_path, window_from=100)
     np.testing.assert_allclose(a.strategy_sum, b.strategy_sum, rtol=1e-4, atol=1e-6)
     assert sums[-1] is not None
+
+
+def _run_with(tree: BettingTree, path, seed: int, abstraction: str = "abs-1"):
+    """A one-rung run whose strategy_sum is distinctive to ``seed``."""
+    rng = np.random.default_rng(seed)
+    storage = StaticArrayStorage(tree)
+    storage.visited[:] = 1
+    storage.strategy_sum[:] = rng.random(storage.strategy_sum.shape).astype(
+        storage.strategy_sum.dtype
+    )
+    save_checkpoint(storage, path, 800, abstraction_id=abstraction)
+    return storage.strategy_sum.copy()
+
+
+def test_mixing_a_run_with_itself_is_the_exact_identity(tree, tmp_path):
+    """THE guard. Rows are normalised per row at read time, so a mixture that
+    got the scaling wrong would still look like a plausible strategy -- this is
+    the only cheap check that says the operation is the one intended."""
+    _run_with(tree, tmp_path, seed=5)
+    for weight in (0.0, 0.25, 0.5, 1.0):
+        storage = StaticArrayStorage(tree)
+        load_checkpoint(storage, tmp_path)
+        before = storage.strategy_sum.copy()
+        assemble_policy(storage, tmp_path, mix_run=tmp_path, mix_at=800, mix_weight=weight)
+        for node_id in range(len(tree)):
+            for bucket in range(int(tree.buckets_per_node[node_id])):
+                start, stop = tree.slots(node_id, bucket)
+                np.testing.assert_allclose(
+                    average_strategy(storage.strategy_sum[start:stop]),
+                    average_strategy(before[start:stop]),
+                    rtol=1e-5,
+                    err_msg=f"weight={weight}",
+                )
+
+
+def test_mixing_blends_the_two_runs_by_total_mass(tree, tmp_path):
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    a = _run_with(tree, a_dir, seed=5)
+    b = _run_with(tree, b_dir, seed=9)
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, a_dir)
+    record = assemble_policy(storage, a_dir, mix_run=b_dir, mix_at=800, mix_weight=0.5)
+
+    assert record == {"mix_run": "b", "mix_at": 800, "mix_weight": 0.5}
+    expected = 0.5 * a / a.sum(dtype=np.float64) + 0.5 * b / b.sum(dtype=np.float64)
+    np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-12)
+
+
+def test_mixing_across_a_different_bucket_assignment_is_refused(tree, tmp_path):
+    """Two runs can share a tree, a layout and bucket COUNTS while row `i` holds
+    a different hand in each, and nothing about the arrays would reveal it."""
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    _run_with(tree, a_dir, seed=5, abstraction="abs-1")
+    _run_with(tree, b_dir, seed=9, abstraction="abs-2")
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, a_dir)
+    with pytest.raises(AbstractionMismatchError, match="different hands"):
+        assemble_policy(storage, a_dir, mix_run=b_dir, mix_at=800)
+
+
+def test_a_mixture_is_scored_plain(tree, tmp_path):
+    _run_with(tree, tmp_path, seed=5)
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, tmp_path)
+    with pytest.raises(ValueError, match="scored plain"):
+        assemble_policy(storage, tmp_path, mix_run=tmp_path, mix_at=800, avg_gamma=0.0)

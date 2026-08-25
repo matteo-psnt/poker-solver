@@ -245,6 +245,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "rungs, tens of GB onto the node). A separate tier.",
     )
     parser.add_argument(
+        "--mix-run",
+        default=None,
+        help="[exact_br] Blend another RUN's average into this one 50/50 and score the "
+        "mixture. Both runs must bucket by the same abstraction (refused otherwise). Tests "
+        "whether the solver's residual error is independent ACROSS runs, not just across "
+        "training spans. A separate tier.",
+    )
+    parser.add_argument(
+        "--mix-at",
+        type=int,
+        default=None,
+        help="[exact_br] Rung of --mix-run to blend (default: its published checkpoint).",
+    )
+    parser.add_argument(
+        "--mix-weight",
+        type=float,
+        default=0.5,
+        help="[exact_br] Weight on --mix-run. 0.5 is the even blend; each side is divided "
+        "by its own total mass first, so this weights STRATEGIES, not accumulated mass.",
+    )
+    parser.add_argument(
         "--br-conditional",
         action="store_true",
         help="[exact_br] Condition chance on the deal: divide each street's branch weights by "
@@ -294,6 +315,9 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             policy_iterate=args.policy_iterate,
             avg_window_from=args.avg_window_from,
             avg_gamma=args.avg_gamma,
+            mix_run=resolve_run_dir(args.mix_run, args.runs_dir) if args.mix_run else None,
+            mix_at=args.mix_at,
+            mix_weight=args.mix_weight,
         ),
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,

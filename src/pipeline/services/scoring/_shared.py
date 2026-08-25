@@ -33,6 +33,7 @@ def build_blueprint_for(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Load a scoreable blueprint from a run's static checkpoint."""
     return build_static_evaluation_solver(
@@ -43,6 +44,9 @@ def build_blueprint_for(
         policy_iterate=policy_iterate,
         avg_window_from=avg_window_from,
         avg_gamma=avg_gamma,
+        mix_run=mix[0],
+        mix_at=mix[1],
+        mix_weight=mix[2],
     )
 
 
@@ -90,6 +94,7 @@ def load_blueprint(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
 ) -> ScorableBlueprint:
     """Build a fresh evaluation blueprint (solver) from a checkpoint.
 
@@ -105,6 +110,9 @@ def load_blueprint(
         policy_iterate=policy_iterate,
         avg_window_from=avg_window_from,
         avg_gamma=avg_gamma,
+        mix_run=mix[0],
+        mix_at=mix[1],
+        mix_weight=mix[2],
     )
     return solver
 
@@ -133,6 +141,7 @@ def prepare_blueprint(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
 ) -> PreparedBlueprint:
     """Everything an estimator needs before it can score: metadata, blueprint, factory.
 
@@ -149,7 +158,14 @@ def prepare_blueprint(
     metadata = load_run_metadata(run_dir)
     effective_hash = effective_abstraction_hash(run_dir, metadata, abstraction_hash)
     solver, storage, policy_record = build_blueprint_for(
-        run_dir, metadata, effective_hash, at_iteration, policy_iterate, avg_window_from, avg_gamma
+        run_dir,
+        metadata,
+        effective_hash,
+        at_iteration,
+        policy_iterate,
+        avg_window_from,
+        avg_gamma,
+        mix,
     )
     factory = (
         functools.partial(
@@ -161,6 +177,7 @@ def prepare_blueprint(
             policy_iterate,
             avg_window_from,
             avg_gamma,
+            mix,
         )
         if num_workers > 1
         else None

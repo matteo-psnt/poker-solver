@@ -82,6 +82,9 @@ def build_static_evaluation_solver(
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
+    mix_run: Path | None = None,
+    mix_at: int | None = None,
+    mix_weight: float = 0.5,
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Build a read-only blueprint over a STATIC checkpoint.
 
@@ -114,6 +117,9 @@ def build_static_evaluation_solver(
         avg_gamma=avg_gamma,
         source_gamma=source_gamma_of(config.solver),
         loaded_iteration=loaded,
+        mix_run=mix_run,
+        mix_at=mix_at,
+        mix_weight=mix_weight,
     )
     solver = StaticTreeSolver(action_model, card_abstraction, storage, config, tree=tree)
     return solver, storage, policy_record
