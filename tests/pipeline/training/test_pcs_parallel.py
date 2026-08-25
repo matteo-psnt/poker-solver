@@ -51,6 +51,21 @@ class TestSampling:
         assert all(np.array_equal(board[:3], boards[0][:3]) for board in boards)
         assert len({tuple(sorted(board[3:].tolist())) for board in boards}) > 1
 
+    def test_no_two_runouts_of_one_iteration_are_the_same_board(self):
+        """A turn and river are a SET, so drawing them independently repeats one.
+
+        Measured: at K=4 a repeat lands about every 200 iterations, which killed
+        a 300-iteration CFR-BR run 13 iterations in. Two copies of one board are
+        one observation counted twice — tolerable for plain PCS, and impossible
+        for a best response, which must choose ONE action across boards it
+        cannot tell apart and so cannot be run on them separately.
+        """
+        rng = np.random.default_rng(0)
+        for _ in range(2000):
+            boards = pcs_parallel.sample_boards(rng, 4)
+            keys = {frozenset(int(card) for card in board[3:]) for board in boards}
+            assert len(keys) == 4
+
     def test_every_full_board_leaves_the_same_live_hand_count(self):
         assert pcs_parallel.LIVE_HANDS == 47 * 46 // 2
 
