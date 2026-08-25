@@ -420,3 +420,36 @@ class TestLegacyLayoutTranslation:
         row_source, slot_source = _legacy_index_maps(tree)
         assert len(np.unique(row_source)) == tree.num_rows
         assert len(np.unique(slot_source)) == tree.num_slots
+
+
+class TestTheAbstractionGuardIsArmed:
+    """`static_parallel` omitted `abstraction_id`, so EVERY run it wrote left the
+    manifest field null -- and `load_checkpoint`'s AbstractionMismatchError needs
+    the id on BOTH sides to fire. The guard its own docstring calls "the only way
+    that failure is ever visible" had never been able to fire."""
+
+    def test_a_fresh_manifest_records_the_bucket_assignment(self, tree, tmp_path):
+        storage = StaticArrayStorage(tree)
+        save_checkpoint(storage, tmp_path, 10, abstraction_id="abs-1")
+        assert StaticCheckpointManifest.read(tmp_path).abstraction_id == "abs-1"
+
+    def test_a_genuine_mismatch_is_refused(self, tree, tmp_path):
+        storage = StaticArrayStorage(tree)
+        save_checkpoint(storage, tmp_path, 10, abstraction_id="abs-1")
+        fresh = StaticArrayStorage(tree)
+        with pytest.raises(AbstractionMismatchError):
+            load_checkpoint(fresh, tmp_path, abstraction_id="abs-2")
+
+    def test_a_historical_manifest_without_the_field_still_loads(self, tree, tmp_path):
+        """The case that keeps other sessions' mid-training runs safe: every
+        checkpoint on the share today predates this field. Arming the guard must
+        be additive, never a gate."""
+        storage = StaticArrayStorage(tree)
+        storage.strategy_sum[:] = 1.0
+        save_checkpoint(storage, tmp_path, 10)
+        raw = json.loads((tmp_path / "STATIC_CHECKPOINT.json").read_text())
+        assert raw["abstraction_id"] is None
+
+        fresh = StaticArrayStorage(tree)
+        assert load_checkpoint(fresh, tmp_path, abstraction_id="abs-anything") == 10
+        assert float(fresh.strategy_sum[0]) == 1.0

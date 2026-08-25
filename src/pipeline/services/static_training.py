@@ -266,6 +266,12 @@ def train_static(
             # value because worker seeds are derived from it deterministically.
             base_seed=config.system.seed if config.system.seed is not None else 42,
             checkpoint_retain_every=config.storage.checkpoint_retain_every,
+            # The bucket ASSIGNMENT, which the tree fingerprint deliberately does
+            # not cover. Without it `load_checkpoint`'s AbstractionMismatchError
+            # cannot fire at all -- it needs the id on BOTH sides -- so the guard
+            # its own docstring calls "the only way that failure is ever visible"
+            # was inert for every run this trainer ever wrote.
+            abstraction_id=tracker.metadata.card_abstraction_hash,
             checkpoint_every=checkpoint_every,
             resume=resuming or seeded,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
