@@ -87,9 +87,9 @@ class NodeGroup:
     (``edge_offset``). ``slot_stride`` is one scalar — a street shares it.
 
     ``node_ids`` indexes STORAGE (regrets, strategy_sum, the CFR-BR trunk);
-    ``walk_ids`` indexes the per-iteration reach/value arrays, which live in
-    level order. They are different spaces and mixing them is silent, so the
-    two names are kept apart everywhere rather than derived at the use site.
+    ``slot_ids`` indexes the per-iteration reach/value ring, which holds a
+    level at a time. They are different spaces and mixing them is silent, so
+    the two are kept apart everywhere rather than derived at the use site.
     """
 
     level: int
@@ -97,7 +97,6 @@ class NodeGroup:
     street: Street
     actor: int  # 0 when the button acts at these nodes, else 1
     node_ids: np.ndarray
-    walk_ids: np.ndarray
     slot_ids: np.ndarray
     slot_base: np.ndarray
     slot_stride: int
@@ -115,7 +114,7 @@ def slot_index(compiled: CompiledTree, group: NodeGroup, chunk: slice) -> np.nda
 
 
 def child_targets(
-    compiled: CompiledTree, group: NodeGroup, chunk: slice, *, ring: bool = True
+    compiled: CompiledTree, group: NodeGroup, chunk: slice
 ) -> tuple[np.ndarray, np.ndarray]:
     """Per-action child ids and a terminal mask, shaped ``(n, A)``.
 
@@ -126,8 +125,7 @@ def child_targets(
     """
     base = group.edge_base[chunk]
     edges = base[:, None] + np.arange(group.num_actions, dtype=np.int64)[None, :]
-    source = compiled.slot_target if ring else compiled.walk_target
-    return source[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
+    return compiled.slot_target[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
 
 
 def regret_match(block: np.ndarray, uniform: np.floating) -> np.ndarray:
@@ -185,7 +183,6 @@ def build_groups(compiled: CompiledTree) -> list[NodeGroup]:
                 street=street,
                 actor=actor,
                 node_ids=node_ids,
-                walk_ids=compiled.walk_index[node_ids],
                 slot_ids=compiled.level_slot[node_ids],
                 slot_base=tree.slot_base[node_ids],
                 slot_stride=int(tree.slot_stride[node_ids[0]]),
