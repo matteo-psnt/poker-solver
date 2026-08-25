@@ -77,6 +77,7 @@ def build_static_evaluation_solver(
     at_iteration: int | None = None,
     policy_iterate: PolicyIterate = "average",
     avg_window_from: int | None = None,
+    avg_gamma: float | None = None,
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Build a read-only blueprint over a STATIC checkpoint.
 
@@ -100,9 +101,15 @@ def build_static_evaluation_solver(
     storage = StaticArrayStorage(tree)
     # Verifies the tree fingerprint, so a checkpoint written against a different
     # tree is refused rather than silently reinterpreted row-for-row.
-    load_checkpoint(storage, checkpoint_dir, at_iteration=at_iteration)
+    loaded = load_checkpoint(storage, checkpoint_dir, at_iteration=at_iteration)
     policy_record = assemble_policy(
-        storage, checkpoint_dir, iterate=policy_iterate, window_from=avg_window_from
+        storage,
+        checkpoint_dir,
+        iterate=policy_iterate,
+        window_from=avg_window_from,
+        avg_gamma=avg_gamma,
+        source_gamma=config.solver.dcfr_gamma,
+        loaded_iteration=loaded,
     )
     solver = StaticTreeSolver(action_model, card_abstraction, storage, config, tree=tree)
     return solver, storage, policy_record

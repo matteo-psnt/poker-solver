@@ -108,7 +108,7 @@ def test_a_window_of_the_current_iterate_is_refused(tree, tmp_path):
     _ladder(tree, tmp_path)
     storage = StaticArrayStorage(tree)
     load_checkpoint(storage, tmp_path)
-    with pytest.raises(ValueError, match="no averaging window"):
+    with pytest.raises(ValueError, match="no averaging weight"):
         assemble_policy(storage, tmp_path, iterate="current", window_from=100)
 
 
@@ -118,3 +118,59 @@ def test_the_default_leaves_the_average_alone(tree, tmp_path):
     load_checkpoint(storage, tmp_path)
     assert assemble_policy(storage, tmp_path) == {}
     np.testing.assert_array_equal(storage.strategy_sum, late)
+
+
+def _ladder_of(tree: BettingTree, path, rungs: tuple[int, ...]) -> list[np.ndarray]:
+    """A run retaining every rung in ``rungs``. Returns each rung's strategy sum."""
+    rng = np.random.default_rng(11)
+    storage = StaticArrayStorage(tree)
+    storage.visited[:] = 1
+    sums = []
+    for rung in rungs:
+        storage.strategy_sum += rng.random(storage.strategy_sum.shape).astype(
+            storage.strategy_sum.dtype
+        )
+        sums.append(storage.strategy_sum.copy())
+        save_checkpoint(storage, path, rung, retain_every=1)
+    return sums
+
+
+def test_gamma_reweighting_is_the_band_weighted_combination(tree, tmp_path):
+    rungs = (100, 200, 300)
+    sums = _ladder_of(tree, tmp_path, rungs)
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, tmp_path)
+    record = assemble_policy(
+        storage, tmp_path, avg_gamma=0.0, source_gamma=2.0, loaded_iteration=300
+    )
+
+    assert record == {"avg_gamma": 0.0, "avg_gamma_rungs": 3}
+    edges = (0, *rungs)
+
+    def mass(exponent, low, high):
+        return (high ** (exponent + 1) - low ** (exponent + 1)) / (exponent + 1)
+
+    coefficients = [
+        mass(0.0, edges[k], edges[k + 1]) / mass(2.0, edges[k], edges[k + 1]) for k in range(3)
+    ]
+    scale = max(coefficients)
+    windows = [sums[0], sums[1] - sums[0], sums[2] - sums[1]]
+    expected = sum((c / scale) * window for c, window in zip(coefficients, windows, strict=True))
+    np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-6)
+
+
+def test_gamma_matching_the_source_leaves_the_average_alone(tree, tmp_path):
+    sums = _ladder_of(tree, tmp_path, (100, 200, 300))
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, tmp_path)
+    assemble_policy(storage, tmp_path, avg_gamma=2.0, source_gamma=2.0, loaded_iteration=300)
+    # Every band's coefficient is 1, so the ladder recombines into the rung.
+    np.testing.assert_allclose(storage.strategy_sum, sums[-1], rtol=1e-4, atol=1e-6)
+
+
+def test_gamma_needs_the_ladder(tree, tmp_path):
+    _ladder_of(tree, tmp_path, (100,))
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, tmp_path)
+    with pytest.raises(ValueError, match="retained ladder"):
+        assemble_policy(storage, tmp_path, avg_gamma=0.0, source_gamma=2.0, loaded_iteration=100)

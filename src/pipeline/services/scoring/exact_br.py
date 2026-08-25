@@ -57,6 +57,7 @@ def evaluate_run_exact_br(
         config.num_workers,
         config.policy_iterate,
         config.avg_window_from,
+        config.avg_gamma,
     )
     metadata, solver, storage, factory = (
         prepared.metadata,

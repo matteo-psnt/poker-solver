@@ -124,6 +124,7 @@ def evaluate_and_record(
             conditional_chance=br_config.conditional_chance,
             policy_iterate=br_config.policy_iterate,
             avg_window_from=br_config.avg_window_from,
+            avg_gamma=br_config.avg_gamma,
         )
     elif method == "resolver_match":
         # Not an exploitability estimate at all: a head-to-head chip edge of
