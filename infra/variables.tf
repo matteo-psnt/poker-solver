@@ -81,11 +81,15 @@ variable "pool_huge_vm_size" {
 
 variable "pool_huge_max_nodes" {
   description = <<-EOT
-    Autoscale ceiling for `train-huge`: 2 x D64als_v6 is ~$5.50/hr. Sized for
-    A/B probes; raise it deliberately if the huge box wins and work moves here.
+    Autoscale ceiling for `train-huge`: 4 x D64als_v6 is ~$11.01/hr. The big
+    box won and the work moved here, so this is no longer probe-sized.
+
+    PAID FOR OUT OF `max_nodes`, not out of new quota -- the three caps share
+    one 1024 vCPU allowance and must clear the +8 offset described there.
+    40/2/4 = 960 is deliberate; raise this only by lowering another.
   EOT
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "max_nodes" {
@@ -97,6 +101,7 @@ variable "max_nodes" {
       4 x D16als_v6  ~$3.20/hr   ~$77/day
      16 x D16als_v6 ~$12.80/hr  ~$307/day
      30 x D16als_v6 ~$24.00/hr  ~$576/day
+     40 x D16als_v6 ~$32.00/hr  ~$768/day
      60 x D16als_v6 ~$48.00/hr ~$1152/day
 
     Quota went 256 -> 512 and then 512 -> 1024 on 2026-08-22. One `az quota update` on
@@ -114,16 +119,22 @@ variable "max_nodes" {
     carrying a persisted `AllocationFailed: core limit has reached` that read
     like a live fault. Do not size this to consume the quota exactly.
 
+    THE THREE POOL CAPS SHARE ONE QUOTA, so this number is not free to raise.
+    40 x 16 + 2 x 32 + 4 x 64 = 960 vCPU of 1024, which the +8 offset above
+    leaves reachable. The previous 60/2/2 summed to 1152 -- the whole quota,
+    exactly the mistake the paragraph above records. `train` carries scoring,
+    which is throwaway; the D64s carry the critical path. Re-do this
+    arithmetic before changing ANY of the three.
+
     `infra/credit_watch.py --daily-burn` is the other half and is NOT derived
-    from here -- 1152.00 accompanies a 60 here. WHAT 60 COSTS: ~$1152/day
-    worst-case against a ~$9.0k remaining balance is ~8 days of runway, which
-    puts `--warn-days 30` permanently in alarm. 60 was chosen on 2026-08-23
-    for the exploitability programme's queue (367 tasks behind 30 nodes); the
-    pool scales to zero at rest, so the figure bounds a runaway, not a day.
-    Drop it back to 20-30 when the programme ends.
+    from here -- 1152.00 accompanies this, and still bounds it: 40 D16 + 2 D32
+    + 4 D64 is ~$45.76/hr, ~$1098/day worst-case. Against a ~$9.0k remaining
+    balance that is ~8 days of runway, which puts `--warn-days 30` permanently
+    in alarm. The pool scales to zero at rest, so the figure bounds a runaway,
+    not a day. Drop this back to 20-30 when the programme ends.
   EOT
   type        = number
-  default     = 60
+  default     = 40
 }
 
 variable "data_disk_gb" {
