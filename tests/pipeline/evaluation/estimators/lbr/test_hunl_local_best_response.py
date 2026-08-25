@@ -344,6 +344,7 @@ class TestTerminalBranching:
 class TestPerHandRecords:
     """Per-hand outcomes + base seed enable paired CRN comparisons offline."""
 
+    @pytest.mark.timeout(60)
     def test_records_match_aggregate_and_seed(self):
         solver = _build_solver(3, starting_stack=400)
         result = compute_lbr_exploitability(
@@ -537,6 +538,7 @@ class TestExploitability:
         assert first.exploitability_mbb == second.exploitability_mbb
         assert first.lbr_utility_p0 == second.lbr_utility_p0
 
+    @pytest.mark.timeout(60)
     def test_include_off_tree_false_pinned_baseline(self):
         """Bitwise anchor: the on-tree eval must not move under the shadow-state
         refactor. Pinned on this platform against the pre-shadow implementation;
@@ -688,6 +690,7 @@ class TestDeployedOpponent:
         assert first.exploitability_mbb == second.exploitability_mbb
         assert first.lbr_utility_p0 == second.lbr_utility_p0
 
+    @pytest.mark.timeout(60)
     def test_deployed_requires_resolver_config(self):
         solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match=r"requires LBRConfig\.resolver"):
@@ -695,6 +698,7 @@ class TestDeployedOpponent:
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="deployed")
             )
 
+    @pytest.mark.timeout(60)
     def test_deployed_requires_pinned_iterations(self):
         solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match="max_iterations"):
@@ -709,6 +713,7 @@ class TestDeployedOpponent:
                 ),
             )
 
+    @pytest.mark.timeout(60)
     def test_unknown_opponent_rejected(self):
         solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match=r"Unknown LBRConfig\.opponent"):
@@ -716,6 +721,7 @@ class TestDeployedOpponent:
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, opponent="resolver")
             )
 
+    @pytest.mark.timeout(60)
     def test_resolved_opponent_incorporates_exploiter_actions(self):
         """History-replay range inference: the EXPLOITER's observed actions must
         Bayes-update the exploiter's slot in the deployed opponent's ranges
@@ -764,6 +770,7 @@ class TestDeployedOpponent:
 class TestLookaheadScorerMode:
     """scorer="lookahead" engine wiring: validation, determinism, effect."""
 
+    @pytest.mark.timeout(60)
     def test_unknown_scorer_rejected(self):
         solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match=r"Unknown LBRConfig\.scorer"):
@@ -771,6 +778,7 @@ class TestLookaheadScorerMode:
                 solver, LBRConfig(num_hands=2, equity_runouts=2, seed=1, scorer="resolver")
             )
 
+    @pytest.mark.timeout(60)
     def test_depth_below_one_rejected(self):
         solver = _build_solver(1, starting_stack=400)
         with pytest.raises(ValueError, match="depth must be >= 1"):
