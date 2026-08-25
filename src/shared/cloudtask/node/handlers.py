@@ -9,6 +9,7 @@ what made the shell version impossible to reason about.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import threading
@@ -16,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from src.shared import records
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, progress
@@ -230,11 +232,49 @@ def _fetch_rungs(
             return []
         log(f"FATAL {plan.run_id} has no published checkpoint to score")
         return None
-    fetched = archive.fetch_for_evaluation(published, paths.runs / plan.run_id, requested, log)
+    destination = paths.runs / plan.run_id
+    fetched = archive.fetch_for_evaluation(published, destination, requested, log)
     if not fetched:
         log("FATAL none of the requested rungs could be fetched")
         return None
+    support = _support_rungs(plan.eval_flags, destination, fetched)
+    if support:
+        log(f"eval also READS rungs {', '.join(support)} (a reassembled average)")
+        if len(archive.fetch_for_evaluation(published, destination, support, log)) != len(support):
+            log("FATAL a rung the reassembled average reads is missing")
+            return None
     return fetched
+
+
+def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str]) -> list[str]:
+    """Rungs the eval READS but does not score, from its own flags.
+
+    `--avg-window-from` subtracts one earlier rung; `--avg-gamma` recombines
+    every retained rung below the one being scored. Selective fetching means a
+    rung nobody asked to SCORE is simply absent on the node, which surfaces as
+    a zarr path error inside the loader -- so the flags have to be read here,
+    where the fetch happens.
+    """
+    top = max(int(rung) for rung in scored)
+    wanted: set[int] = set()
+    for name, value in itertools.pairwise(flags):
+        if name == "--avg-window-from":
+            wanted.add(int(value))
+        elif name == "--avg-gamma":
+            wanted.update(rung for rung in _retained_ladder(destination) if rung < top)
+    return [str(rung) for rung in sorted(wanted) if str(rung) not in scored]
+
+
+def _retained_ladder(destination: Path) -> list[int]:
+    """Every rung the run's manifest still points at. Parsed, not imported:
+    the storage layer that owns this manifest is not on the node's stdlib-only
+    import path."""
+    raw = archive.read_manifest(destination / records.STATIC_CHECKPOINT)
+    if not raw:
+        return []
+    return sorted(
+        {int(entry["iteration"]) for entry in raw.get("retained", [])} | {int(raw["iteration"])}
+    )
 
 
 def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
