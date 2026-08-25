@@ -14,7 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.interfaces.chipzen.seat import BlueprintSeat, sdk_state_payload
+from src.interfaces.chipzen.seat import (
+    TIGHT_CLOCK_MS,
+    BlueprintSeat,
+    budget_for,
+    sdk_state_payload,
+)
 from tests.interfaces.chipzen.test_adapter import (
     BIG_BLIND_ENTRY,
     SMALL_BLIND_ENTRY,
@@ -83,6 +88,44 @@ class TestSeatConstruction:
         built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
         assert built.use_resolver is False
         assert BlueprintSeat.__dataclass_fields__["use_resolver"].default is None
+
+
+class TestBudget:
+    """One constant cannot serve clocks that differ by 15x.
+
+    Casual and the rated queue allow 30 s; ranked challenges and tournaments
+    allow 2 s. The budget is not a cap either -- at 900 ms the resolver ran
+    1033 ms median and 1695 ms worst live, so the fraction is set against the
+    worst case rather than the median.
+    """
+
+    def test_a_stated_clock_sizes_the_budget(self, blueprint):
+        relaxed = {**MATCH_INFO, "decision_timeout_ms": 30_000}
+        built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
+        assert built.budget_ms == 9000
+
+    def test_an_unstated_clock_assumes_the_tight_one(self, blueprint):
+        """`decision_timeout_ms` is absent on exactly the fast-clock matches."""
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
+        assert built.budget_ms == 600
+
+    def test_an_explicit_budget_wins(self, blueprint):
+        relaxed = {**MATCH_INFO, "decision_timeout_ms": 30_000}
+        built = BlueprintSeat.for_match(
+            blueprint, relaxed, seat=0, use_resolver=False, budget_ms=250
+        )
+        assert built.budget_ms == 250
+
+    @pytest.mark.parametrize(
+        ("clock", "expected"),
+        [(2000, 600), (30_000, 9000), (None, 600), (0, 600), (100, 50)],
+    )
+    def test_the_rule_across_clocks(self, clock, expected):
+        assert budget_for(clock) == expected
+
+    def test_the_worst_case_stays_clear_of_the_tight_clock(self):
+        """1.9x the budget was the worst live ratio; it must still fit."""
+        assert budget_for(None) * 1.9 < TIGHT_CLOCK_MS * 0.7
 
 
 class TestWarmUp:

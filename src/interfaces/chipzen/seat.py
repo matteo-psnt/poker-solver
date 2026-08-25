@@ -47,20 +47,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Their ranked and tournament clocks are 2000 ms ROUND-TRIP, and a decision that
-# lands late is a fold the server made for us.
+# The clock differs by 15x between paths -- 30 s on casual and the rated queue,
+# 2 s on ranked challenges and tournaments -- so one constant cannot be right for
+# both. A fixed 900 ms was measured at max 1695 ms against the 2 s clock: SAFE by
+# the letter and 85% of it, which is luck rather than margin.
 #
-# This is the resolver's budget, and the resolver spends all of it: measured on
-# the box, a bare-blueprint decision is sub-millisecond (a table lookup) while
-# blueprint+resolver took 1231 ms median against a 1200 ms budget. Live
-# round-trips on the bare blueprint were ~118 ms, so the frame costs ~120 ms on
-# top. 900 + 120 is a bit over half the clock, which is the margin worth having
-# when the alternative is an auto-fold.
-#
-# The casual and rated-queue paths allow 30 s, so `--budget-ms` is worth raising
-# there -- and note the off-tree measurement that justifies arming the resolver
-# was made at the evaluator's settings, not at this budget.
-DEFAULT_BUDGET_MS = 900
+# BUDGET IS NOT A CAP. The resolver spends all of it and then some: at 900 ms it
+# ran 1033 ms median and 1695 ms worst, so worst ~= 1.9x the budget. Thirty
+# percent keeps the worst case near 57% of the clock, which leaves room for a
+# slow frame.
+TIGHT_CLOCK_MS = 2000
+BUDGET_FRACTION = 0.30
+
+# What a fixed default costs when nothing says otherwise. Assumes the TIGHT
+# clock, because `decision_timeout_ms` is absent on exactly the matches that
+# enforce it -- ranked challenges and tournaments -- and present (30000) on the
+# two relaxed token-initiated paths. Guessing the generous clock is the guess
+# that auto-folds.
+DEFAULT_BUDGET_MS = int(TIGHT_CLOCK_MS * BUDGET_FRACTION)
+
+
+def budget_for(clock_ms: int | None) -> int:
+    """A per-decision budget for the clock the server says it is enforcing.
+
+    ``None`` means the frame did not carry one, which is itself the signal for a
+    fast-clock match -- so it resolves to the tight assumption rather than to
+    anything roomier.
+    """
+    clock = int(clock_ms) if clock_ms else TIGHT_CLOCK_MS
+    return max(50, int(clock * BUDGET_FRACTION))
 
 
 @dataclass
@@ -126,10 +141,22 @@ class BlueprintSeat:
         seat: int,
         *,
         use_resolver: bool | None = None,
-        budget_ms: int = DEFAULT_BUDGET_MS,
+        budget_ms: int | None = None,
     ) -> BlueprintSeat:
-        """Build a seat from ``match_start``, refusing a table we cannot denominate."""
+        """Build a seat from ``match_start``, refusing a table we cannot denominate.
+
+        ``budget_ms=None`` sizes the budget from the clock this match enforces,
+        which the frame carries as ``decision_timeout_ms`` on the relaxed paths
+        and omits on the fast ones. An explicit value overrides it.
+        """
         config = GameConfig.parse(match_info["game_config"])
+        clock = match_info.get("decision_timeout_ms")
+        budget = budget_ms if budget_ms is not None else budget_for(clock)
+        logger.info(
+            "Clock %s ms; per-decision budget %s ms.",
+            clock if clock else f"unstated (assuming {TIGHT_CLOCK_MS})",
+            budget,
+        )
         scale = table_scale(config, blueprint)
         if not scale.depth_matches:
             logger.warning(
@@ -144,7 +171,7 @@ class BlueprintSeat:
             scale=scale,
             seat=seat,
             use_resolver=use_resolver,
-            budget_ms=budget_ms,
+            budget_ms=budget,
         )
         seated.warm()
         return seated
@@ -285,7 +312,7 @@ def run_seat(
     token: str | None,
     env: str,
     use_resolver: bool | None = None,
-    budget_ms: int = DEFAULT_BUDGET_MS,
+    budget_ms: int | None = None,
     max_matches: int | None = None,
 ) -> None:
     """Hold a seat on Chipzen until interrupted, or for ``max_matches`` matches.
