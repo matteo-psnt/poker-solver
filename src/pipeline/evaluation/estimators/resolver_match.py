@@ -31,6 +31,7 @@ import numpy as np
 
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.agent import BlueprintAgent
+from src.engine.solver.mccfr.chance import begin_street
 from src.pipeline.evaluation.statistics import summarize_samples
 from src.pipeline.evaluation.units import pair_mean_mbb
 from src.shared.log import configure_logging
@@ -317,22 +318,15 @@ def deal_for(
 def deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
     """Deal the street's cards from fixed deck positions (duplicate-poker dealing)."""
     board_size = len(state.board)
-    new_board = list(state.board)
     if state.street == Street.FLOP and board_size == 0:
-        new_board.extend(board_stack[:3])
+        cards = board_stack[:3]
     elif state.street == Street.TURN and board_size == 3:
-        new_board.append(board_stack[3])
+        cards = board_stack[3:4]
     elif state.street == Street.RIVER and board_size == 4:
-        new_board.append(board_stack[4])
+        cards = board_stack[4:5]
     else:
         return state
-
-    return state.replace(
-        board=tuple(new_board),
-        current_player=1 - state.button_position,  # out of position acts first postflop
-        to_call=0,
-        last_aggressor=None,
-    )
+    return begin_street(state, cards)
 
 
 # A flop all-in leaves C(45,2) = 990 completions and a turn all-in 44; both are

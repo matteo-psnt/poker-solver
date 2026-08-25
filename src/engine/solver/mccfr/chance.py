@@ -71,6 +71,19 @@ def draw_cards(state: GameState, count: int, rng: random.Random | None = None) -
     return drawn
 
 
+def begin_street(state: GameState, cards: list[Card] | tuple[Card, ...]) -> GameState:
+    """The state every street opens with once ``cards`` hit the board: the
+    out-of-position seat acts, nothing to call, no aggressor yet. The ONE
+    spelling of this transition -- estimators and path replay call it too."""
+    return state.replace(
+        board=(*state.board, *cards),
+        current_player=1 - state.button_position,
+        is_terminal=False,
+        to_call=0,
+        last_aggressor=None,
+    )
+
+
 def sample_chance_outcome(state: GameState, rng: random.Random | None = None) -> GameState:
     """Sample the next chance outcome (flop/turn/river card deals)."""
     board_size = len(state.board)
@@ -87,15 +100,7 @@ def sample_chance_outcome(state: GameState, rng: random.Random | None = None) ->
         # caller's "while chance node" loop forever; fail loudly on the malformed state.
         raise ValueError(f"Unexpected chance state: street={state.street}, board_size={board_size}")
 
-    first_to_act = 1 - state.button_position
-
-    return state.replace(
-        board=(*state.board, *draw_cards(state, count, rng)),
-        current_player=first_to_act,
-        is_terminal=False,
-        to_call=0,
-        last_aggressor=None,
-    )
+    return begin_street(state, draw_cards(state, count, rng))
 
 
 def deal_remaining_cards(state: GameState, rng: random.Random | None = None) -> GameState:

@@ -426,22 +426,18 @@ class GameRules:
                 state, betting_history, pot or state.pot, stacks or state.stacks
             )
 
-        # Deal next cards (in real game, would deal from deck)
-        # For now, board must be provided externally
-        # This is a placeholder that will be completed when integrating with actual game loop
-
-        # Out of position player acts first postflop (non-button)
-        first_to_act = 1 - state.button_position
-
+        # No board here: the caller deals it (see `chance.begin_street`), which is
+        # why `validate=False` below -- the state is briefly a street ahead of
+        # its cards. Out of position acts first postflop.
         return state.replace(
             street=next_street,
+            current_player=1 - state.button_position,
             pot=state.pot if pot is None else pot,
             stacks=state.stacks if stacks is None else stacks,
             betting_history=betting_history,
-            current_player=first_to_act,
             to_call=0,
             last_aggressor=None,
-            validate=False,  # Board is dealt by the caller (CFR) after the street advances
+            validate=False,
         )
 
     def _advance_to_showdown(

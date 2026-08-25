@@ -58,6 +58,7 @@ from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_co
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
 from src.engine.solver.infoset.encoder import get_spr_bucket
 from src.engine.solver.infoset.index import preflop_hand_index
+from src.engine.solver.mccfr.chance import begin_street
 from src.engine.solver.policy.lookup import blueprint_policy_table
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
 from src.shared.log import configure_logging
@@ -611,7 +612,6 @@ class PublicTreeBestResponse:
     def _deal_values(
         self, state: GameState, opp_reach: np.ndarray, own_reach: np.ndarray, line: str
     ) -> tuple[np.ndarray, np.ndarray]:
-        first_to_act = 1 - state.button_position
         best = np.zeros(NUM_COMBOS, dtype=np.float64)
         self_play = np.zeros(NUM_COMBOS, dtype=np.float64)
         # The FLOP deal only -- an empty board. It is the outermost branching in
@@ -635,13 +635,7 @@ class PublicTreeBestResponse:
             # reach is still a branch DONE, and skipping the count would leave the
             # bar permanently short of its own total.
             if child_reach.any():
-                child_state = state.replace(
-                    board=(*state.board, *cards),
-                    current_player=first_to_act,
-                    is_terminal=False,
-                    to_call=0,
-                    last_aggressor=None,
-                )
+                child_state = begin_street(state, cards)
                 if top_level:
                     key = (self._walk_index, deal, flop)
                     if self._fringe is not None:

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 
 from src.core.game.actions import Action, ActionType
 from src.core.game.state import FULL_DECK, Card, GameState
-from src.engine.solver.mccfr.chance import is_chance_node
+from src.engine.solver.mccfr.chance import begin_street, is_chance_node
 
 if TYPE_CHECKING:
     from src.core.game.rules import GameRules
@@ -207,11 +207,5 @@ def _advance_chance(
             )
         dealt = board[consumed : consumed + needed]
         consumed += needed
-        state = state.replace(
-            board=(*state.board, *dealt),
-            current_player=1 - state.button_position,
-            is_terminal=False,
-            to_call=0,
-            last_aggressor=None,
-        )
+        state = begin_street(state, dealt)
     return state, consumed
