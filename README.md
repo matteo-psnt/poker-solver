@@ -2,7 +2,7 @@
 
 A research-grade Monte Carlo CFR implementation for computing near-optimal (GTO) strategies in Heads-Up No-Limit Texas Hold'em.
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
@@ -15,8 +15,8 @@ This solver uses **Monte Carlo Counterfactual Regret Minimization (MCCFR)** with
 - **Suit Isomorphism Card Abstraction**: Exact, full-coverage combo-level abstraction that preserves suit relationships (flush draws, blockers) with no fallback path
 - **Node-Template Action Model**: Context-aware preflop/postflop sizing with SPR-gated jam logic
 - **Realtime Subgame Resolver**: Runtime local re-solving with configurable depth, rollout leaves, and conservative blueprint blending
-- **Parallel Training**: Hash-partitioned shared memory with owner-only writes — lock-free, no merge step
-- **Rigorous Evaluation**: Local Best Response (LBR) exploitability lower bounds with confidence intervals, recorded to an append-only eval ledger with paired run comparison
+- **Parallel Training**: Hogwild over shared memory — every worker writes every row, lock-free, no ownership map and no merge step
+- **Rigorous Evaluation**: Local Best Response (LBR) exploitability lower bounds with confidence intervals, recorded as per-run documents that a DERIVED ledger indexes for paired run comparison
 - **Production-Ready Checkpointing**: Async Zarr-based snapshots with resume capability
 - **Reproducibility**: Runs record git provenance, config hashes, and the exact card-abstraction hash; evaluation auto-pins to it
 - **Cloud-first execution**: training and evaluation run on an autoscale-to-zero Azure Batch pool, dispatched from Python (`src/interfaces/cloud/`). The laptop submits and reads JSON; it does not train.
@@ -139,16 +139,16 @@ card_abstraction:
 
 training:
   num_iterations: 1000000
-  checkpoint_frequency: 500000
 
 storage:
   initial_capacity: 4000000
+  checkpoint_retain_every: 10000000
 
 system:
   config_name: "production"
 ```
 
-Resolver defaults (`ResolverConfig`): `enabled: true`, `time_budget_ms: 300`, `max_depth: 2`, `leaf_rollouts: 8`, `policy_blend_alpha: 0.35`, `min_strategy_prob: 1.0e-6`.
+Resolver defaults (`ResolverConfig`): `enabled: true`, `time_budget_ms: 300`, `max_depth: 6`, `leaf_rollouts: 8`, `policy_blend_alpha: 0.35`, `min_strategy_prob: 1.0e-6`.
 
 Card abstraction configs live in `config/abstraction/`:
 
@@ -177,8 +177,6 @@ The primary quality metric is **exploitability**, measured with **Local Best Res
 - `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
 
 Every evaluation is written as its own document under `<run_dir>/evals/`, with git provenance and the pinned abstraction hash. There is no stored index: `poker-solver ledger` DERIVES one from the published documents on every read, which is what makes evaluating from several boxes at once safe.
-
-An older rollout-based estimator (`compute_exploitability`) is retained as a fast smoke test only — it measures a one-ply deviation gain and is not a trustworthy exploitability figure.
 
 See [Evaluation README](src/pipeline/evaluation/README.md) for methodology and best practices.
 

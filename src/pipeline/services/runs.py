@@ -48,7 +48,7 @@ class RunSummary(BaseModel):
     Experiment lineage
     ------------------
     ``experiment_id``/``arm`` are on every summary because a LISTING is the only
-    place the set of experiments exists. `report --experiment` takes an id and
+    place the set of experiments exists. `ledger --experiment` takes an id and
     `runinfo` reports one run's, so a caller who does not already know an id had
     nowhere to learn one -- which made the report unreachable from any surface
     that cannot be told the answer in advance. It costs nothing: both fields are

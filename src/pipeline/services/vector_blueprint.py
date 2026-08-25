@@ -6,7 +6,7 @@ both store ``regrets``/``strategy_sum`` as flat arrays of ``tree.num_slots``
 under the identical ``slot_base[n] + b*slot_stride[n] + a`` layout, so the
 strategy is already in the shape a checkpoint wants. This service is that
 bridge: train board-free, write a real ``STATIC_CHECKPOINT.json`` ladder, and
-``evaluate``, ``curve`` and ``report`` all work on it unchanged.
+``evaluate``, ``curve`` and ``ledger`` all work on it unchanged.
 
 Two things here are load-bearing rather than incidental.
 

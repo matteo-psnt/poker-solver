@@ -3,7 +3,7 @@
 Experiments are developed in parallel git worktrees — one idea per branch — and
 retyping that name as `--arm` is a step that adds nothing and can be forgotten.
 Forgetting it is not a small mistake: an untagged run is unaffiliated,
-`report --experiment` never sees it, and the omission shows up as a missing row
+`ledger --experiment` never sees it, and the omission shows up as a missing row
 rather than as an error.
 """
 
@@ -44,7 +44,7 @@ class TestArmDefaultsToTheBranch:
         """Outside an experiment an arm label means nothing.
 
         Stamping every run with its branch would turn a field that says "this is
-        part of a comparison" into one that is always set, and `report` groups on
+        part of a comparison" into one that is always set, and `ledger` groups on
         exactly that field.
         """
         monkeypatch.setenv(gitinfo.BRANCH_ENV, "worktree-hybrid-kernels")

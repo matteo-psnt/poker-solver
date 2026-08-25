@@ -1,7 +1,7 @@
 """Static enumeration of the public betting tree.
 
 The public betting tree of HUNL under a fixed action abstraction and stack depth
-is *small* and *finite*: 57,604 decision nodes under
+is *small* and *finite*: 81,518 decision nodes under
 `config/training/production.yaml`, enumerable in seconds. Every information set
 the solver will ever touch is a pair
 

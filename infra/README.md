@@ -101,7 +101,7 @@ Two things worth knowing at the seams:
   `--br-flops 8`: argparse rejects a bare unknown option as an argument of
   `score` itself rather than handing it to the passthrough.
 - **Readers pull metadata only, and there is no local copy.** `ledger`, `curve`,
-  `report` and friends materialise `*.json`/`*.jsonl` from the share into a temp
+  `runinfo` and friends materialise `*.json`/`*.jsonl` from the share into a temp
   tree and discard it — never `*.zarr`, never the `keys-*` tables of the deleted
   dynamic backend. There is no `--source` and no `--runs-dir`: nothing on a
   laptop is a source of truth about a run, so a local copy could only be a stale

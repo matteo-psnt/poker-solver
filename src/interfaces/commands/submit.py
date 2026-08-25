@@ -179,7 +179,7 @@ def _arm(args: argparse.Namespace) -> str:
     An arm IS a worktree here — the whole reason for a branch is that it holds
     one idea — so retyping the name as `--arm` is a step that adds nothing and
     can be forgotten. Forgetting it is not a small mistake: an untagged run is
-    unaffiliated, `report --experiment` never sees it, and the omission shows up
+    unaffiliated, `ledger --experiment` never sees it, and the omission shows up
     as a missing row rather than as an error.
 
     Only under `--experiment`. Outside one an arm label means nothing, and

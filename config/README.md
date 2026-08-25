@@ -46,17 +46,15 @@ Sections and fields, with defaults:
 | Section | Field | Default | Notes |
 |---|---|---|---|
 | `training` | `num_iterations` | 100000 | |
-| | `verbose` | true | |
-| | `runs_dir` | `data/runs` | |
+| | `runs_dir` | `data/runs` | node-relative; runs live on the share |
 | `storage` | `initial_capacity` | 2000000 | recorded in run metadata only |
-| | `max_actions` | 10 | |
-| | `zarr_compression_level` | 1 | 1-9; 1 benchmarked fastest *and* smallest |
+| | `checkpoint_retain_every` | 0 | spare a rung per N iterations from pruning (0 = keep only the last) |
 | `system` | `seed` | null | |
 | | `config_name` | `default` | shown in run metadata |
 | | `log_level` | `INFO` | |
 | `game` | `starting_stack` | 200 | BB units |
 | | `small_blind` / `big_blind` | 1 / 2 | validated: BB > SB |
-| `action_model` | `preflop_templates` | see schema | required keys: `sb_first_in`, `bb_vs_limp`, `bb_vs_open`, `sb_vs_3bet`, `bb_vs_4bet`, `sb_vs_5bet` |
+| `action_model` | `preflop_templates` | see schema | required keys: `sb_first_in`, `bb_vs_limp`, `sb_vs_limp_raise`, `bb_vs_open`, `sb_vs_3bet`, `bb_vs_4bet`, `sb_vs_5bet` |
 | | `postflop_templates` | see schema | required keys: `first_aggressive`, `facing_bet`, `after_one_raise`, `after_two_raises` |
 | | `jam_spr_threshold` | 2.0 | |
 | | `raise_count_rules` | see schema | maps `facing_1/2/3_plus` → postflop template |
@@ -64,15 +62,21 @@ Sections and fields, with defaults:
 | | `version` | 1 | |
 | `resolver` | `enabled` | true | |
 | | `time_budget_ms` | 300 | |
-| | `max_depth` | 2 | |
+| | `max_depth` | 6 | at 2 it truncated 52% of river leaves |
 | | `max_raises_per_street` | 2 | production overrides to 5 |
 | | `leaf_rollouts` | 8 | board runouts for leaf valuation |
 | | `policy_blend_alpha` | 0.35 | resolver↔blueprint blend |
 | | `min_strategy_prob` | 1e-6 | |
 | | `max_iterations` | null | fixed CFR count; determinism knob (null = wall-clock budget) |
-| | `cfr_plus` | false | |
+| | `leaf_continuation_fraction` | 0.0 | a different leaf valuation is a different game to score |
+| | `root_prior_weight` | 0.0 | seeds the subgame with the blueprint |
+| `solver` | `cfr_plus` | false | |
 | | `iteration_weighting` | `linear` | `none` \| `linear` \| `dcfr`; production uses `dcfr` |
 | | `dcfr_alpha/beta/gamma` | 1.5 / 0.0 / 2.0 | used only with `dcfr`; `beta=0` halves negative regrets per update |
+| | `traversal` | `compiled` | `compiled` \| `tree` \| `state`; bit-identical, throughput only |
+| `pcs` | `alternating` | false | |
+| | `runouts_per_flop` | 1 | |
+| | `showdown` | `walk` | `walk` \| `matmul` |
 | `card_abstraction` | `config` | `default` | name of a `config/abstraction/` preset |
 
 Template tokens are validated: preflop accepts `fold`/`call`/`check`/jam

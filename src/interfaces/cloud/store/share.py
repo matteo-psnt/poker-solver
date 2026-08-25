@@ -285,7 +285,7 @@ def is_snapshot_path(relative: str) -> bool:
 def is_metadata(name: str) -> bool:
     """Whether a published file is small enough to be worth a default sync.
 
-    Every analysis command -- ``ledger``, ``report``, ``compare``, ``curve``,
+    Every analysis command -- ``ledger``, ``curve``,
     ``promote`` -- reads only JSON. The checkpoints beside them are ~540 MB of
     zarr chunks that nothing local opens.
     """

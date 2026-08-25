@@ -427,7 +427,7 @@ class TestWhichWorktreeProducedTheNumber:
     The train and eval commits are routinely IDENTICAL across arms that differ
     entirely — experiments live in parallel git worktrees, and a worktree carries
     its change uncommitted for as long as it is being iterated on. Without the
-    branch, `report --experiment` pairs arms it cannot tell apart.
+    branch, `ledger --experiment` pairs arms it cannot tell apart.
     """
 
     def test_both_branches_are_recorded(self, monkeypatch):

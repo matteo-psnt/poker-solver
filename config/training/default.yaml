@@ -34,11 +34,13 @@
 # resolver:
 #   # enabled: true
 #   # time_budget_ms: 300
-#   # max_depth: 2
+#   # max_depth: 6                     # at 2 it truncated 52% of river leaves
 #   # max_raises_per_street: 2
 #   # leaf_rollouts: 8
 #   # policy_blend_alpha: 0.35
 #   # min_strategy_prob: 1.0e-6
+#   # leaf_continuation_fraction: 0.0
+#   # root_prior_weight: 0.0
 
 # ===== Card Abstraction =====
 # card_abstraction:
@@ -47,16 +49,22 @@
 
 # ===== Solver Configuration =====
 # solver:
-#   # Sampling method options:
-#   # - "external": Lower variance, slower (recommended for production)
-#   # - "outcome": Higher variance, faster (good for testing)
-#
 #   # CFR+ regret floor. Off by default: the floor locks in sampling noise under
 #   # MCCFR (Burch 2017); DCFR's beta discount decays negative regrets instead.
 #   # cfr_plus: false  # default: false
 #
 #   # Iteration weighting: "linear" (default), "dcfr", or "none"
 #   # iteration_weighting: "linear"
+#   # dcfr_alpha: 1.5                  # used only with "dcfr"
+#   # dcfr_beta: 0.0                   # beta=0 halves negative regrets per update
+#   # dcfr_gamma: 2.0
+#   # traversal: "compiled"            # compiled | tree | state; bit-identical
+
+# ===== Public Chance Sampling (--kernel pcs) =====
+# pcs:
+#   # alternating: false
+#   # runouts_per_flop: 1
+#   # showdown: "walk"                 # walk | matmul
 
 # ===== Training Configuration =====
 # training:
@@ -67,6 +75,8 @@
 # storage:
 #   # initial_capacity: 2000000        # Recorded in run metadata only; the static
 #   #                                  # table is sized from the betting tree
+#   # checkpoint_retain_every: 0       # Spare a rung per N iterations from
+#   #                                  # pruning (0 = keep only the last)
 
 # ===== System Configuration =====
 # system:
