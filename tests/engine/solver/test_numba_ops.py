@@ -179,6 +179,13 @@ class TestApplyRegretUpdates:
 class TestDCFRWeights:
     """DCFR discount behavior of the unified kernel, and the strategy weight."""
 
+    def test_dcfr_does_not_discount_at_iteration_0(self):
+        """`iteration` is the 0-based absolute iteration, so 0 reaches the kernel
+        and must be left alone like 1. Tests started at 1, which let
+        `iteration > 1` widen to `!= 1` -- discounting on the very first pass --
+        without failing anything."""
+        assert _dcfr_discount(0, 8.0, alpha=1.5, beta=0.0) == 1.0
+
     def test_dcfr_no_discount_at_iteration_1(self):
         assert _dcfr_discount(1, 8.0, alpha=1.5, beta=0.0) == 1.0
         assert _dcfr_discount(1, -8.0, alpha=1.5, beta=0.0) == 1.0
@@ -222,3 +229,10 @@ class TestDCFRWeights:
 
     def test_dcfr_strategy_weight_zero_gamma(self):
         assert compute_dcfr_strategy_weight(100, gamma=0.0) == 1.0
+
+    def test_dcfr_strategy_weight_leaves_the_flat_region_at_two(self):
+        """t=1 is flat and t=2 is already t^gamma. Every other test here jumps
+        to t=100, so the boundary itself was unpinned: mutation testing widened
+        `iteration <= 1` to `<= 2` and nothing noticed."""
+        assert compute_dcfr_strategy_weight(1, gamma=2.0) == 1.0
+        assert compute_dcfr_strategy_weight(2, gamma=2.0) == pytest.approx(4.0, abs=1e-12)
