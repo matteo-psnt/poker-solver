@@ -43,11 +43,6 @@ class RunProvenance:
     run_id: str
     git_commit: str | None
     git_dirty: bool | None
-    # The branch the RUN was trained from. A commit does not identify an arm
-    # here: experiments live in parallel worktrees that share one and differ
-    # only in what is uncommitted. Keyword-only-with-a-default is deliberate --
-    # the two positional fields above it predate this and every legacy row
-    # simply has none.
     config_name: str
     card_abstraction_hash: str | None
     action_config_hash: str | None
@@ -62,6 +57,9 @@ class RunProvenance:
     # Which trainer filled the table. Two runs can share config, abstraction
     # and tree and still be different lineages by this alone.
     kernel: str | None = None
+    # The branch the RUN was trained from. A commit does not identify an arm
+    # here: experiments live in parallel worktrees that share one and differ
+    # only in what is uncommitted. Defaulted because every legacy row has none.
     git_branch: str | None = None
     # The tarball the RUN's code came from. Defaulted for the same reason as
     # `git_branch`: every row written before it existed simply has none, and a
