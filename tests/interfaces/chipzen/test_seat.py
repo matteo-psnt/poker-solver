@@ -53,7 +53,13 @@ def blueprint():
 
 @pytest.fixture
 def seat(blueprint):
-    return BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0)
+    """The BARE blueprint, explicitly.
+
+    Most of this file is about the adapter and the fallbacks, and the resolver
+    would only make each decision slow and non-deterministic. What the default
+    IS gets its own test rather than riding along in every other one.
+    """
+    return BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
 
 
 class TestSeatConstruction:
@@ -63,13 +69,20 @@ class TestSeatConstruction:
 
     def test_a_shallower_table_still_seats(self, blueprint, caplog):
         shallow = {"game_config": {**MATCH_INFO["game_config"], "starting_stack": 400}}
-        built = BlueprintSeat.for_match(blueprint, shallow, seat=0)
+        built = BlueprintSeat.for_match(blueprint, shallow, seat=0, use_resolver=False)
         assert not built.scale.depth_matches
         assert "trained at" in caplog.text
 
-    def test_the_resolver_is_off_unless_asked_for(self, seat):
-        """Off-tree play is where the resolver has been measured to collapse."""
-        assert seat.use_resolver is False
+    def test_the_resolver_follows_the_config_by_default(self, blueprint):
+        """`None` defers to `resolver.enabled` -- one switch, not two.
+
+        It was hard-defaulted False on the old off-tree collapse; `3565aec`
+        ungated the shadow board-sync and the shipped arm then measured 528
+        mbb/hand AHEAD of the bare blueprint off-tree.
+        """
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
+        assert built.use_resolver is False
+        assert BlueprintSeat.__dataclass_fields__["use_resolver"].default is None
 
 
 class TestWarmUp:
@@ -82,7 +95,7 @@ class TestWarmUp:
 
     def test_a_seat_arrives_already_warm(self, blueprint, caplog):
         with caplog.at_level(logging.INFO, logger="src.interfaces.chipzen.seat"):
-            BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0)
+            BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
         assert "Warmed the decision path" in caplog.text
 
     def test_the_throwaway_leaves_no_trace_in_the_tally(self, seat):
@@ -102,7 +115,7 @@ class TestWarmUp:
             "decide_frame",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("cold")),
         )
-        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0)
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
         assert "play continues cold" in caplog.text
         assert built.tally.decisions == 0
 
@@ -133,7 +146,7 @@ class TestDecide:
         assert frame["action"] in LEGAL
 
     def test_an_off_tree_opponent_size_is_tallied(self, blueprint):
-        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1)
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1, use_resolver=False)
         built.decide_frame(
             turn_payload(
                 your_hole_cards=["Qs", "Qc"],
@@ -149,7 +162,7 @@ class TestDecide:
         Read 66-of-66 on the first live match -- one charge per remaining
         decision for the same handful of snapped actions.
         """
-        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1)
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1, use_resolver=False)
         payload = turn_payload(
             your_hole_cards=["Qs", "Qc"],
             to_call=330,
@@ -161,7 +174,7 @@ class TestDecide:
         assert built.tally.off_tree == 1
 
     def test_two_hands_each_contribute_their_own(self, blueprint):
-        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1)
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1, use_resolver=False)
         for hand in (1, 2):
             built.decide_frame(
                 turn_payload(
@@ -191,7 +204,7 @@ class TestItNeverRaises:
 
     def test_a_turn_for_the_seat_that_is_not_ours_passes(self, blueprint):
         """Their frame says it is our turn; if our replay disagrees, do not guess."""
-        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1)
+        built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=1, use_resolver=False)
         frame = built.decide_frame(turn_payload())
         assert frame["action"] in LEGAL
         assert built.tally.truncated == 1

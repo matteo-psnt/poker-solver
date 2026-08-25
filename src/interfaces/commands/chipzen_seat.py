@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from src.interfaces.chipzen.seat import DEFAULT_BUDGET_MS
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
 
@@ -103,17 +104,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "is not a prod one).",
     )
     parser.add_argument(
-        "--resolver",
+        "--no-resolver",
         action="store_true",
-        help="Arm the subgame resolver. Off by default: it has been measured to "
-        "collapse off-tree, which is what arena play is.",
+        help="Play the bare blueprint. The resolver otherwise follows "
+        "`resolver.enabled` (on), which off-tree LBR puts 528 mbb/hand AHEAD of "
+        "the bare blueprint since the shadow board-sync fix.",
     )
     parser.add_argument(
         "--budget-ms",
         type=int,
-        default=1200,
-        help="Per-decision budget. Their ranked and tournament clock is 2000 ms "
-        "round-trip, so leave room for the frame (default 1200).",
+        default=DEFAULT_BUDGET_MS,
+        help=f"Per-decision budget, which the RESOLVER spends all of (measured "
+        f"1231 ms against a 1200 ms budget). Their ranked and tournament clock is "
+        f"2000 ms round-trip and the frame costs ~120 ms of it; casual and the "
+        f"rated queue allow 30 s, so raise it there (default {DEFAULT_BUDGET_MS}).",
     )
     parser.add_argument(
         "--once",
@@ -131,7 +135,8 @@ class ChipzenSeatPayload(BaseModel):
     runs_dir: str
     at_iteration: int | None = None
     mode: Literal["replay", "live"]
-    resolver: bool
+    resolver: bool | None = None
+    """None follows `resolver.enabled`; False is an explicit `--no-resolver`."""
     budget_ms: int
     env: str | None = None
     bot_id: str | None = None
@@ -176,7 +181,7 @@ def run(args: argparse.Namespace) -> ChipzenSeatPayload:
         runs_dir=args.runs_dir,
         at_iteration=args.at,
         mode="live",
-        resolver=args.resolver,
+        resolver=False if args.no_resolver else None,
         budget_ms=args.budget_ms,
         env=args.env,
         bot_id=bot_id,
@@ -200,7 +205,7 @@ def _replay_payload(args: argparse.Namespace, run_dir: Path) -> ChipzenSeatPaylo
         blueprint,
         {"game_config": recorded["game_config"]},
         seat=int(recorded.get("seat", 0)),
-        use_resolver=args.resolver,
+        use_resolver=False if args.no_resolver else None,
         budget_ms=args.budget_ms,
     )
     decision = seat.decide_frame(recorded["state"])
@@ -210,7 +215,7 @@ def _replay_payload(args: argparse.Namespace, run_dir: Path) -> ChipzenSeatPaylo
         runs_dir=args.runs_dir,
         at_iteration=args.at,
         mode="replay",
-        resolver=args.resolver,
+        resolver=False if args.no_resolver else None,
         budget_ms=args.budget_ms,
         decision=decision,
         depth_matches=seat.scale.depth_matches,

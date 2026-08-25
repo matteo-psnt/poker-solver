@@ -7,13 +7,19 @@ that goes back, which is the whole contract and is testable without an account.
 SDK, which is an optional dependency, and does nothing a failure there could make
 interesting.
 
-The resolver is OFF by default here, against ``resolver.enabled``'s own default.
-Arena play is off-tree by construction -- opponents bet sizes our action model
-never cut -- and off-tree is exactly where the resolver has been measured to
-collapse: an exploiter beats blueprint+resolver by more than it beats the bare
-blueprint. Reconstructing statelessly each turn would also starve its range
-inference, which never sees a hand's actions in order. ``--resolver`` turns it
-back on for anyone who wants to measure that again.
+The resolver follows ``resolver.enabled``, which ships on. It was defaulted OFF
+here on the old off-tree collapse -- an exploiter beat blueprint+resolver by far
+more than it beat the bare blueprint -- and that measurement is now void.
+`3565aec` ungated `_sync_board` from `_diverged`, and off-tree LBR over 4,000
+hands then put the shipped arm (alpha=0.35) at -781.6 against the bare
+blueprint's -253.8: paired **-527.8, t=-2.84**, i.e. the resolver now HELPS
+exactly where it used to hurt. Arena play is that setting -- roughly one off-tree
+opponent action per hand -- so following the config is the measured choice and
+``--no-resolver`` is the escape hatch.
+
+One caveat that survives the fix: we reconstruct statelessly each turn and never
+call ``observe``, so the resolver's range inference starts cold every decision.
+The measurement above was made the same way, so it prices that in.
 """
 
 from __future__ import annotations
@@ -41,10 +47,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Their ranked and tournament clocks are 2000 ms round-trip. Leave room for the
-# frame to get there and back, and for the resolver to be cut off rather than
-# blown through -- a decision that lands late is a fold the server made for us.
-DEFAULT_BUDGET_MS = 1200
+# Their ranked and tournament clocks are 2000 ms ROUND-TRIP, and a decision that
+# lands late is a fold the server made for us.
+#
+# This is the resolver's budget, and the resolver spends all of it: measured on
+# the box, a bare-blueprint decision is sub-millisecond (a table lookup) while
+# blueprint+resolver took 1231 ms median against a 1200 ms budget. Live
+# round-trips on the bare blueprint were ~118 ms, so the frame costs ~120 ms on
+# top. 900 + 120 is a bit over half the clock, which is the margin worth having
+# when the alternative is an auto-fold.
+#
+# The casual and rated-queue paths allow 30 s, so `--budget-ms` is worth raising
+# there -- and note the off-tree measurement that justifies arming the resolver
+# was made at the evaluator's settings, not at this budget.
+DEFAULT_BUDGET_MS = 900
 
 
 @dataclass
@@ -98,7 +114,7 @@ class BlueprintSeat:
     config: GameConfig
     scale: TableScale
     seat: int
-    use_resolver: bool = False
+    use_resolver: bool | None = None
     budget_ms: int = DEFAULT_BUDGET_MS
     tally: SeatTally = field(default_factory=SeatTally)
 
@@ -109,7 +125,7 @@ class BlueprintSeat:
         match_info: dict[str, Any],
         seat: int,
         *,
-        use_resolver: bool = False,
+        use_resolver: bool | None = None,
         budget_ms: int = DEFAULT_BUDGET_MS,
     ) -> BlueprintSeat:
         """Build a seat from ``match_start``, refusing a table we cannot denominate."""
@@ -220,7 +236,11 @@ class BlueprintSeat:
             return self._pass(turn)
 
     def _choose(self, spot: Spot) -> Action:
-        """Ask the blueprint (or the resolver) what to do at ``spot``."""
+        """Ask the blueprint (or the resolver) what to do at ``spot``.
+
+        ``use_resolver=None`` defers to ``resolver.enabled``, which is where the
+        decision belongs -- one switch, not two that can disagree.
+        """
         from src.engine.search.agent import BlueprintAgent  # noqa: PLC0415 -- see below
 
         agent = BlueprintAgent(self.blueprint, use_resolver=self.use_resolver)
@@ -264,7 +284,7 @@ def run_seat(
     bot_id: str | None,
     token: str | None,
     env: str,
-    use_resolver: bool = False,
+    use_resolver: bool | None = None,
     budget_ms: int = DEFAULT_BUDGET_MS,
     max_matches: int | None = None,
 ) -> None:
