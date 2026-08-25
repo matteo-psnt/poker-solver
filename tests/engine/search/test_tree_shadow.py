@@ -117,6 +117,78 @@ class TestOffMenuSizeDoesNotEraseTheBlueprint:
         assert res._shadow.state_for(state) is state
 
 
+class TestTheShadowMenuIsJudgedAgainstShadowChips:
+    """MEASURED failure this pins.
+
+    ``_blueprint_strategy`` took its menu, bucket and infoset from the SHADOW
+    and then handed the REAL state to the validity filter. Once the shadow has
+    diverged the two carry different pots and stacks, and the filter's all-in
+    test is an exact ``amount == current_stack`` -- so shadow actions were
+    dropped for being unaffordable in a game they were never priced in. Over
+    120 randomized hands 40% of shadow-backed lookups had at least one action
+    fail, and rows like ``{fold 0.02, jam 0.98}`` collapsed to a pure fold that
+    was then blended into what the resolver actually played.
+
+    Pinned as the CONTRACT -- menu, infoset and filter all come from one state
+    -- rather than by reproducing a chip split: a single fixture hand does not
+    reliably diverge the stacks, so a value assertion here passes either way.
+    """
+
+    @pytest.fixture(scope="class")
+    def solver(self):
+        return build_trained_test_solver(400)
+
+    def _state_the_filter_saw(self, monkeypatch, res, state, menu, *, lookup=None):
+        """The state ``_blueprint_strategy`` hands the validity filter.
+
+        ``_lookup_state`` is pinned to ``lookup`` when given, because it builds
+        a fresh equal-but-distinct state per call -- so identity is the only
+        way to tell "the shadow's state" from "an identical-looking real one".
+        """
+        seen = {}
+        import src.engine.search.resolver as resolver_module
+
+        original = resolver_module.blueprint_action_distribution
+
+        def capture(infoset, filter_state, rules, actions, *, use_average):
+            seen["state"] = filter_state
+            return original(infoset, filter_state, rules, actions, use_average=use_average)
+
+        monkeypatch.setattr(resolver_module, "blueprint_action_distribution", capture)
+        if lookup is not None:
+            monkeypatch.setattr(res, "_lookup_state", lambda *_args, **_kw: lookup)
+        res._blueprint_strategy(state, menu, use_average=True)
+        return seen["state"]
+
+    def test_a_shadow_backed_row_is_filtered_against_the_shadow(self, solver, monkeypatch):
+        state = _flop_node(solver)
+        off = _off_menu_bet(solver, state)
+        after = state.apply_action(off, solver.rules)
+        menu = list(solver.rules.get_legal_actions(after, solver.action_model))
+
+        res = _resolver(solver)
+        res.observe(state, off)
+        lookup = res._lookup_state(after, menu)
+        assert lookup is not after, "the shadow must be in use or this pins nothing"
+
+        saw = self._state_the_filter_saw(monkeypatch, res, after, menu, lookup=lookup)
+        assert saw is lookup, (
+            "the menu, bucket and infoset come from the shadow, so the validity "
+            "filter must too -- against the real state it drops shadow actions "
+            "for being unaffordable in a game they were never priced in"
+        )
+
+    def test_an_on_tree_row_is_unchanged(self, solver, monkeypatch):
+        """On-tree ``_lookup_state`` returns the state itself, so the fix is a
+        no-op there and existing on-tree numbers are not a new lineage."""
+        state = _flop_node(solver)
+        menu = list(solver.rules.get_legal_actions(state, solver.action_model))
+        res = _resolver(solver)
+        assert res._lookup_state(state, menu) is state
+        saw = self._state_the_filter_saw(monkeypatch, res, state, menu)
+        assert saw is state
+
+
 class TestTreeShadowMechanics:
     @pytest.fixture(scope="class")
     def solver(self):
