@@ -1,10 +1,10 @@
+import { getRouteApi, Link } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
 import { useLog, useTasks } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { errorOf } from "@/lib/error";
 import { clock, count, duration, runLabel, span } from "@/lib/format";
-import { Link, getRouteApi } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
 
 const route = getRouteApi("/tasks/$taskId");
 
@@ -122,7 +122,6 @@ export function TaskLog() {
               // still correct here because nothing is carried per row: the tone
               // is derived from the line, so a reused node re-renders with the
               // right content rather than keeping the previous line's state.
-              // biome-ignore lint/suspicious/noArrayIndexKey: no per-row state to preserve
               <div key={index} className={lineTone(line)}>
                 {line}
               </div>

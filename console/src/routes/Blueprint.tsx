@@ -1,11 +1,11 @@
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { useBlueprintRun, useLoadBlueprintRun } from "@/api/queries";
 import { BoxControl } from "@/components/BoxControl";
 import { Panel } from "@/components/Panel";
 import { RunPicker } from "@/components/RunPicker";
 import { Tabs } from "@/components/Tabs";
 import { runLabel } from "@/lib/format";
-import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
 import { Charts } from "./Charts";
 import { Play } from "./Play";
 

@@ -1,6 +1,18 @@
+import { getRouteApi, Link } from "@tanstack/react-router";
+import { useMemo } from "react";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useRunView } from "@/api/queries";
 import { Panel } from "@/components/Panel";
-import { StatusBadge, displayName, toneFor } from "@/components/StatusBadge";
+import { displayName, StatusBadge, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import {
   clock,
@@ -16,18 +28,6 @@ import {
 } from "@/lib/format";
 import { timelineBars } from "@/lib/timeline";
 import { cn } from "@/lib/utils";
-import { Link, getRouteApi } from "@tanstack/react-router";
-import { useMemo } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 const route = getRouteApi("/runs/$runId");
 
@@ -126,8 +126,8 @@ export function RunDetail() {
                 <YAxis tick={AXIS} width={52} />
                 <Tooltip
                   contentStyle={TOOLTIP}
-                  formatter={(v: number) => mbb(v)}
-                  labelFormatter={(v: number) => `${count(v)} it`}
+                  formatter={(v) => mbb(Number(v))}
+                  labelFormatter={(v) => `${count(Number(v))} it`}
                 />
                 <Line
                   type="monotone"
@@ -253,10 +253,10 @@ function ProgressPanel({ view }: { view: RunViewQuery }) {
             />
             <Tooltip
               contentStyle={TOOLTIP}
-              formatter={(v: number, name: string) =>
-                name === "coverage" ? percent(v) : v.toFixed(1)
+              formatter={(v, name) =>
+                name === "coverage" ? percent(Number(v)) : Number(v).toFixed(1)
               }
-              labelFormatter={(v: number) => `${count(v)} it`}
+              labelFormatter={(v) => `${count(Number(v))} it`}
             />
             <Legend wrapperStyle={{ fontSize: 10 }} iconSize={8} />
             {/* No animation: this redraws on every poll, and a chart that

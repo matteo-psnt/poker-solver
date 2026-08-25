@@ -1,5 +1,10 @@
+// biome-ignore-all lint/a11y/noStaticElementInteractions: the one hit is the
+// grid container's `onMouseLeave`. The interactive elements are the 169
+// `<button>` cells inside it; the container only CLEARS the hover they set, and
+// giving it a role to satisfy the rule would misdescribe the grid to a reader.
+
 import type { ActionLabel } from "@/lib/actions";
-import { type Cell, GRID_SIZE, actionColours } from "@/lib/range";
+import { actionColours, type Cell, GRID_SIZE } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 /**

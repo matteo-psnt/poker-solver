@@ -1,10 +1,10 @@
+import { useState } from "react";
 import { useActivity } from "@/api/queries";
 import { Panel } from "@/components/Panel";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, duration, since } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
 
 /**
  * What this tool has been costing itself.

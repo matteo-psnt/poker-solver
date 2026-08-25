@@ -1,5 +1,5 @@
-import type { NodeStatus } from "@/api/types";
 import { describe, expect, it } from "vitest";
+import type { NodeStatus } from "@/api/types";
 import { elapsed, nodeLabel, poolShape } from "./pool";
 
 /**
