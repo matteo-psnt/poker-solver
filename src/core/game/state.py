@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import eval7
 
 if TYPE_CHECKING:
-    from src.core.actions.action_model import ActionModel
     from src.core.game.rules import GameRules
 
 from src.core.game.actions import Action, ActionType
@@ -138,27 +137,13 @@ class Card:
         return str(self._card)
 
     def __eq__(self, other: object) -> bool:
-        """
-        Equality comparison based on card mask.
-
-        Optimized with fast type() check for common case.
-        """
-        # Fast path: direct type check (most common case)
-        if type(other) is Card:
-            return self._card == other._card
-
-        # Slow path: handle subclasses
         if not isinstance(other, Card):
             return False
         return self._card == other._card
 
     def __hash__(self) -> int:
-        """
-        Hash based on card mask for use in sets/dicts.
-
-        Hash is cached for performance (called millions of times).
-        """
-        if not hasattr(self, "_hash") or self._hash is None:
+        # Cached: called millions of times, and eval7's mask hash is stable.
+        if self._hash is None:
             self._hash = hash(self._card)
         return self._hash
 
@@ -277,24 +262,10 @@ class GameState:
         """Check if current player can raise (facing a bet with chips left)."""
         return self.to_call > 0 and self.stacks[self.current_player] > self.to_call
 
-    def legal_actions(
-        self, action_model: ActionModel | None = None, rules: GameRules | None = None
-    ) -> tuple[Action, ...]:
-        """Get legal actions for current player using the provided rules engine."""
-        if rules is None:
-            raise ValueError("rules is required for GameState.legal_actions()")
-        return rules.get_legal_actions(self, action_model)
-
-    def apply_action(self, action: Action, rules: GameRules | None = None) -> GameState:
-        """Apply an action using the provided rules engine and return the next state."""
-        if rules is None:
-            raise ValueError("rules is required for GameState.apply_action()")
+    def apply_action(self, action: Action, rules: GameRules) -> GameState:
         return rules.apply_action(self, action)
 
-    def get_payoff(self, player: int, rules: GameRules | None = None) -> float:
-        """Compute payoff for a player using the provided rules engine."""
-        if rules is None:
-            raise ValueError("rules is required for GameState.get_payoff()")
+    def get_payoff(self, player: int, rules: GameRules) -> float:
         return rules.get_payoff(self, player)
 
     def replace(self, *, validate: bool = True, **changes) -> GameState:

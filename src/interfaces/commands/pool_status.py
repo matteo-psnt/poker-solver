@@ -27,8 +27,8 @@ class PoolView(batch.PoolStatus):
     """One pool, plus what it costs while up.
 
     Subclasses the shape `batch.pool_status` already produces rather than
-    restating its six fields -- what is added is the rate, which comes from
-    config and not from Batch.
+    restating its fields -- what is added is the rate and capacity, which come
+    from config and the autoscale formula, not from Batch.
     """
 
     hourly_cost: str | None = None
@@ -59,8 +59,9 @@ class PoolPayload(BaseModel):
     total_nodes: int
     # Both summed across pools -- the console header counts one of each.
     burn_per_hour: float | None = None
-    total_vcpus: int = 0
-    # Live vCPUs across pools, the cross-pool number that stayed comparable.
+    total_vcpus: int | None = None
+    # Live vCPUs across pools; null unless EVERY pool's SKU parsed, so an
+    # unparsed pool can never silently shrink the header's number.
     max_vcpus: int | None = None
     # Sum of the pools' ceilings; null unless EVERY pool reported one, so a
     # partial sum can never understate capacity.
@@ -86,10 +87,11 @@ def run(args: argparse.Namespace) -> PoolPayload:  # noqa: ARG001
     views = [_view(status, rates.get(status.pool_id)) for status in statuses]
     burns = [view.burn_per_hour for view in views if view.burn_per_hour is not None]
     ceilings = [view.max_vcpus for view in views]
+    live = [view.vcpus for view in views]
     return PoolPayload(
         pools=views,
         total_nodes=sum(view.current_dedicated_nodes or 0 for view in views),
-        total_vcpus=sum(view.vcpus or 0 for view in views),
+        total_vcpus=sum(live) if views and None not in live else None,  # type: ignore[arg-type]
         max_vcpus=sum(ceilings) if views and None not in ceilings else None,  # type: ignore[arg-type]
         burn_per_hour=round(sum(burns), 3) if burns else None,
     )
@@ -115,8 +117,9 @@ def _view(status: batch.PoolStatus, rate: str | None) -> PoolView:
 
 
 def vcpus_per_node(vm_size: str | None) -> int | None:
-    """`standard_d32als_v6` -> 32; None for a SKU whose D-number is not its cores."""
-    match = re.search(r"_d(\d+)", (vm_size or "").lower())
+    """`standard_d32als_v6` -> 32; None for a SKU whose D-number is not its cores.
+    The lookahead refuses constrained-core SKUs (`d16-8as`: 8 usable, not 16)."""
+    match = re.search(r"_d(\d+)(?![\d-])", (vm_size or "").lower())
     return int(match.group(1)) if match else None
 
 
@@ -157,9 +160,6 @@ def _print_values(values: dict[str, str | None]) -> None:
 
 
 def render(payload: PoolPayload) -> None:
-    if not payload.pools:
-        print("No pools. Check `terraform output` in infra/ -- the account has none deployed.")
-        return
     for view in payload.pools:
         _render_pool(view)
     if len(payload.pools) <= 1:
@@ -170,10 +170,8 @@ def render(payload: PoolPayload) -> None:
     unpriced = [view.pool_id for view in payload.pools if view.burn_per_hour is None]
     missing = f" (EXCLUDES {', '.join(unpriced)} — no rate for that SKU)" if unpriced else ""
     capacity = f" of {payload.max_vcpus}" if payload.max_vcpus is not None else ""
-    print(
-        f"\nAll pools: {payload.total_nodes} node(s), "
-        f"{payload.total_vcpus}{capacity} vCPU{burn}{missing}"
-    )
+    live = payload.total_vcpus if payload.total_vcpus is not None else "?"
+    print(f"\nAll pools: {payload.total_nodes} node(s), {live}{capacity} vCPU{burn}{missing}")
 
 
 def _render_pool(payload: PoolView) -> None:

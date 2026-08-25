@@ -27,7 +27,7 @@ from src.core.game.state import Street
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-# Street ordinals, matching ``Street.value``, used to index per-street arrays.
+# Indexed by ``street.value - 1``: ``Street`` is 1-based ``auto()``.
 STREET_ORDER: tuple[Street, ...] = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
 
 

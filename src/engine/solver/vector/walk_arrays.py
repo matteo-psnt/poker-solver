@@ -56,7 +56,6 @@ class WalkArrays:
     """
 
     __slots__ = (
-        "buckets_per_node",
         "edge_child",
         "edge_deal",
         "edge_offset",
@@ -124,12 +123,11 @@ class WalkArrays:
         self.terminal_lose = np.array(lose, dtype=np.float64).reshape(-1, 2)
         self.terminal_tie = np.array(tie, dtype=np.float64).reshape(-1, 2)
 
-        self.num_actions = np.asarray(tree.num_actions, dtype=np.int64)
-        self.row_base = np.asarray(tree.row_base[:count], dtype=np.int64)
-        self.row_stride = np.asarray(tree.row_stride[:count], dtype=np.int64)
-        self.slot_base = np.asarray(tree.slot_base[:count], dtype=np.int64)
-        self.slot_stride = np.asarray(tree.slot_stride[:count], dtype=np.int64)
-        self.buckets_per_node = np.asarray(tree.buckets_per_node, dtype=np.int64)
+        self.num_actions = tree.num_actions
+        self.row_base = tree.row_base
+        self.row_stride = tree.row_stride
+        self.slot_base = tree.slot_base
+        self.slot_stride = tree.slot_stride
         self.node_actor_is_button = np.array(
             [node.actor_is_button for node in tree.nodes], dtype=np.uint8
         )

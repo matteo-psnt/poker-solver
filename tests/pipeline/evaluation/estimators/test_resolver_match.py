@@ -13,9 +13,9 @@ from src.core.game.state import Card, Street
 from src.pipeline.evaluation.estimators.resolver_match import (
     _allin_payoff,
     _chunk_bounds,
-    _complete_board,
-    _deal_from_stack,
     _remaining_deck,
+    complete_board,
+    deal_from_stack,
     play_resolver_match,
 )
 from tests.test_helpers import build_trained_test_solver
@@ -43,7 +43,7 @@ class TestDuplicateDealing:
         known = {c.mask for hand in state.hole_cards for c in hand}
         stack = [c for c in deck if c.mask not in known][:5]
 
-        flop_state = _deal_from_stack(state, stack)
+        flop_state = deal_from_stack(state, stack)
         assert flop_state.street == Street.FLOP
         assert flop_state.board == tuple(stack[:3])
         assert not solver.is_chance_node(flop_state)
@@ -165,7 +165,7 @@ class TestAllInRunoutAveraging:
         rules = solver.rules
         state = self._state(solver)
         stack = [*self.BOARD, Card.new("2d")]
-        dealt = _complete_board(state, stack).get_payoff(0, rules)
+        dealt = complete_board(state, stack).get_payoff(0, rules)
         averaged = _allin_payoff(state, rules, stack, 0, runouts=1, rng=None)
         assert averaged == pytest.approx(float(dealt))
 

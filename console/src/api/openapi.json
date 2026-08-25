@@ -2236,9 +2236,15 @@
             "type": "integer"
           },
           "total_vcpus": {
-            "default": 0,
-            "title": "Total Vcpus",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Vcpus"
           }
         },
         "required": [
@@ -2249,7 +2255,7 @@
         "type": "object"
       },
       "PoolView": {
-        "description": "One pool, plus what it costs while up.\n\nSubclasses the shape `batch.pool_status` already produces rather than\nrestating its six fields -- what is added is the rate, which comes from\nconfig and not from Batch.",
+        "description": "One pool, plus what it costs while up.\n\nSubclasses the shape `batch.pool_status` already produces rather than\nrestating its fields -- what is added is the rate and capacity, which come\nfrom config and the autoscale formula, not from Batch.",
         "properties": {
           "allocation_since": {
             "anyOf": [

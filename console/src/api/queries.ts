@@ -20,11 +20,9 @@ import type {
   Cost,
   Dispatched,
   Hand,
-  Jobs,
   LeftSession,
   LogLines,
   NowView,
-  Pool,
   PushedCode,
   PushedData,
   RunView,
@@ -92,20 +90,6 @@ function useView<T>(queryKey: readonly string[], path: string, interval = LIVE) 
     });
   return { ...query, refresh };
 }
-
-export const usePool = () =>
-  useQuery<Pool>({
-    queryKey: ["pool"],
-    queryFn: () => get("/api/pool"),
-    refetchInterval: FAST,
-  });
-
-export const useJobs = (limit = 20) =>
-  useQuery<Jobs>({
-    queryKey: ["jobs", limit],
-    queryFn: () => get(`/api/jobs?limit=${limit}`),
-    refetchInterval: FAST,
-  });
 
 export const useTasks = (limit = 0) =>
   useQuery<Tasks>({

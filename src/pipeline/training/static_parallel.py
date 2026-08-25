@@ -62,14 +62,15 @@ class StaticTrainingResult:
     dropped_updates: int
 
 
-def worker_seed(base_seed: int, worker_id: int, batch_id: int = 0) -> int:
-    """Deterministic, decorrelated seed per (worker, batch).
+def worker_seed(base_seed: int, worker_id: int, chunk_start: int = 0) -> int:
+    """Deterministic, decorrelated seed per (worker, chunk).
 
-    Mixed through SeedSequence rather than added: pairs sharing a seed would
-    silently draw correlated MCCFR samples, which costs effective sample size
-    without showing up anywhere.
+    ``chunk_start`` is the chunk's ABSOLUTE start iteration, so a resumed leg
+    seeds differently from the leg it continues. Mixed through SeedSequence
+    rather than added: pairs sharing a seed would silently draw correlated
+    MCCFR samples, which costs effective sample size without showing up.
     """
-    return int(np.random.SeedSequence([base_seed, worker_id, batch_id]).generate_state(1)[0])
+    return int(np.random.SeedSequence([base_seed, worker_id, chunk_start]).generate_state(1)[0])
 
 
 def worker_iteration_indices(
@@ -119,7 +120,7 @@ def _worker_entry(
     base_seed: int,
     result_queue: mp.Queue,
     abstraction: BucketingStrategy | None = None,
-    chunk_id: int = 0,
+    chunk_start: int = 0,
     counters: Any = None,
     merge_lock: Any = None,
 ) -> None:
@@ -148,10 +149,11 @@ def _worker_entry(
         storage.cumulative_utility = np.zeros_like(shared_utility)
         solver = StaticTreeSolver(action_model, abstraction, storage, config, tree=tree)
 
-        # chunk_id mixed in: without it every chunk re-seeds identically and
-        # replays the same RNG stream, so extra chunks would add correlated
-        # samples instead of new ones.
-        seed = worker_seed(base_seed, worker_id, chunk_id)
+        # The chunk's ABSOLUTE start iteration, not a per-call counter: a
+        # counter restarts at 0 on every leg, so a resumed run would replay
+        # leg one's RNG streams and add correlated samples instead of new ones
+        # (the 25M-postmortem defect).
+        seed = worker_seed(base_seed, worker_id, chunk_start)
         random.seed(seed)
         np.random.seed(seed)
 
@@ -194,15 +196,15 @@ def _worker_entry(
             storage.close()
 
 
-"""Iterations per kernel call, and so per counter write. One crossing costs the
-random-state hand-off (~280 us); at a worker's ~3,000 it/s this keeps the
-counter under half a second stale while amortising that to nothing."""
+# Iterations per kernel call, and so per counter write. One crossing costs the
+# random-state hand-off (~280 us); at a worker's ~3,000 it/s this keeps the
+# counter under half a second stale while amortising that to nothing.
 COUNTER_STRIDE = 1000
 
 
-"""How often the workers' counters are totalled and written. Deliberately well
-under the cadence anything READS it at -- the write is a small local JSON, and
-the two intervals otherwise compound into staleness neither of them names."""
+# How often the workers' counters are totalled and written. Deliberately well
+# under the cadence anything READS it at -- the write is a small local JSON,
+# and the two intervals otherwise compound into staleness neither names.
 HEARTBEAT_SECONDS = 5
 
 
@@ -357,7 +359,6 @@ def train_static_parallel(
         started = time.time()
         ctx = mp.get_context("spawn")
         dropped = 0
-        chunk_id = 0
         done = start
 
         # No lock: each slot has exactly one writer, and a sum that is a tick
@@ -386,7 +387,7 @@ def train_static_parallel(
                         base_seed,
                         result_queue,
                         abstraction,
-                        chunk_id,
+                        done,
                         counters,
                         merge_lock,
                         *worker_args,
@@ -423,9 +424,7 @@ def train_static_parallel(
                     f"{chunk_dropped} updates were dropped on static storage, which has no "
                     "code path for it — dynamic allocation has been reintroduced."
                 )
-            dropped += chunk_dropped
             done = chunk_end
-            chunk_id += 1
 
             # Checkpoint per chunk, so the bound on loss is the chunk, not the run.
             if checkpoint_dir is not None:

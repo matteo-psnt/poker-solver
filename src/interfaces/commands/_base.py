@@ -262,3 +262,12 @@ def ledger_for(root: Path) -> Path:
     derived = root / "eval_ledger.jsonl"
     rebuild_ledger(root, derived)
     return derived
+
+
+def pct(value: Any) -> str:
+    """Blank rather than a placeholder when a field predates its schema version."""
+    return f"{value:.1%}" if isinstance(value, int | float) else ""
+
+
+def num(value: Any, fmt: str) -> str:
+    return fmt.format(value) if isinstance(value, int | float) else ""

@@ -17,6 +17,7 @@ Batch task would be one stray import in ``interfaces/__init__.py`` away from
 dying at bootstrap, with no test that could see it coming.
 
 Stdlib only, all of it, plus ``shared.records`` and ``shared.cache`` -- a
-contract in ``.importlinter``, not a convention, because a node that cannot
-import the wrapper dies before the wrapper can say so.
+contract ``tests/shared/cloudtask/test_imports.py`` walks the closure to
+enforce (importlinter cannot express it), because a node that cannot import
+the wrapper dies before the wrapper can say so.
 """

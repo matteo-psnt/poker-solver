@@ -19,10 +19,8 @@ class TestDefaultBehavior:
         cfg = Config()
 
         assert cfg.training.num_iterations > 0
-        assert cfg.training.verbose is True
 
         assert cfg.storage.initial_capacity > 0
-        assert cfg.storage.max_actions > 0
 
         assert cfg.game.big_blind > cfg.game.small_blind
         assert cfg.game.starting_stack > 0
@@ -58,14 +56,14 @@ class TestMergeBehavior:
         """Verify deep merging works."""
         base = Config()
         overrides = {
-            "training": {"num_iterations": 50_000, "verbose": False},
+            "training": {"num_iterations": 50_000, "runs_dir": "elsewhere"},
             "game": {"big_blind": 4},
         }
 
         merged = base.merge(overrides)
 
         assert merged.training.num_iterations == 50_000
-        assert merged.training.verbose is False
+        assert merged.training.runs_dir == "elsewhere"
         assert merged.game.big_blind == 4
 
     def test_merge_empty_overrides(self):
@@ -104,7 +102,7 @@ class TestLoadBehavior:
                 """
 training:
   num_iterations: 50000
-  verbose: false
+  runs_dir: elsewhere
 
 game:
   starting_stack: 300
@@ -117,7 +115,7 @@ game:
 
             # Overridden values
             assert cfg.training.num_iterations == 50_000
-            assert cfg.training.verbose is False
+            assert cfg.training.runs_dir == "elsewhere"
             assert cfg.game.starting_stack == 300
 
         finally:
@@ -181,7 +179,7 @@ action_abstraction:
                 """
 training:
   num_iterations: 1000
-  verbose: false
+  runs_dir: elsewhere
 solver:
   cfr_plus: true
 """
@@ -197,7 +195,7 @@ training:
             cfg = load_config(child_path)
 
             assert cfg.training.num_iterations == 9999  # child wins
-            assert cfg.training.verbose is False  # inherited from base
+            assert cfg.training.runs_dir == "elsewhere"  # inherited from base
             assert cfg.solver.cfr_plus is True  # inherited from base
 
     def test_all_training_profiles_load(self):
@@ -224,7 +222,6 @@ class TestTypeSafety:
         cfg = Config()
 
         assert isinstance(cfg.training.num_iterations, int)
-        assert isinstance(cfg.training.verbose, bool)
         assert isinstance(cfg.game.starting_stack, int)
         assert cfg.system.seed is None or isinstance(cfg.system.seed, int)
 
@@ -277,20 +274,6 @@ class TestValidation:
         finally:
             yaml_path.unlink()
 
-    def test_zarr_compression_level_bounds(self):
-        """zarr_compression_level must be between 1 and 9 inclusive."""
-        from src.shared.config import StorageConfig
-
-        with pytest.raises(ValidationError):
-            StorageConfig(zarr_compression_level=0)
-
-        with pytest.raises(ValidationError):
-            StorageConfig(zarr_compression_level=10)
-
-        # Boundary values are valid
-        StorageConfig(zarr_compression_level=1)
-        StorageConfig(zarr_compression_level=9)
-
 
 # Fields present in real pre-refactor run snapshots that no longer exist.
 LEGACY_SNAPSHOT = {
@@ -298,6 +281,9 @@ LEGACY_SNAPSHOT = {
     "action_model": {"spr_buckets": [2.0, 6.0]},
     "resolver": {"leaf_value_mode": "blueprint_rollout"},
     "card_abstraction": {"config": "default", "abstraction_path": None},
+    # Retired 2026-08: read by nothing, but present in every old run snapshot.
+    "training": {"verbose": True},
+    "storage": {"max_actions": 10, "zarr_compression_level": 1},
 }
 
 

@@ -5,8 +5,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
-    LBRConfig,
     LBRResult,
     compute_lbr_exploitability,
     dominant_terminal,

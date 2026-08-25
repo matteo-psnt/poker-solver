@@ -45,13 +45,6 @@ def _test_tree(config, abstraction):
     )
 
 
-def _row_starts(tree) -> np.ndarray:
-    per_row = np.repeat(tree.num_actions, tree.buckets_per_node)
-    starts = np.zeros(tree.num_rows, dtype=np.int64)
-    np.cumsum(per_row[:-1], out=starts[1:])
-    return starts
-
-
 def _policy(strength: float) -> np.ndarray:
     return strength_policy(strength, action_aggression(MENU, POT))
 

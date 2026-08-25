@@ -27,7 +27,6 @@ when it did not.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, field_validator
@@ -47,6 +46,7 @@ from src.shared.cloudtask.task_log import (
     START_SUFFIX,
     read_documents,
     tasks_dir,
+    utcnow,
 )
 
 if TYPE_CHECKING:
@@ -93,52 +93,8 @@ CAUSE_PREPARING = task_states.cause_of(task_states.Phase.STARTING)
 LIVE_CAUSES = task_states.LIVE_CAUSES
 
 
-def _utcnow() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 def _first_not_none(*values: Any) -> Any:
     return next((v for v in values if v is not None), None)
-
-
-def observed_record(
-    *,
-    task_id: str,
-    job_id: str,
-    state: str,
-    result: str | None = None,
-    exit_code: int | None = None,
-    failure: dict[str, Any] | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
-    node_id: str = "",
-) -> dict[str, Any]:
-    """What Batch says happened, as a document, without writing it.
-
-    Split from the write so :func:`reconcile` can ask whether the observation
-    it just made says anything the share does not already hold.
-
-    ``state`` is stored SHORT -- ``completed``, not ``BatchTaskState.COMPLETED``.
-    Every observed record on the share already holds the short word, and the
-    caller no longer shortens it: `tasks._translate` used to, and was deleted
-    when `batch.BatchTask` began carrying a classified `phase` beside the raw
-    state. Normalising here rather than at the caller is what keeps the record
-    format the reader's business, and stops Azure's spelling from being the
-    thing that lands in a durable record.
-    """
-    return {
-        "source": "batch",
-        "task_id": task_id,
-        "job_id": job_id,
-        "state": (state or "").rsplit(".", 1)[-1].lower(),
-        "result": result,
-        "exit_code": exit_code,
-        "failure": failure,
-        "start_time": start_time,
-        "end_time": end_time,
-        "node_id": node_id,
-        "observed_at": _utcnow(),
-    }
 
 
 def write_observed_record(
@@ -164,17 +120,21 @@ def write_observed_record(
     """
     directory = tasks_dir(share)
     path = directory / f"{task_id}{OBSERVED_SUFFIX}"
-    record = observed_record(
-        task_id=task_id,
-        job_id=job_id,
-        state=state,
-        result=result,
-        exit_code=exit_code,
-        failure=failure,
-        start_time=start_time,
-        end_time=end_time,
-        node_id=node_id,
-    )
+    record = {
+        "source": "batch",
+        "task_id": task_id,
+        "job_id": job_id,
+        # Stored SHORT -- ``completed``, never ``BatchTaskState.COMPLETED`` --
+        # so Azure's spelling is not the thing that lands in a durable record.
+        "state": (state or "").rsplit(".", 1)[-1].lower(),
+        "result": result,
+        "exit_code": exit_code,
+        "failure": failure,
+        "start_time": start_time,
+        "end_time": end_time,
+        "node_id": node_id,
+        "observed_at": utcnow(),
+    }
     if only_if_new and _says_the_same(records.read_snapshot(path), record):
         return None
     directory.mkdir(parents=True, exist_ok=True)
@@ -551,7 +511,7 @@ def read_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
     # ended_at then started_at, so a still-running task sorts beside the one it
     # followed rather than at the front.
     joined.sort(key=lambda r: (r.get("ended_at") or r.get("started_at") or "", r["task_id"]))
-    now = _utcnow()
+    now = utcnow()
     for row in joined:
         row["eta_seconds"] = kinds.remaining(row, joined, now)
     return [TaskRow(**row) for row in joined]

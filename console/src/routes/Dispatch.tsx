@@ -43,6 +43,8 @@ function Train() {
   const [parent, setParent] = useState("");
   const [sets, setSets] = useState("");
   const [workers, setWorkers] = useState("");
+  const [pool, setPool] = useState("");
+  const [kernel, setKernel] = useState("");
 
   const target = int(to);
   const trainingConfigs = configs.data?.kinds.find((k) => k.kind === "training")?.names ?? [];
@@ -104,6 +106,18 @@ function Train() {
           />
         </Field>
         <Field
+          label="pool"
+          hint="Blank is train (D16). big = D32, huge = D64 — the fastest box per wall-clock."
+        >
+          <Select value={pool} onChange={setPool} options={["train", "big", "huge"]} />
+        </Field>
+        <Field
+          label="kernel"
+          hint="Blank is scalar MCCFR. pcs = vector kernel on a sampled board per iteration; board-free = bucket-transition vector kernel."
+        >
+          <Select value={kernel} onChange={setKernel} options={["scalar", "pcs", "board-free"]} />
+        </Field>
+        <Field
           label="workers"
           hint="Blank is all CPUs. Worth setting below the core count on a big abstraction — every worker loads its own copy."
         >
@@ -129,6 +143,8 @@ function Train() {
                 parent,
                 sets: overrides(sets),
                 workers: int(workers),
+                pool,
+                kernel,
               }),
             )
           }

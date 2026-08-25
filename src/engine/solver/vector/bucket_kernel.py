@@ -38,8 +38,14 @@ import numpy as np
 
 from src.core.game.state import Street
 from src.engine.solver.vector.bucket_game import BucketGame
-from src.engine.solver.vector.compiled_tree import EDGE_TO_TERMINAL, CompiledTree, TerminalKind
-from src.engine.solver.vector.kernel import NodeGroup, build_groups
+from src.engine.solver.vector.compiled_tree import CompiledTree, TerminalKind
+from src.engine.solver.vector.kernel import (
+    NodeGroup,
+    build_groups,
+    child_targets,
+    slot_index,
+    strategy_block,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -136,30 +142,18 @@ class BucketVectorCFR:
     # ---- layout helpers --------------------------------------------------
 
     def _slot_index(self, group: NodeGroup, chunk: slice) -> np.ndarray:
-        num_buckets = self.compiled.tree.num_buckets(group.street)
-        span = (
-            np.arange(num_buckets, dtype=np.int64)[:, None] * group.slot_stride
-            + np.arange(group.num_actions, dtype=np.int64)[None, :]
-        ).ravel()
-        return group.slot_base[chunk][:, None] + span[None, :]
+        return slot_index(self.compiled, group, chunk)
 
     def _strategy_block(
         self, group: NodeGroup, chunk: slice, *, use_average: bool = False
     ) -> np.ndarray:
-        num_actions = group.num_actions
-        num_buckets = self.compiled.tree.num_buckets(group.street)
         source = self.strategy_sum if use_average else self.regrets
-        block = source[self._slot_index(group, chunk)].reshape(-1, num_buckets, num_actions)
-
-        positive = np.maximum(block, 0.0)
-        total = positive.sum(axis=-1, keepdims=True)
-        uniform = self.dtype(1.0 / num_actions)
-        return np.where(total > 0, positive / np.where(total > 0, total, 1.0), uniform)
+        return strategy_block(
+            source, self.compiled, group, chunk, self.dtype(1.0 / group.num_actions)
+        )
 
     def _child_targets(self, group: NodeGroup, chunk: slice) -> tuple[np.ndarray, np.ndarray]:
-        base = group.edge_base[chunk]
-        edges = base[:, None] + np.arange(group.num_actions, dtype=np.int64)[None, :]
-        return self.compiled.edge_target[edges], self.compiled.edge_kind[edges] == EDGE_TO_TERMINAL
+        return child_targets(self.compiled, group, chunk)
 
     def _street_of(self, target: np.ndarray, terminal: bool) -> np.ndarray:
         source = self.compiled.terminal_street if terminal else self._node_street

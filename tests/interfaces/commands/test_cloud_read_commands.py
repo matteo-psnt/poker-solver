@@ -89,6 +89,8 @@ class TestVcpuArithmetic:
         # E16-4ads has 4 usable cores, not 16 -- a D-only parse refuses rather
         # than reading the wrong number off the name.
         assert pool_status.vcpus_per_node("standard_e16-4ads_v5") is None
+        # Constrained-core D SKU: 8 usable cores, and the name's 16 would be read
+        assert pool_status.vcpus_per_node("standard_d16-8as_v5") is None
         assert pool_status.vcpus_per_node(None) is None
 
     def test_ceiling_is_the_formulas_own_max_nodes(self):

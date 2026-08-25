@@ -81,9 +81,8 @@ interruption.
     infoset (node n, bucket b) owns slots
         [slot_offset[n] + b*num_actions[n], ... + num_actions[n])
 
-Ragged rather than a dense `(num_infosets, max_actions)` rectangle: at the
-production tree's mean of ~2.6 actions against `max_actions=10`, dense would
-waste roughly 4x the memory.
+Ragged rather than a dense rectangle: at the production tree's mean of ~2.6
+actions against a 10-action row cap, dense would waste roughly 4x the memory.
 
 A checkpoint is those arrays plus a **16-byte tree fingerprint**, and nothing
 else — the tree already says which infoset each row is. (Carrying that mapping
@@ -141,8 +140,6 @@ card_abstraction:
   config: production
 training:
   num_iterations: 1000000
-storage:
-  zarr_compression_level: 1   # benchmarked: fastest AND smallest
 ```
 
 ## Testing

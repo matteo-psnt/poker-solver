@@ -17,7 +17,7 @@ from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.core.game.state import Street
 from src.engine.solver.betting_tree import BettingTree
-from src.pipeline.services.warm_start import _row_slot_starts, regrets_encoding
+from src.pipeline.services.warm_start import regrets_encoding
 from tests.test_helpers import make_test_config
 
 # Three rows of widths 3, 2, 4 laid out contiguously, as the ragged slot layout does.
@@ -41,10 +41,10 @@ class _Buckets:
 def test_row_slot_starts_agree_with_the_tree_accessors():
     """Pin the boundaries to the TREE's own layout, not to a rebuilt copy.
 
-    This function once rebuilt row order with ``np.repeat`` — node-major, the
-    retired layout — and every test fed it hand-made arrays, so the drift was
-    invisible while the seeded prior landed on the wrong infosets. A real tree
-    makes the agreement the assertion.
+    The seeding path once rebuilt row order with ``np.repeat`` — node-major,
+    the retired layout — and every test fed it hand-made arrays, so the drift
+    was invisible while the seeded prior landed on the wrong infosets. A real
+    tree makes the agreement the assertion.
     """
     config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=20)
     tree = BettingTree(
@@ -53,7 +53,7 @@ def test_row_slot_starts_agree_with_the_tree_accessors():
         starting_stack=20,
         buckets_per_street={Street.FLOP: 3, Street.TURN: 4, Street.RIVER: 5},
     )
-    starts = _row_slot_starts(tree)
+    starts = tree.row_slot_starts
     for node in tree.nodes:
         for bucket in range(tree.num_buckets(node.street)):
             row = tree.row(node.node_id, bucket)

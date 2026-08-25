@@ -126,7 +126,6 @@ def save_checkpoint(
     *,
     retain_every: int = 0,
     abstraction_id: str | None = None,
-    compression_level: int = DEFAULT_COMPRESSION_LEVEL,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> Path:
     """Write a snapshot and atomically publish it. Returns the zarr path.
@@ -143,7 +142,7 @@ def save_checkpoint(
     zarr_path = checkpoint_dir / f"static-{iteration}.zarr"
 
     compressor = numcodecs.Blosc(
-        cname="zstd", clevel=compression_level, shuffle=numcodecs.Blosc.BITSHUFFLE
+        cname="zstd", clevel=DEFAULT_COMPRESSION_LEVEL, shuffle=numcodecs.Blosc.BITSHUFFLE
     )
     root = zarr.open(zarr.DirectoryStore(zarr_path), mode="w")
     for name in _ARRAYS:
@@ -328,8 +327,6 @@ def _legacy_index_maps(tree) -> tuple[np.ndarray, np.ndarray]:
         bucket_axis = np.arange(count, dtype=np.int64)
         new_rows = int(tree.row_base[n]) + bucket_axis * int(tree.row_stride[n])
         row_source[new_rows] = row_offset_v1[n] + bucket_axis
-        if width == 0:
-            continue
         new_slots = (
             int(tree.slot_base[n])
             + bucket_axis[:, None] * int(tree.slot_stride[n])

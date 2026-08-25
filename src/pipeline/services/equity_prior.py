@@ -50,17 +50,27 @@ from src.pipeline.blueprint import construction
 if TYPE_CHECKING:
     from src.shared.config import Config
 
+# How sharply the guess commits. MEASURED optimum, 3 training seeds x 6 boards
+# at 30M, as mbb/g against a cold control:
+#
+#     0.10  +17.9 | 0.25  -80.8 | 0.50 -101.7 | 0.75  -73.3
+#     1.00  -66.5 | 1.50  -57.0 | uniform +18.5
+#
+# Unimodal, and both extremes are WORSE than not seeding at all: sharp
+# entrenches a confident wrong prior, flat carries no information. The curve is
+# asymmetric -- overshooting costs far less than undershooting -- so err high.
 DEFAULT_TEMPERATURE = 0.50
-"""How sharply the guess commits. MEASURED optimum, 3 training seeds x 6 boards
-at 30M, as mbb/g against a cold control:
 
-    0.10  +17.9 | 0.25  -80.8 | 0.50 -101.7 | 0.75  -73.3
-    1.00  -66.5 | 1.50  -57.0 | uniform +18.5
-
-Unimodal, and both extremes are WORSE than not seeding at all: sharp entrenches a
-confident wrong prior, flat carries no information. The curve is asymmetric --
-overshooting costs far less than undershooting -- so err high if you must.
-"""
+__all__ = (
+    "DEFAULT_TEMPERATURE",
+    "action_aggression",
+    "bucket_strength",
+    "build_tree",
+    "seed_regrets",
+    "strength_policy",
+    "tree_policy",
+    "write_checkpoint",
+)
 
 
 def action_aggression(actions: tuple[Action, ...], pot: float) -> np.ndarray:
@@ -121,19 +131,6 @@ def bucket_strength(bucket: int, num_buckets: int) -> float:
     return (bucket + 0.5) / num_buckets
 
 
-__all__ = (
-    "DEFAULT_TEMPERATURE",
-    "action_aggression",
-    "bucket_strength",
-    "build_tree",
-    "seed_regrets",
-    "strength_policy",
-    "tree_policy",
-    "tree_regrets",
-    "write_checkpoint",
-)
-
-
 def seed_regrets(tree: BettingTree, weight: float, temperature: float = DEFAULT_TEMPERATURE):
     """Regrets over the WHOLE tree encoding the strength-aware opening guess.
 
@@ -192,23 +189,6 @@ def tree_policy(
     """
     regrets, _ = seed_regrets(tree if tree is not None else build_tree(config), 1.0, temperature)
     return regrets
-
-
-def tree_regrets(
-    config: Config,
-    *,
-    weight: int,
-    temperature: float = DEFAULT_TEMPERATURE,
-    tree: BettingTree | None = None,
-) -> np.ndarray:
-    """The guess as a regret vector, without writing anything.
-
-    Separate from the write so a warm start can take it as a BASE and add its
-    own confidence on top, rather than the two racing to write iteration 0.
-    """
-    if weight <= 0:
-        raise ValueError("equity prior weight must be positive; it scales the guess.")
-    return tree_policy(config, temperature=temperature, tree=tree) * float(weight)
 
 
 def write_checkpoint(

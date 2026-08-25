@@ -12,6 +12,7 @@ from src.pipeline.evaluation.estimators.resolver_match import play_resolver_matc
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
+    effective_abstraction_hash,
     load_blueprint,
 )
 from src.pipeline.training.run_tracker import RunMetadata
@@ -102,12 +103,19 @@ def evaluate_run_resolver_gate(
         leaf_rollouts=leaf_rollouts,
         blend_alpha=blend_alpha,
     )
-    solver, storage = build_static_evaluation_solver(config, checkpoint_dir=run_dir)
+    # Pinned like every other estimator: resolving by config NAME would silently
+    # rebucket the checkpoint if the abstraction was recomputed since training.
+    effective_hash = effective_abstraction_hash(run_dir, metadata, None)
+    solver, storage = build_static_evaluation_solver(
+        config, checkpoint_dir=run_dir, abstraction_hash=effective_hash
+    )
     # The factory carries the OVERRIDDEN config, not the run's. A worker built
     # from the stored config would resolve under different knobs than the
     # coordinator and the arms would silently stop being an A/B -- the same trap
     # `prepare_blueprint` documents for a mismatched abstraction hash.
-    factory = functools.partial(load_blueprint, config, run_dir) if workers > 1 else None
+    factory = (
+        functools.partial(load_blueprint, config, run_dir, effective_hash) if workers > 1 else None
+    )
     result = play_resolver_match(
         solver,
         num_deals=num_deals,

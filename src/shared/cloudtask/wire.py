@@ -59,6 +59,25 @@ def parse_duration(raw: str | None) -> int:
     return seconds if seconds > 0 else DEFAULT_TIMEOUT_SECONDS
 
 
+def duration_error(raw: str | None) -> str | None:
+    """Why ``raw`` would not survive :func:`parse_duration` — None when it would.
+
+    ``parse_duration`` itself stays forgiving (the node must start with SOME
+    guard), so submit asks this first and refuses, instead of a malformed
+    ``--timeout`` silently running under the default.
+    """
+    text = (raw or "").strip().lower()
+    if not text:
+        return None
+    digits = text[:-1] if text[-1] in _UNITS else text
+    if not digits.isdigit() or int(digits) <= 0:
+        return (
+            f"--timeout '{raw}' is not a duration: digits plus an optional "
+            "s/m/h/d suffix (e.g. 90m, 6h)."
+        )
+    return None
+
+
 def _int(raw: str | None, default: int = 0) -> int:
     try:
         return int(str(raw).strip())

@@ -103,6 +103,7 @@ def play_resolver_match(
                     repeat(time_budget_ms),
                     [start for start, _ in bounds],
                     [stop for _, stop in bounds],
+                    repeat(allin_runouts),
                 )
             )
         pair_samples_mbb = [sample for part in parts for sample in part[0]]
@@ -154,7 +155,7 @@ def _deals_worker(
     time_budget_ms: int,
     start: int,
     stop: int,
-    allin_runouts: int = 1,
+    allin_runouts: int,
 ) -> tuple[list[float], int, int]:
     """One contiguous block of deals, in its own process.
 
@@ -269,7 +270,7 @@ def _play_game(
     decisions = 0
     while not state.is_terminal:
         if solver.is_chance_node(state):
-            state = _deal_from_stack(state, board_stack)
+            state = deal_from_stack(state, board_stack)
             continue
         if state.current_player == resolver_seat:
             decisions += 1
@@ -313,7 +314,7 @@ def deal_for(
     return hole_cards, board_stack, deal % 2
 
 
-def _deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
+def deal_from_stack(state: GameState, board_stack: list[Card]) -> GameState:
     """Deal the street's cards from fixed deck positions (duplicate-poker dealing)."""
     board_size = len(state.board)
     new_board = list(state.board)
@@ -374,7 +375,7 @@ def _allin_payoff(
     shipped behaviour and the default.
     """
     if runouts <= 1:
-        return float(_complete_board(state, board_stack).get_payoff(resolver_seat, rules))
+        return float(complete_board(state, board_stack).get_payoff(resolver_seat, rules))
 
     deck = _remaining_deck(state)
     needed = 5 - len(state.board)
@@ -406,7 +407,7 @@ def _allin_payoff(
     return total / len(completions)
 
 
-def _complete_board(state: GameState, board_stack: list[Card]) -> GameState:
+def complete_board(state: GameState, board_stack: list[Card]) -> GameState:
     """Complete an all-in board from the same fixed deck positions."""
     return state.replace(
         street=Street.RIVER,

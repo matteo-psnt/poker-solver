@@ -26,9 +26,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.shared.config import ResolverConfig
 
-"""Off-tree bet sizes the LBR player may bet when first to put money in on a
-street. Deliberately NOT the blueprint's trained sizes; overbets in particular
-probe the action abstraction."""
+# Off-tree bet sizes the LBR player may bet when first to put money in on a
+# street. Deliberately NOT the blueprint's trained sizes; overbets in
+# particular probe the action abstraction.
 DEFAULT_OFF_TREE_POT_FRACTIONS: tuple[float, ...] = (0.33, 0.5, 0.66, 0.75, 1.0, 1.5, 2.0)
 
 

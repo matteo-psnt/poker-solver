@@ -15,9 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from src.pipeline.evaluation import ledger as eval_ledger
-from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
-    LBRConfig,
-)
+from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.services.scoring._shared import (

@@ -58,10 +58,15 @@ class TestChunkIndicesTileTheRange:
 
 class TestChunkSeeding:
     def test_chunks_do_not_replay_the_same_stream(self):
-        # Without chunk_id every chunk re-seeds identically, so extra chunks add
-        # correlated samples rather than new information -- silently, since the
-        # iteration count still goes up.
+        # Seeded on the chunk's ABSOLUTE start iteration: a per-leg counter
+        # restarts at 0 on resume, so leg two would replay leg one's streams
+        # and add correlated samples -- silently, since the iteration count
+        # still goes up (the 25M-postmortem defect).
         assert worker_seed(42, 0, 0) != worker_seed(42, 0, 1)
+
+    def test_a_resumed_leg_seeds_unlike_the_leg_it_continues(self):
+        # Leg one's first chunk starts at 0; leg two's at the banked iteration.
+        assert worker_seed(42, 0, 0) != worker_seed(42, 0, 5_000_000)
 
     def test_still_distinct_across_workers_within_a_chunk(self):
         seeds = {worker_seed(42, w, 3) for w in range(8)}

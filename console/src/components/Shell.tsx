@@ -36,21 +36,21 @@ export function Shell() {
   const view = useNow();
   // `?.` at every step: this is the SHELL, and a 200 whose body lacks a part
   // must take down nothing rather than every page at once.
-  const pool = { data: view.data?.parts?.pool?.payload };
-  const jobs = { data: view.data?.parts?.jobs?.payload };
+  const poolData = view.data?.parts?.pool?.payload;
+  const jobsData = view.data?.parts?.jobs?.payload;
 
-  const nodes = pool.data?.total_nodes ?? null;
+  const nodes = poolData?.total_nodes ?? null;
   // vCPUs, not nodes: pool sizes diverged (D16/D32/D64), so a node count no
   // longer says how much compute is up. The node count survives in the title.
-  const vcpus = pool.data?.total_vcpus ?? null;
+  const vcpus = poolData?.total_vcpus ?? null;
   // The pools' own formula ceilings, summed server-side; null until every
   // pool has reported one, so it can never understate capacity.
-  const capacity = pool.data?.max_vcpus ?? null;
+  const capacity = poolData?.max_vcpus ?? null;
   // `?.` past `jobs` as well as past `data`: this is the app SHELL, so a 200
   // whose body lacks the field takes down every page at once rather than one
   // panel. Same one-character gap as `RunPicker`'s `current` had.
   const live =
-    jobs.data?.jobs?.reduce(
+    jobsData?.jobs?.reduce(
       (total, job) =>
         total +
         // `phase`, not a fourth copy of Batch's enum spelling. This file had a
@@ -100,9 +100,9 @@ export function Shell() {
           </span>
           {/* What it costs NOW, not the per-node list price: the rate is the
               same every day and the node count is the thing that moves. */}
-          {pool.data?.burn_per_hour != null && (
+          {poolData?.burn_per_hour != null && (
             <span>
-              · <span className="tnum text-[var(--fg)]">${pool.data.burn_per_hour.toFixed(2)}</span>
+              · <span className="tnum text-[var(--fg)]">${poolData.burn_per_hour.toFixed(2)}</span>
               /hr
             </span>
           )}
