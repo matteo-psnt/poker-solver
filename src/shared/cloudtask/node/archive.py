@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import json
 import shutil
+import time
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING
 
@@ -155,14 +156,29 @@ def _put_object(name: str, source: Path, sas: str, log: Log, *, overwrite: bool 
             return True
         if not overwrite and blobstore.exists(sas, name):
             return True
+        started = time.monotonic()
         size = blobstore.put_object(sas, name, source)
+        elapsed = time.monotonic() - started
     except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
         # LOUD, because the alternative is the failure shape this project keeps
         # paying for: a write that reports success and lands nowhere.
         log(f"WARN {name} NOT in the container: {type(error).__name__}: {error}")
         return False
-    log(f"blob {name} <- {size:,} bytes")
+    log(f"blob {name} <- {_transferred(size, elapsed)}")
     return True
+
+
+def _transferred(size: int, elapsed: float) -> str:
+    """`<bytes> in <s> (<MiB/s>)`, so a task log carries its own throughput.
+
+    Publishing was the dominant wall-clock of a short run and the only sustained
+    load that ever took a node `unusable`, so the number that says whether it
+    still is belongs in every task log rather than in a session that measured it
+    once. A rung is ~1 GiB; at 100 MiB/s that is ~10s, and a figure far off that
+    is the signal.
+    """
+    rate = f", {size / elapsed / 1024**2:,.0f} MiB/s" if elapsed > 0.05 else ""
+    return f"{size:,} bytes in {elapsed:.1f}s{rate}"
 
 
 def _rungs_landed(manifest: bytes, run_id: str, sas: str, log: Log) -> bool:
@@ -253,7 +269,7 @@ def fetch_metadata(run_id: str, destination: Path, sas: str) -> None:
         target.write_bytes(body)
 
 
-def fetch_snapshot(run_id: str, destination: Path, name: str, sas: str) -> None:
+def fetch_snapshot(run_id: str, destination: Path, name: str, sas: str, log: Log = _quiet) -> None:
     """Get one snapshot onto the node, replacing whatever is there.
 
     Remove first, and no update check. A cancelled task leaves partial rungs on
@@ -271,8 +287,13 @@ def fetch_snapshot(run_id: str, destination: Path, name: str, sas: str) -> None:
         path = destination / stale
         shutil.rmtree(path, ignore_errors=True)
         path.unlink(missing_ok=True)
+    started = time.monotonic()
     if not blobstore.get_object(sas, f"{run_id}/{stored}", destination):
         raise FetchRefusedError(f"the container does not hold {run_id}/{stored}")
+    elapsed = time.monotonic() - started
+    landed = destination / stored
+    size = landed.stat().st_size if landed.is_file() else 0
+    log(f"  blob {run_id}/{stored} -> {_transferred(size, elapsed)}")
 
 
 class FetchRefusedError(Exception):
@@ -339,7 +360,7 @@ def fetch_current_rung(run_id: str, destination: Path, sas: str, log: Log = _qui
     if not current:
         raise FetchRefusedError(f"{records.STATIC_CHECKPOINT} names no current snapshot")
     require_complete(run_id, current, sas)
-    fetch_snapshot(run_id, destination, current, sas)
+    fetch_snapshot(run_id, destination, current, sas, log)
     (destination / records.STATIC_CHECKPOINT).write_text(body, encoding="utf-8")
     log(f"fetched current rung {current}")
     return current
@@ -516,7 +537,7 @@ def fetch_for_evaluation(
             log(f"  WARN rung {rung}: {refusal}")
             continue
         try:
-            fetch_snapshot(run_id, destination, name, sas)
+            fetch_snapshot(run_id, destination, name, sas, log)
         except (OSError, FetchRefusedError) as error:
             # Reported, not swallowed: a silent copy failure becomes a
             # confusing load error minutes later, in a different subsystem.

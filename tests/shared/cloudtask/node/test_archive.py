@@ -47,6 +47,26 @@ def _run(tmp_path, name: str = "run-a"):
     return run_dir
 
 
+class TestATransferReportsItsOwnThroughput:
+    """Publishing was the dominant wall-clock of a short run and the only load
+    that ever took a node `unusable`, so the figure that says whether it still
+    is belongs in the task log rather than in a session that measured it once.
+    """
+
+    def test_it_carries_bytes_seconds_and_a_rate(self):
+        line = archive._transferred(1024**3, 8.0)
+        assert "1,073,741,824 bytes" in line
+        assert "8.0s" in line
+        assert "128 MiB/s" in line
+
+    def test_a_transfer_too_short_to_time_reports_no_rate(self):
+        """A sub-50ms transfer divides a real size by a number dominated by
+        measurement noise -- and at exactly 0.0 it divides by zero. A manifest
+        is a few KB, so this is the COMMON case, not an edge."""
+        assert "MiB/s" not in archive._transferred(4096, 0.0)
+        assert "4,096 bytes" in archive._transferred(4096, 0.0)
+
+
 class TestFetchCurrentRung:
     """The container is the only store, so a rung is one OBJECT, not a tree."""
 

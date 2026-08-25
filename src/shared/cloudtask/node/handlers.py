@@ -113,7 +113,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             except archive.FetchRefusedError as refusal:
                 log(f"FATAL warm-start rung {wanted}: {refusal}")
                 return 1, "missing-rung"
-            archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas)
+            archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas, log)
             log(f"fetched warm-start rung {name}")
         else:
             archive.fetch_current_rung(prior, destination, plan.checkpoint_sas, log)
