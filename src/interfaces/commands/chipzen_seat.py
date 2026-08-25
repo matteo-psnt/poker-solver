@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from src.interfaces.chipzen.seat import BUDGET_FRACTION, TIGHT_CLOCK_MS
+from src.interfaces.chipzen.seat import CLOCK_FRACTION, TIGHT_CLOCK_MS
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
 
@@ -115,10 +115,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="Per-decision budget. Default sizes itself from the clock each match "
-        f"says it enforces ({int(BUDGET_FRACTION * 100)}%% of it), assuming the "
-        f"tight {TIGHT_CLOCK_MS} ms one when the frame does not say -- which is "
-        "exactly when it is tight. The RESOLVER spends the whole budget and then "
-        "some: worst observed was 1.9x it.",
+        f"says it enforces ({int(CLOCK_FRACTION * 100)}%% of it, less an overshoot "
+        f"allowance), assuming the tight {TIGHT_CLOCK_MS} ms one when the frame "
+        "does not say -- which is exactly when it is tight. The RESOLVER spends "
+        "the whole budget, so this is how long each decision takes.",
     )
     parser.add_argument(
         "--once",
