@@ -256,12 +256,16 @@ def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str])
     where the fetch happens.
     """
     top = max(int(rung) for rung in scored)
+    options = dict(itertools.pairwise(flags))
+    floor = int(options["--avg-window-from"]) if "--avg-window-from" in options else 0
     wanted: set[int] = set()
-    for name, value in itertools.pairwise(flags):
-        if name == "--avg-window-from":
-            wanted.add(int(value))
-        elif name == "--avg-gamma":
-            wanted.update(rung for rung in _retained_ladder(destination) if rung < top)
+    if floor:
+        wanted.add(floor)
+    if "--avg-gamma" in options:
+        # Only the bands the reweighting actually spans. Without the floor a
+        # 1.2B run would drag its whole 24-rung ladder onto the node to
+        # recombine the last quarter of it.
+        wanted.update(rung for rung in _retained_ladder(destination) if floor <= rung < top)
     return [str(rung) for rung in sorted(wanted) if str(rung) not in scored]
 
 

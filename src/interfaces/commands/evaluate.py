@@ -231,7 +231,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="[exact_br] Average only over iterations AFTER this retained rung — exactly the "
-        "difference of the two rungs' strategy sums. A separate tier.",
+        "difference of the two rungs' strategy sums. Combine with --avg-gamma to reweight "
+        "WITHIN the window: a fixed-width uniform window at two endpoints holds the averaging "
+        "noise constant while the endpoint moves. A separate tier.",
     )
     parser.add_argument(
         "--avg-gamma",
