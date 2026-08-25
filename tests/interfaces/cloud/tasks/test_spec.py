@@ -271,6 +271,16 @@ class TestPrecomputeTask:
         env = spec.TaskSpec(code_snapshot="s", op=TaskName.PRECOMPUTE, config="x").environment()
         assert env["RUN_FORCE_PUBLISH"] == ""
 
+    def test_the_string_zero_does_not_mean_true(self):
+        """`bool("0")` is True, so an operator spelling "off" as 0 would overwrite
+        a published abstraction and invalidate every run trained against it."""
+        from src.shared.cloudtask import wire
+
+        decode = next(k.decode for k in wire.KEYS if k.env == "RUN_FORCE_PUBLISH")
+        assert decode("0") is False
+        assert decode("") is False
+        assert decode("1") is True
+
     def test_force_publish_reaches_the_node(self):
         env = spec.TaskSpec(
             code_snapshot="s", op=TaskName.PRECOMPUTE, config="x", force_publish=True

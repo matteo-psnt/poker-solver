@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
 from src.shared import gitinfo
+from src.shared.cloudtask import kinds
 from src.shared.cloudtask.kinds import TaskName
 
 if TYPE_CHECKING:
@@ -65,8 +66,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--checkpoint-every",
         type=int,
-        default=spec.DEFAULT_CHECKPOINT_EVERY,
-        help="Checkpoint interval in iterations.",
+        default=None,
+        help="Checkpoint interval in iterations. Default is the KERNEL's: the "
+        "unit is its iteration, and 5M rungs would leave a board-free or pcs "
+        "run as one chunk.",
     )
     parser.add_argument(
         "--kernel",
@@ -226,7 +229,11 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 parent=args.parent,
                 sets=tuple(args.sets),
                 workers=args.workers,
-                checkpoint_every=args.checkpoint_every,
+                checkpoint_every=(
+                    args.checkpoint_every
+                    if args.checkpoint_every is not None
+                    else kinds.kind(_OPS[args.kernel]).default_checkpoint_every
+                ),
                 retain_every=args.retain_every,
                 timeout=args.timeout,
                 universe_boards=args.universe_boards if args.kernel == "board-free" else 0,

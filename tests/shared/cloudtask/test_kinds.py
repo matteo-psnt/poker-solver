@@ -67,6 +67,74 @@ def _plan(**kwargs):
     return SimpleNamespace(**(base | kwargs))
 
 
+class TestAPriorIsRefusedByTheKernelsThatCannotApplyIt:
+    """A submission naming a prior a kernel's argv does not carry would train a
+    plain CONTROL under the variant's arm label -- the failure that has twice
+    cost a whole sweep. The scalar path refuses at submit; these did not.
+    """
+
+    PRIORS = (
+        {"warm_start_from": "run-y"},
+        {"warm_start_weight": 3000},
+        {"warm_start_at": 10_000_000},
+        {"equity_prior_weight": 3000},
+        {"equity_prior_temperature": 0.5},
+    )
+
+    def _spec_for(self, op, **over):
+        base = {
+            "op": op,
+            "warm_start_from": "",
+            "warm_start_weight": 0,
+            "warm_start_at": 0,
+            "warm_start_shape": "",
+            "equity_prior_weight": 0,
+            "equity_prior_temperature": 0.0,
+            "to": 1000,
+            "universe_boards": 32,
+        }
+        return _spec(**(base | over))
+
+    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS, TaskName.TRAIN_VECTOR])
+    @pytest.mark.parametrize("prior", PRIORS)
+    def test_a_prior_is_refused_rather_than_dropped(self, op, prior):
+        spec = self._spec_for(op, **prior)
+        with pytest.raises(BadTaskError, match="only the scalar trainer"):
+            kinds.kind(op).validate(spec)
+
+    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS, TaskName.TRAIN_VECTOR])
+    def test_a_plain_arm_still_passes(self, op):
+        kinds.kind(op).validate(self._spec_for(op))
+
+
+class TestTheGameIsAlwaysStated:
+    def test_board_free_states_universe_seed_zero(self):
+        """Seed 0 is a seed. Guarded on truthiness it vanished from the argv and
+        the trainer's own default (7) silently solved a different game."""
+        argv = kinds.kind(TaskName.TRAIN_VECTOR).commands(
+            _plan(universe_boards=32, universe_seed=0)
+        )[0]
+        assert "--universe-seed" in argv
+        assert argv[argv.index("--universe-seed") + 1] == "0"
+
+
+class TestEveryKindRungsAtItsOwnScale:
+    def test_the_vector_kernels_do_not_inherit_the_scalar_rung(self):
+        """5M rungs on a run of hundreds is ONE chunk: nothing to resume from and
+        no ladder to score, against a quality curve that is U-shaped."""
+        scalar = kinds.kind(TaskName.TRAIN).default_checkpoint_every
+        for op in (TaskName.TRAIN_PCS, TaskName.TRAIN_VECTOR):
+            assert kinds.kind(op).default_checkpoint_every < scalar
+
+
+class TestPrecomputeUsesTheWorkerCountItWasGiven:
+    def test_workers_reaches_the_argv(self):
+        """It travelled the spec and the whole wire and was dropped at the argv,
+        so a 12-hour abstraction build ran at the config's worker count."""
+        argv = kinds.kind(TaskName.PRECOMPUTE).commands(_plan(workers=8))[0]
+        assert argv[argv.index("--workers") + 1] == "8"
+
+
 class TestTheRegistryStaysHonest:
     def test_every_wire_name_has_a_kind_and_the_reverse(self):
         """The one drift a closed enum plus an open registry could hide.
