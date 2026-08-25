@@ -8,6 +8,12 @@ statistic carries that judgement.
 Cells show aggression as a percentage, and the legend counts what was never
 trained: an untrained class is left blank rather than shown as uniform, because a
 uniform row looks exactly like a deliberate mixed strategy and is not one.
+
+THIS IS THE BLUEPRINT, NOT NECESSARILY WHAT PLAYS. The rows come straight out of
+storage, and `HUResolver` has no street gate -- armed, it resolves the preflop
+root too and can return something the chart does not show. So a chart describes
+the deployed strategy exactly when the resolver is off, which is
+`chipzen-seat`'s default and NOT `resolver.enabled`'s.
 """
 
 from __future__ import annotations
@@ -114,6 +120,7 @@ def render(payload: ChartPayload) -> None:
     if not counts:
         print("cell = P(raise or all-in).  · <2%   ░ <20%   ▒ <50%   ▓ <80%   █ 80%+")
         print("suited above the diagonal, offsuit below, pairs on it.")
+        print("the stored blueprint — a resolver, if armed, also acts preflop.")
 
 
 def _print_grid(payload: ChartPayload, *, counts: bool) -> None:
