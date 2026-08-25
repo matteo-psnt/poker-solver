@@ -147,7 +147,13 @@ def train_pcs(
         workers,
         requested,
         safe,
-        pcs_parallel.worker_bytes(tree, compiled.num_terminals, br_streets=config.pcs.cfr_br) / 1e9,
+        pcs_parallel.worker_bytes(
+            tree,
+            compiled.num_terminals,
+            br_streets=config.pcs.cfr_br,
+            runouts=config.pcs.runouts_per_flop,
+        )
+        / 1e9,
         config.pcs.runouts_per_flop,
         config.pcs.cfr_br,
     )

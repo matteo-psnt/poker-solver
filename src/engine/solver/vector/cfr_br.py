@@ -54,6 +54,7 @@ from src.engine.solver.vector.kernel import (
     VectorCFR,
     build_groups,
     regret_match,
+    slot_index,
 )
 from src.engine.solver.vector.mixture import GLOBAL_HANDS, VISIBLE_CARDS
 from src.engine.solver.vector.pcs import STREETS, dcfr_discount
@@ -115,18 +116,23 @@ class HybridAgent:
         *,
         br_streets: frozenset[Street],
         trunk_regrets: np.ndarray,
-        layout: TrunkLayout,
+        layout: TrunkLayout | None,
         compiled: CompiledTree,
         positions: int,
     ):
         self.player = player
         self.br_streets = br_streets
         self.trunk_regrets = trunk_regrets
+        # None reads the trunk out of whatever array ``trunk_regrets`` is under
+        # the TREE's own ragged layout, which is how the blueprint-trunk
+        # diagnostic borrows the seat's trained rows.
         self.layout = layout
         self.compiled = compiled
         self.picks: list[np.ndarray | None] = [None] * positions
 
     def trunk_index(self, group: NodeGroup, chunk: slice) -> np.ndarray:
+        if self.layout is None:
+            return slot_index(self.compiled, group, chunk)
         num_buckets = self.compiled.tree.num_buckets(group.street)
         span = (
             np.arange(num_buckets, dtype=np.int64)[:, None] * group.num_actions
@@ -205,7 +211,11 @@ class CFRBestResponse:
         cfr_plus: bool = True,
         showdown: str = "walk",
         num_boards: int = 1,
+        sequential: bool = False,
+        trunk_source: str = "own",
     ):
+        if trunk_source not in ("own", "blueprint"):
+            raise ValueError(f"Unknown trunk source {trunk_source!r}.")
         if weighting not in ("none", "linear", "dcfr"):
             raise ValueError(f"Unknown iteration weighting {weighting!r}.")
         self.compiled = compiled
@@ -220,6 +230,19 @@ class CFRBestResponse:
         self.cfr_plus = cfr_plus
         self.showdown = showdown
         self.num_boards = num_boards
+        # One kernel rebound per board instead of one per board held at once.
+        # The ~3 GB of hand-space scratch is per KERNEL, so holding K of them is
+        # what a production node cannot do; rebinding costs a segment sort per
+        # board and nothing else. Only a best response that must maximise ACROSS
+        # boards needs them simultaneously, which is exactly the case a river
+        # region never produces.
+        self.sequential = sequential and num_boards > 1
+        # `blueprint` makes the hybrid play the seat's own trained strategy above
+        # the best-response region instead of a table of its own. That is NOT
+        # CFR-BR -- the opponent stops being a regret minimiser against this
+        # player's sequence -- and exists to separate the trunk agent's effect
+        # from the region's when one of them costs more than it buys.
+        self.trunk_source = trunk_source
         self.groups: list[NodeGroup] = build_groups(compiled)
         self.layout = TrunkLayout(compiled.tree, tuple(self.br_streets))
         if trunk_regrets.shape[0] < self.layout.num_slots:
@@ -229,9 +252,13 @@ class CFRBestResponse:
                 "and the same br_streets."
             )
         self.kernels: list[VectorCFR] = []
+        self.contexts: list[HandContext] = []
+        self._bound = -1  # which board the single sequential kernel currently holds
         self.agents: list[dict[int, HybridAgent]] = []
         self.plan: list[tuple[NodeGroup, slice]] = []
         self._delta: np.ndarray | None = None
+        self._trunk_delta: np.ndarray | None = None
+        self._trunk_touched: dict[Street, set[int]] = {}
         self._global_hand_id: list[np.ndarray] = []
         self._partition: dict[Street, list[list[int]]] = {}
         self.boards = 0  # board passes completed, for throughput accounting
@@ -249,8 +276,9 @@ class CFRBestResponse:
                 f"This driver is built for {self.num_boards} boards per iteration; "
                 f"got {len(contexts)}. Scratch is sized once."
             )
+        self.contexts = list(contexts)
         if not self.kernels:
-            for context in contexts:
+            for context in contexts[: 1 if self.sequential else self.num_boards]:
                 kernel = VectorCFR(
                     self.compiled,
                     context,
@@ -268,8 +296,10 @@ class CFRBestResponse:
                     player: HybridAgent(
                         player,
                         br_streets=self.br_streets,
-                        trunk_regrets=self.trunk_regrets,
-                        layout=self.layout,
+                        trunk_regrets=(
+                            self.regrets if self.trunk_source == "blueprint" else self.trunk_regrets
+                        ),
+                        layout=None if self.trunk_source == "blueprint" else self.layout,
                         compiled=self.compiled,
                         positions=len(self.plan),
                     )
@@ -277,9 +307,10 @@ class CFRBestResponse:
                 }
                 for _ in contexts
             ]
-        else:
+        elif not self.sequential:
             for kernel, context in zip(self.kernels, contexts, strict=True):
                 kernel.bind(context)
+        self._bound = -1
         self._global_hand_id = [
             context.hand_cards[:, 0].astype(np.int64) * 52 + context.hand_cards[:, 1]
             for context in contexts
@@ -332,7 +363,43 @@ class CFRBestResponse:
         """Bind the boards and set this iteration's weights; :meth:`iterate` calls it."""
         self._bind(contexts)
         self._partition_boards(boards)
+        if self.sequential:
+            spanning = [
+                street
+                for street in self.br_streets
+                for members in self._partition[street]
+                if len(members) > 1
+            ]
+            if spanning:
+                raise ValueError(
+                    f"Sequential binding cannot best-respond on {spanning[0].name}: these boards "
+                    "share that street's visible prefix, so one action must be chosen across them "
+                    "and their values have to exist at the same time. Build with sequential=False."
+                )
         self._schedule(iteration)
+
+    def _use(self, index: int) -> VectorCFR:
+        """The kernel holding board ``index``, rebinding it first when sequential."""
+        if not self.sequential:
+            return self.kernels[index]
+        kernel = self.kernels[0]
+        if self._bound != index:
+            kernel.bind(self.contexts[index])
+            self._bound = index
+        return kernel
+
+    def _walks(self) -> list[list[int]]:
+        """Board indices per backward walk: all at once, or one at a time.
+
+        A walk has to hold every board whose values a single maximisation
+        compares, so sequential is only legal where no partition group spans two
+        boards -- which is what ``prepare`` checks.
+        """
+        return (
+            [[i] for i in range(self.num_boards)]
+            if self.sequential
+            else [list(range(self.num_boards))]
+        )
 
     def iterate(
         self,
@@ -349,22 +416,32 @@ class CFRBestResponse:
         self.prepare(contexts, iteration, boards=boards)
         initial = np.ones(self.kernels[0].num_hands, dtype=DTYPE)
 
-        for kernel in self.kernels:
-            kernel.opponent = None
-            kernel.update_players = ()
-            kernel.strategy_weight = self.strategy_weight
-            kernel.delta_scale = self.delta_scale
-            kernel.regret_discount = self.regret_discount
-            kernel.forward(initial)
-            kernel.evaluate_terminals()
-            kernel.value[:] = 0.0
-        self.hybrid_pass()
+        if self.num_boards > 1:
+            if self._trunk_delta is None:
+                self._trunk_delta = np.zeros(max(1, self.layout.num_slots), dtype=DTYPE)
+            self._trunk_delta[:] = 0.0
+            self._trunk_touched = {street: set() for street in STREETS}
+
+        for members in self._walks():
+            for index in members:
+                kernel = self._use(index)
+                kernel.opponent = None
+                kernel.update_players = ()
+                kernel.strategy_weight = self.strategy_weight
+                kernel.delta_scale = self.delta_scale
+                kernel.regret_discount = self.regret_discount
+                kernel.forward(initial)
+                kernel.evaluate_terminals()
+                kernel.value[:] = 0.0
+            self.hybrid_pass(members)
+        if self.num_boards > 1:
+            self._flush_trunk()
 
         for player in (0, 1):
             self._cfr_pass(player, initial)
         self.boards += self.num_boards
 
-    def hybrid_pass(self) -> None:
+    def hybrid_pass(self, members: Sequence[int] | None = None) -> None:
         """Both seats' hybrid strategies for this iteration, and their trunk regrets.
 
         One backward walk carries both value chains: at a node the actor's own
@@ -374,23 +451,25 @@ class CFRBestResponse:
         reach, which is exactly the current iterate the best response is
         supposed to answer.
         """
+        members = list(range(self.num_boards)) if members is None else list(members)
         for position in range(len(self.plan) - 1, -1, -1):
             group, chunk = self.plan[position]
             actor, other = group.actor, 1 - group.actor
             nodes = group.node_ids[chunk]
-            actor_children, other_children = [], []
-            for kernel in self.kernels:
+            actor_children, other_children = {}, {}
+            for index in members:
+                kernel = self._use(index)
                 targets, is_terminal = kernel.child_targets(group, chunk)
-                actor_children.append(kernel.gather_children(targets, is_terminal, actor))
-                other_children.append(kernel.gather_children(targets, is_terminal, other))
+                actor_children[index] = kernel.gather_children(targets, is_terminal, actor)
+                other_children[index] = kernel.gather_children(targets, is_terminal, other)
 
             if group.street in self.br_streets:
                 self._maximise(group, position, actor, nodes, actor_children)
             else:
                 self._mix_trunk(group, chunk, actor, nodes, actor_children)
 
-            for kernel, children in zip(self.kernels, other_children, strict=True):
-                kernel.value[other, nodes] = children.sum(axis=-1)
+            for index, children in other_children.items():
+                self._use(index).value[other, nodes] = children.sum(axis=-1)
 
     def _maximise(
         self,
@@ -398,17 +477,19 @@ class CFRBestResponse:
         position: int,
         actor: int,
         nodes: np.ndarray,
-        children: list[np.ndarray],
+        children: dict[int, np.ndarray],
     ) -> None:
         """Per-hand argmax, joint over boards this street cannot tell apart."""
-        for members in self._partition[group.street]:
+        for group_members in self._partition[group.street]:
+            members = [index for index in group_members if index in children]
+            if not members:
+                continue
             if len(members) == 1:
                 only = members[0]
                 per_board = {only: children[only].argmax(axis=-1).astype(np.int8)}
             else:
-                totals = np.zeros(
-                    (children[0].shape[0], GLOBAL_HANDS, group.num_actions), dtype=DTYPE
-                )
+                shape = (children[members[0]].shape[0], GLOBAL_HANDS, group.num_actions)
+                totals = np.zeros(shape, dtype=DTYPE)
                 for index in members:
                     totals[:, self._global_hand_id[index], :] += children[index]
                 best = totals.argmax(axis=-1)
@@ -418,7 +499,7 @@ class CFRBestResponse:
             for index, chosen in per_board.items():
                 self.agents[index][actor].picks[position] = chosen
                 self.best_responses += 1
-                self.kernels[index].value[actor, nodes] = np.take_along_axis(
+                self._use(index).value[actor, nodes] = np.take_along_axis(
                     children[index], chosen.astype(np.int64)[:, :, None], axis=2
                 )[:, :, 0]
 
@@ -428,7 +509,7 @@ class CFRBestResponse:
         chunk: slice,
         actor: int,
         nodes: np.ndarray,
-        children: list[np.ndarray],
+        children: dict[int, np.ndarray],
     ) -> None:
         """Trunk value under regret matching, and the trunk regret this leaves."""
         agent = self.agents[0][actor]
@@ -437,7 +518,8 @@ class CFRBestResponse:
         block = np.zeros((nodes.shape[0], num_buckets, group.num_actions), dtype=DTYPE)
         occupied: set[int] = set()
 
-        for kernel, child in zip(self.kernels, children, strict=True):
+        for index, child in children.items():
+            kernel = self._use(index)
             segments = kernel.segments[group.street]
             value = (strategy[:, kernel.context.buckets_for(group.street), :] * child).sum(axis=-1)
             kernel.value[actor, nodes] = value
@@ -450,25 +532,57 @@ class CFRBestResponse:
             block[:, segments.segment_bucket, :] += collapsed - node_value[:, :, None]
             occupied.update(segments.segment_bucket.tolist())
 
+        if self.trunk_source == "blueprint":
+            return  # those rows are the seat's own answer; the diagnostic only READS them
         if self.delta_scale != 1.0:
             block *= DTYPE(self.delta_scale)
-        apply_regret_block(
-            self.trunk_regrets,
-            agent.trunk_index(group, chunk),
-            block,
-            np.array(sorted(occupied), dtype=np.int64),
-            discount=self.regret_discount,
-            cfr_plus=self.cfr_plus,
-        )
+        index_map = agent.trunk_index(group, chunk)
+        if self._trunk_delta is None:
+            apply_regret_block(
+                self.trunk_regrets,
+                index_map,
+                block,
+                np.array(sorted(occupied), dtype=np.int64),
+                discount=self.regret_discount,
+                cfr_plus=self.cfr_plus,
+            )
+            return
+        # Several boards of ONE iteration: their increments sum before the
+        # discount and the floor, as in ``pcs.PublicChanceSamplingCFR``.
+        self._trunk_delta[index_map] += block.reshape(block.shape[0], -1)
+        self._trunk_touched[group.street].update(occupied)
+
+    def _flush_trunk(self) -> None:
+        """Apply the iteration's summed trunk increment once per row."""
+        if self._trunk_delta is None or self.trunk_source == "blueprint":
+            return
+        union = {
+            street: np.array(sorted(rows), dtype=np.int64)
+            for street, rows in self._trunk_touched.items()
+        }
+        for group in self.groups:
+            if group.street in self.br_streets:
+                continue
+            agent = self.agents[0][group.actor]
+            buckets = self.compiled.tree.num_buckets(group.street)
+            for chunk in self.kernels[0].chunks(group):
+                index_map = agent.trunk_index(group, chunk)
+                block = self._trunk_delta[index_map].reshape(-1, buckets, group.num_actions)
+                apply_regret_block(
+                    self.trunk_regrets,
+                    index_map,
+                    block,
+                    union[group.street],
+                    discount=self.regret_discount,
+                    cfr_plus=self.cfr_plus,
+                )
 
     def _cfr_pass(self, player: int, initial: np.ndarray) -> None:
         """One seat's CFR update against the hybrid opponent just computed."""
-        for index, kernel in enumerate(self.kernels):
-            kernel.opponent = self.agents[index][1 - player]
-            kernel.update_players = (player,)
-
         if self.num_boards == 1:
             kernel = self.kernels[0]
+            kernel.opponent = self.agents[0][1 - player]
+            kernel.update_players = (player,)
             kernel.forward(initial)
             kernel.evaluate_terminals()
             kernel.backward()
@@ -479,7 +593,10 @@ class CFRBestResponse:
             self._delta = np.zeros(self.compiled.tree.num_slots, dtype=DTYPE)
         self._delta[:] = 0.0
         occupied: dict[Street, set[int]] = {street: set() for street in STREETS}
-        for kernel in self.kernels:
+        for index in range(self.num_boards):
+            kernel = self._use(index)
+            kernel.opponent = self.agents[index][1 - player]
+            kernel.update_players = (player,)
             kernel.regret_target = self._delta
             try:
                 kernel.forward(initial)
@@ -487,6 +604,7 @@ class CFRBestResponse:
                 kernel.backward()
             finally:
                 kernel.regret_target = None
+                kernel.opponent = None
             for street in STREETS:
                 occupied[street].update(kernel.segments[street].segment_bucket.tolist())
 
@@ -502,8 +620,6 @@ class CFRBestResponse:
                 index = first._slot_index(group, chunk)  # noqa: SLF001 -- the kernel's own layout
                 block = self._delta[index].reshape(-1, buckets, group.num_actions)
                 first.apply_regret_block(index, block, union[group.street])
-        for kernel in self.kernels:
-            kernel.opponent = None
 
 
 __all__ = ("BR_REGIONS", "CFRBestResponse", "HybridAgent", "TrunkLayout")
