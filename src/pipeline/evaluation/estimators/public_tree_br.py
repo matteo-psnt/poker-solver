@@ -68,6 +68,7 @@ if TYPE_CHECKING:
 
     from src.core.game.actions import Action
     from src.engine.solver.policy.source import ScorableBlueprint
+    from src.engine.solver.storage.policy_assembly import PolicyIterate
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,13 @@ class PublicBRConfig:
     decompose: bool = False
     """Attribute the responder's gain to the public nodes it comes from. Does
     not change the number; costs one extra reach vector per walk."""
+    policy_iterate: PolicyIterate = "average"
+    """Which strategy of the checkpoint is measured: the DCFR average, which
+    `t^gamma` weighting makes a mostly-recent one, or the current regret-matched
+    iterate. A separate tier."""
+    avg_window_from: int | None = None
+    """Average only over iterations after this retained rung, which is exactly
+    the difference of the two rungs' `strategy_sum`. A separate tier."""
 
 
 @dataclass(frozen=True)
