@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.interfaces import run_names
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import blob, share
+from src.interfaces.cloud.store import blob
 from src.interfaces.errors import CommandError
 from src.shared import records
 from src.shared.cloudtask.node import archive
@@ -32,12 +32,6 @@ from src.shared.cloudtask.node import archive
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
 
-
-# `<op>_result.json` -- train, evaluate, resume, train-static. The writer was
-# deleted with the clobbering result file it produced; nothing reads them, and
-# they are still on the share as history. `fetch` still syncs them, because that
-# is a copy of the record; this is a question being asked of it.
-DEAD_SUFFIX = "_result.json"
 
 # Sized by latency, not bandwidth: 105 metadata files took 7.5s at 16 threads,
 # 4.6s at 32, 3.5s at 64. Threads blocked on a socket cost almost nothing.
@@ -47,16 +41,6 @@ _PARALLEL_DOWNLOADS = 64
 # of a materialised tree. Every reader of that tree filters to directories, so a
 # file beside the run directories is invisible to them.
 _ETAGS_NAME = "records.etags"
-
-
-def _is_snapshot_dir(name: str) -> bool:
-    """A checkpoint directory, never worth descending into to ask a question.
-
-    Delegates to :func:`share.is_snapshot_dir` so the walk and the per-path
-    filter below cannot disagree about what a snapshot is -- when they did, a
-    directory was descended into and then discarded file by file.
-    """
-    return share.is_snapshot_dir(name)
 
 
 def pull_metadata(

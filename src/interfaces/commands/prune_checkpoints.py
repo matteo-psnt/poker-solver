@@ -72,7 +72,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--no-price",
         dest="price",
         action="store_false",
-        help="Skip sizing the plan. Sizing is one listing per affected run against the share.",
+        help="Skip sizing the plan. Sizing is one HEAD per affected run against the container.",
     )
     parser.add_argument(
         "--apply",
@@ -173,7 +173,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
         raise CommandError("--keep must be at least 1: a run always keeps its latest rung.")
 
     from src.interfaces.cloud.config import CloudConfig  # noqa: PLC0415 -- Azure only when applying
-    from src.interfaces.cloud.store import blob, share  # noqa: PLC0415
+    from src.interfaces.cloud.store import blob  # noqa: PLC0415
 
     source = connect.record_source_from_environment()
     engine = connect.engine_from_environment()
@@ -228,26 +228,10 @@ def run(args: argparse.Namespace) -> PrunePlan:
     # percent, while across runs they vary 0.30-2.21 GiB -- so per-run is where
     # the accuracy is, and per-rung would be thousands of listings for it.
     config = CloudConfig.load()
-    service = share.share_client(config)
 
     def _price(entry: dict[str, Any]) -> float:
         snapshot = entry["snapshots"][0]
-        base = f"{share.ARCHIVE_DIR}/{entry['run']}/{snapshot}"
-        entries = share.list_entries(service, config.share_name, base)
-        total = sum(e.size or 0 for e in entries if not e.is_directory)
-        for sub in (e.name for e in entries if e.is_directory):
-            total += sum(
-                e.size or 0
-                for e in share.list_entries(service, config.share_name, f"{base}/{sub}")
-                if not e.is_directory
-            )
-        # WHICHEVER STORE HOLDS IT. A migrated rung has a marker on the share
-        # and no bytes beside it, so listing the share alone prices the whole
-        # plan at zero -- and a plan that says it frees nothing is one nobody
-        # runs.
-        if not total:
-            total = blob.rung_size(config, entry["run"], records.object_name(snapshot))
-        return total / GB
+        return blob.rung_size(config, entry["run"], records.object_name(snapshot)) / GB
 
     if plan.plan and args.price:
         with ThreadPoolExecutor(max_workers=32) as pool:
@@ -262,95 +246,15 @@ def run(args: argparse.Namespace) -> PrunePlan:
 
     for entry in plan.plan:
         for snapshot in entry["snapshots"]:
-            base = f"{share.ARCHIVE_DIR}/{entry['run']}/{snapshot}"
-            # The marker FIRST, and this ordering was chosen the wrong way round
-            # once. A marker is the share's own claim that a rung is complete --
-            # `verify_published_rungs` reads exactly these -- so a sweep that
-            # deletes bytes first and is then interrupted leaves a rung that
-            # ADVERTISES itself and cannot load, and the failure surfaces on a
-            # node after a snapshot upload and an allocation. Deleting the claim
-            # first leaves orphaned bytes instead: invisible, harmless, and
-            # swept by the next run of this command.
-            share.delete_file(
-                service,
-                config.share_name,
-                f"{share.ARCHIVE_DIR}/{entry['run']}/{archive.marker_for(snapshot)}",
-            )
-            paths = [path for path, _etag in share.walk_files(service, config.share_name, base)]
-            with ThreadPoolExecutor(max_workers=_PARALLEL_DELETES) as pool:
-                deleted = list(
-                    pool.map(
-                        lambda path: share.delete_file(service, config.share_name, path), paths
-                    )
-                )
-            plan.files_deleted += sum(1 for ok in deleted if ok)
-            # A rung on the share may also be a single FILE rather than a
-            # directory, since the format changed.
-            if share.delete_file(service, config.share_name, base):
-                plan.files_deleted += 1
-            # Azure Files keeps the directory when its files go, and an empty one
-            # still costs the parent listing a name -- which is the walk every
-            # metadata read pays per run.
-            _remove_empty_tree(share, service, config.share_name, base)
-            # AND THE CONTAINER, which is where the rung actually lives now.
-            # Deleting only the share left the object behind forever: the
-            # container is the one store that still grows and this is the only
-            # thing that removes anything from it.
+            # THE ONLY DELETE THIS PROJECT PERFORMS against the container, and
+            # the container is now the only store a rung is in. What stood here
+            # was twice this long: a marker delete, a threaded file walk, an
+            # empty-directory tidy and a self-healing sweep for litter a killed
+            # sweep had left -- all of it the shape of removing thousands of
+            # small files from an SMB mount that no longer holds any.
             if blob.delete_rung(config, entry["run"], records.object_name(snapshot)):
                 plan.objects_deleted += 1
-
-    # SELF-HEALING, and the reason the ordering comment above can promise it:
-    # a sweep interrupted before this existed left directories emptied of files
-    # but not removed, and a later run has nothing left to drop so would never
-    # revisit them. An empty snapshot directory with no marker is litter by
-    # definition -- nothing advertises it and nothing can load it.
-    for name in swept:
-        run_base = f"{share.ARCHIVE_DIR}/{name}"
-        listing = share.list_entries(service, config.share_name, run_base)
-        claimed = {
-            e.name[len(archive.MARKER_PREFIX) :]
-            for e in listing
-            if not e.is_directory and e.name.startswith(archive.MARKER_PREFIX)
-        }
-        files = {e.name for e in listing if not e.is_directory}
-        for snapshot in (e.name for e in listing if _RUNG.match(e.name)):
-            if snapshot in claimed:
-                continue
-            # UNCLAIMED on a terminal run, so unloadable whatever it holds: the
-            # marker is the definition of complete, and a reader is driven by
-            # what the manifest names rather than by what a directory happens to
-            # contain. Either our own interrupted sweep or a copy that died with
-            # the run -- both are bytes nothing can reference.
-            base = f"{run_base}/{snapshot}"
-            if snapshot in files:
-                # One object rather than a tree, since the format changed.
-                if share.delete_file(service, config.share_name, base):
-                    plan.files_deleted += 1
-                continue
-            paths = [path for path, _etag in share.walk_files(service, config.share_name, base)]
-            if paths:
-                with ThreadPoolExecutor(max_workers=_PARALLEL_DELETES) as pool:
-                    swept_files = list(
-                        pool.map(
-                            lambda path: share.delete_file(service, config.share_name, path), paths
-                        )
-                    )
-                plan.files_deleted += sum(1 for ok in swept_files if ok)
-            _remove_empty_tree(share, service, config.share_name, base)
     return plan
-
-
-def _remove_empty_tree(share: Any, service: Any, share_name: str, base: str) -> None:
-    """Remove `base` and the directories under it, deepest first.
-
-    A zarr snapshot nests one level, so the children have to go before the
-    parent can. Anything still holding a file is simply left: this tidies, it
-    does not decide.
-    """
-    children = [e.name for e in share.list_entries(service, share_name, base) if e.is_directory]
-    for child in children:
-        share.delete_directory(service, share_name, f"{base}/{child}")
-    share.delete_directory(service, share_name, base)
 
 
 def render(payload: PrunePlan) -> None:

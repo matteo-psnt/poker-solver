@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from src.interfaces.cloud.cost import billing
-from src.interfaces.cloud.store import share, workspace
+from src.interfaces.cloud.store import workspace
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands import cost, jobs
 from src.interfaces.errors import CommandError
@@ -188,33 +188,6 @@ class TestPoolStatusIsTwoRoundTrips:
         assert status.autoscale is not None
         assert status.autoscale.variables == {"$TargetDedicatedNodes": "1", "pending": "1"}
         assert status.autoscale.interval_seconds == 300.0
-
-
-class TestDeadKeyTablesAreNotFetched:
-    """`keys-<iter>/vocab.json` is the deleted dynamic backend's key table.
-
-    Nothing in `src/` opens one, and they are permanently unreadable at HEAD --
-    but they are JSON, so every metadata sync matched them on the suffix.
-    """
-
-    def test_a_key_table_directory_counts_as_checkpoint_data(self):
-        assert share.is_snapshot_dir("keys-1080000")
-        assert share.is_snapshot_path("run-a/keys-1080000/vocab.json")
-
-    def test_zarr_snapshots_still_count(self):
-        assert share.is_snapshot_dir("static-500000.zarr")
-        assert share.is_snapshot_path("run-a/static-500000.zarr/0.0")
-
-    def test_eval_records_are_still_record(self):
-        """The regression this predicate already had once: depth is not the
-        criterion, and `<run>/evals/record-*.json` is three deep."""
-        assert not share.is_snapshot_path("run-a/evals/record-2026.json")
-        assert not share.is_snapshot_path("run-a/.run.json")
-
-    def test_a_run_named_like_a_key_table_is_not_swallowed(self):
-        """The prefix must not be so broad it hides a real run directory."""
-        assert not share.is_snapshot_dir("run-keys-experiment")
-        assert not share.is_snapshot_dir("keysight")
 
 
 class TestAPageCostsOneMaterialisation:
