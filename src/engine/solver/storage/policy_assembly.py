@@ -41,17 +41,11 @@ PolicyIterate = Literal["average", "current"]
 WINDOW_SHRINKAGE = 1e-3
 
 
-def _abstraction_of(checkpoint_dir: Path) -> tuple[StaticCheckpointManifest, str]:
-    """A run's manifest and the bucket ASSIGNMENT its rows are written under."""
+def _manifest_of(checkpoint_dir: Path) -> StaticCheckpointManifest:
     manifest = StaticCheckpointManifest.read(checkpoint_dir)
     if manifest is None:
         raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
-    if manifest.abstraction_id is None:
-        raise AbstractionMismatchError(
-            f"{checkpoint_dir.name} does not record which bucket assignment it was trained "
-            "under, so a mixture with it cannot be shown to be adding the same hands."
-        )
-    return manifest, manifest.abstraction_id
+    return manifest
 
 
 def _apply_mix(
@@ -69,16 +63,22 @@ def _apply_mix(
     which is the guard this operation needs: rows are normalised per row at
     read time, so a common scale factor cannot change the policy.
 
-    The tree fingerprint is checked by the read; the bucket ASSIGNMENT is
-    checked here, and it is the one that matters -- two runs can share a tree,
-    a layout and bucket COUNTS while row `i` holds a different hand in each,
-    and nothing about the arrays would reveal it.
+    The tree fingerprint is checked by the read. The bucket ASSIGNMENT is the
+    one that matters -- two runs can share a tree, a layout and bucket COUNTS
+    while row `i` holds a different hand in each, and nothing about the arrays
+    would reveal it -- and the CALLER verifies it, from the runs' recorded
+    metadata. It cannot be verified here: ordinary training runs leave
+    ``abstraction_id`` unset in the checkpoint manifest
+    (``static_parallel`` does not pass it), so a manifest check alone would
+    refuse every real pair. The manifests are still compared when BOTH record
+    one, since that case is a definite mismatch.
     """
     if not 0.0 <= weight <= 1.0:
         raise ValueError(f"a mixture weight is a proportion, got {weight}")
-    _, mine = _abstraction_of(checkpoint_dir)
-    other_manifest, theirs = _abstraction_of(Path(mix_run))
-    if mine != theirs:
+    mine = _manifest_of(checkpoint_dir).abstraction_id
+    other_manifest = _manifest_of(Path(mix_run))
+    theirs = other_manifest.abstraction_id
+    if mine is not None and theirs is not None and mine != theirs:
         raise AbstractionMismatchError(
             f"{Path(mix_run).name} buckets by {theirs} but {checkpoint_dir.name} buckets by "
             f"{mine}. The rows would line up and hold different hands."
