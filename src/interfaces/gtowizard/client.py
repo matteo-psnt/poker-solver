@@ -11,6 +11,7 @@ the two reference floors (Always Fold, Check Call) readable before we hold one.
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -41,14 +42,24 @@ BUSY = frozenset(
 
 @dataclass(frozen=True)
 class Retry:
-    """Backoff for a busy engine. Bounded, so a wedged server ends the run."""
+    """Backoff for a busy engine. Bounded, so a wedged server ends the run.
 
-    attempts: int = 6
+    JITTERED, because the failure this fixes was not one slow request. Their
+    engine answers 503 intermittently and recovers within seconds, but every
+    concurrent worker backs off on the same schedule, so a deterministic pause
+    marches them into the server together and they exhaust together: 30 hands
+    at concurrency 5 failed 30/30 while a lone request beside them succeeded.
+    Full jitter spreads the herd over the window instead of stacking it on the
+    edge of one.
+    """
+
+    attempts: int = 8
     base_seconds: float = 0.5
     max_seconds: float = 30.0
 
     def pause(self, attempt: int) -> float:
-        return min(self.base_seconds * 2**attempt, self.max_seconds)
+        """Uniform over [0, window]: full jitter, not the window itself."""
+        return random.uniform(0.0, min(self.base_seconds * 2**attempt, self.max_seconds))
 
 
 class BenchmarkClient:
