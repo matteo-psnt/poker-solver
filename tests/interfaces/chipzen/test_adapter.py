@@ -168,6 +168,41 @@ class TestParsing:
         with pytest.raises(ProtocolError, match=because):
             GameConfig.parse({**base, **payload})
 
+    def test_a_table_with_an_ante_is_refused(self):
+        """`GameRules` takes two blinds and nothing else; an ante is a game we
+        cannot represent, so every pot would be the wrong size silently."""
+        with pytest.raises(ProtocolError, match="ante"):
+            GameConfig.parse(
+                {
+                    "variant": "nlhe",
+                    "starting_stack": STACK,
+                    "small_blind": SB,
+                    "big_blind": BB,
+                    "ante": 25,
+                    "num_players": 2,
+                }
+            )
+
+    @pytest.mark.parametrize(
+        ("broken", "because"),
+        [
+            ({"board": ["2c", "2c", "9h"], "phase": "flop"}, "a board card twice"),
+            ({"your_hole_cards": ["Ah", "Ah"]}, "the same card twice in hand"),
+            (
+                {"board": ["Ah", "7d", "9h"], "phase": "flop"},
+                "a hole card already on the board",
+            ),
+        ],
+    )
+    def test_a_card_that_repeats_is_refused(self, broken, because):
+        """Probed live: each of these came back with a confident action.
+
+        A real server never sends one, which is exactly why nothing downstream
+        checks -- the bucket for a state that cannot exist looks like any other.
+        """
+        with pytest.raises(ProtocolError, match="repeats"):
+            TurnState.parse(turn_payload(**broken))
+
     def test_a_bad_card_names_itself(self):
         with pytest.raises(ProtocolError, match="'Zz' is not a card"):
             TurnState.parse(turn_payload(your_hole_cards=["Zz", "Kd"]))
