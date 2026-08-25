@@ -286,6 +286,7 @@ def train_static_parallel(
     checkpoint_dir: Path | None = None,
     base_seed: int = 42,
     checkpoint_retain_every: int = 0,
+    abstraction_id: str | None = None,
     abstraction: BucketingStrategy | None = None,
     checkpoint_every: int = 0,
     start_iteration: int = 0,
@@ -431,7 +432,13 @@ def train_static_parallel(
                 write_started = time.time()
                 if before_checkpoint is not None:
                     before_checkpoint(storage)
-                save_checkpoint(storage, checkpoint_dir, done, retain_every=checkpoint_retain_every)
+                save_checkpoint(
+                    storage,
+                    checkpoint_dir,
+                    done,
+                    retain_every=checkpoint_retain_every,
+                    abstraction_id=abstraction_id,
+                )
                 checkpoint_seconds = time.time() - write_started
                 coverage = storage.coverage()
                 logger.info(
