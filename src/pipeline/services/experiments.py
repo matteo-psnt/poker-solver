@@ -45,6 +45,9 @@ class CurveOutput(BaseModel):
     points: list[CurvePoint]
     missing_iterations: list[int]
     other_tiers: list[str]
+    # Which `--tier N` produced `points`. `other_tiers` drops the selected entry,
+    # so a reader cannot recover the N of any other tier without this.
+    tier_index: int = 0
     retained_iterations: list[int]
     # Rows for this run that predate `checkpoint_iteration` being recorded. They
     # cannot be placed on an axis -- an unlabelled point is not a point -- but an
@@ -131,6 +134,7 @@ def exploitability_curve(
         points=points,
         missing_iterations=[i for i in retained if i not in by_iteration],
         other_tiers=[lbl for idx, (lbl, _) in enumerate(series) if idx != tier_index],
+        tier_index=tier_index,
         retained_iterations=retained,
         unplaceable_records=unplaceable,
     )

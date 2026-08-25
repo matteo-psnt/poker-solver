@@ -124,6 +124,14 @@ def render(payload: RunInfoPayload) -> None:
                 f"    {point.iteration:>12,}  {point.exploitability_mbb:>9.1f} mbb"
                 f"  (± {point.std_error_mbb:.1f})"
             )
+        # Without this the curve of a run whose eval tree changed simply STOPS and
+        # the completed evals below it are invisible -- read once as ten scoring
+        # tasks having produced nothing.
+        others = (
+            i for i in range(len(payload.curve.other_tiers) + 1) if i != payload.curve.tier_index
+        )
+        for index, other in zip(others, payload.curve.other_tiers, strict=True):
+            print(f"    (also recorded, not mixed in -- `--tier {index}`: {other})")
 
     tasks = payload.tasks or []
     if tasks:

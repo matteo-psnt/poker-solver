@@ -1040,6 +1040,11 @@
             ],
             "title": "Tier"
           },
+          "tier_index": {
+            "default": 0,
+            "title": "Tier Index",
+            "type": "integer"
+          },
           "unplaceable_records": {
             "default": 0,
             "title": "Unplaceable Records",
@@ -1122,6 +1127,11 @@
               }
             ],
             "title": "Tier"
+          },
+          "tier_index": {
+            "default": 0,
+            "title": "Tier Index",
+            "type": "integer"
           },
           "unplaceable_records": {
             "default": 0,

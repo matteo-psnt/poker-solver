@@ -1,3 +1,5 @@
+import { configure } from "@testing-library/react";
+
 /**
  * jsdom gaps that a real browser fills.
  *
@@ -54,3 +56,14 @@ class NoopResizeObserver implements ResizeObserver {
   disconnect() {}
 }
 globalThis.ResizeObserver ??= NoopResizeObserver;
+
+/**
+ * `waitFor`'s 1s default is a WALL-CLOCK budget, and vitest runs 21 files at
+ * once: under that load a render that takes ~10ms alone overshoots it, so the
+ * suite failed 1-3 arbitrary tests per parallel run and passed every one of
+ * them serially. A changing failure list is environmental, never a regression.
+ *
+ * Raised rather than made serial because the assertions are unaffected -- a
+ * genuinely broken query still fails, it just is not raced against the CI box.
+ */
+configure({ asyncUtilTimeout: 5000 });
