@@ -224,17 +224,6 @@ class CanonicalBoardEnumerator:
 
         yield from self._cache.values()
 
-    def get_by_id(self, board_id: int) -> CanonicalBoardInfo | None:
-        """Get canonical board info by ID."""
-        if not self._enumerated:
-            self.enumerate()
-        return self._cache.get(board_id)
-
-    def get_canonical_id(self, board: tuple[Card, ...]) -> int:
-        """Get canonical board ID for a raw board."""
-        canonical_board, _ = canonicalize_board(board)
-        return get_canonical_board_id(canonical_board)
-
     def count(self) -> int:
         """Get total number of canonical boards."""
         if not self._enumerated:

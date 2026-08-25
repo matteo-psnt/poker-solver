@@ -36,8 +36,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.core.game.state import FULL_DECK, GameState, Street
-from src.engine.solver.mccfr.chance import draw_cards, is_chance_node, sample_chance_outcome
+from src.core.game.state import FULL_DECK, GameState
+from src.engine.solver.mccfr.chance import (
+    deal_remaining_cards,
+    is_chance_node,
+    sample_chance_outcome,
+)
 from src.engine.solver.policy.lookup import blueprint_action_distribution
 
 if TYPE_CHECKING:
@@ -202,26 +206,14 @@ class HeadsUpHand:
 
     def _settle(self) -> None:
         """Finalize a terminal state: complete an all-in board, then score payoffs."""
-        state = self.state
-        if not state.ended_by_fold and len(state.board) < 5:
-            state = self._complete_board(state)
-            self.state = state
+        # The shared runout: it owns the fold and complete-board guards, so a
+        # session and an evaluator settle an all-in the same way by construction.
+        state = deal_remaining_cards(self.state, self._deal_rng)
+        self.state = state
         self.is_over = True
         self.payoffs = (
             state.get_payoff(0, self.rules),
             state.get_payoff(1, self.rules),
-        )
-
-    def _complete_board(self, state: GameState) -> GameState:
-        """Run out the remaining board for an early all-in (mirrors the evaluator)."""
-        needed = 5 - len(state.board)
-        extra = draw_cards(state, needed, self._deal_rng)
-        return state.replace(
-            validate=False,
-            street=Street.RIVER,
-            board=(*state.board, *extra),
-            is_terminal=True,
-            to_call=0,
         )
 
     def _deal_initial_state(self) -> GameState:

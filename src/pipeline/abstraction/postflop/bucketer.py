@@ -231,18 +231,6 @@ class DenseBucketer:
             return 169
         return self._num_buckets.get(street, 0)
 
-    def get_bucket_distribution(self, street: Street) -> dict[int, int]:
-        """Bucket → canonical-class count over all boards for a street."""
-        matrix = self._buckets.get(street)
-        if matrix is None:
-            return {}
-        counts = np.bincount(np.asarray(matrix).ravel(), minlength=self._sentinels[street] + 1)
-        return {
-            bucket: int(count)
-            for bucket, count in enumerate(counts[: self._sentinels[street]])
-            if count > 0
-        }
-
     def __str__(self) -> str:
         parts = [f"PREFLOP={self.num_buckets(Street.PREFLOP)}"]
         parts.extend(
