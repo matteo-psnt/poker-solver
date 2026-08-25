@@ -151,31 +151,46 @@ def _size_or_word(token: float | str, field: str, template_name: str) -> str | N
     return token.strip().lower()
 
 
+def _preflop_template_defaults() -> dict[str, list[float | str]]:
+    """Declared on the function rather than inferred from the literal: a row
+    like `["jam"]` infers `list[str]`, and `list` is invariant, so it is not a
+    `list[float | str]` however obviously it should be.
+
+    Numeric preflop sizes are the chips committed by THIS action in big blinds:
+    `bb_vs_limp: 2.0` is a raise to 3bb total over the posted blind, as
+    `sb_first_in: 2.5` is an open to 3bb total.
+    """
+    return {
+        "sb_first_in": ["fold", "call", 2.5, 3.5, 5.0],
+        "bb_vs_limp": ["check", 2.0, 3.0],
+        "sb_vs_limp_raise": ["fold", "call", "2.3x_last", "jam"],
+        "bb_vs_open": ["fold", "call"],
+        "sb_vs_3bet": ["fold", "call"],
+        "bb_vs_4bet": ["fold", "call", "jam"],
+        "sb_vs_5bet": ["fold", "call"],
+    }
+
+
+def _postflop_template_defaults() -> dict[str, list[float | str]]:
+    """Fractions of pot, or a named raise. See :func:`_preflop_template_defaults`
+    for why the type is declared here."""
+    return {
+        "first_aggressive": [0.33, 0.66, 1.25],
+        "facing_bet": ["min_raise", "jam"],
+        "after_one_raise": ["pot_raise", "jam"],
+        "after_two_raises": ["jam"],
+    }
+
+
 class ActionModelConfig(StrictFrozenModel):
     """Action model configuration with node-template and SPR-aware defaults."""
 
     version: PositiveInt = Field(default=1)
     preflop_templates: dict[str, list[float | str]] = Field(
-        default_factory=lambda: {
-            "sb_first_in": ["fold", "call", 2.5, 3.5, 5.0],
-            # Numeric preflop sizes are the chips committed by THIS action in
-            # big blinds: `bb_vs_limp: 2.0` is a raise to 3bb total over the
-            # posted blind, as `sb_first_in: 2.5` is an open to 3bb total.
-            "bb_vs_limp": ["check", 2.0, 3.0],
-            "sb_vs_limp_raise": ["fold", "call", "2.3x_last", "jam"],
-            "bb_vs_open": ["fold", "call"],
-            "sb_vs_3bet": ["fold", "call"],
-            "bb_vs_4bet": ["fold", "call", "jam"],
-            "sb_vs_5bet": ["fold", "call"],
-        }
+        default_factory=lambda: _preflop_template_defaults()
     )
     postflop_templates: dict[str, list[float | str]] = Field(
-        default_factory=lambda: {
-            "first_aggressive": [0.33, 0.66, 1.25],
-            "facing_bet": ["min_raise", "jam"],
-            "after_one_raise": ["pot_raise", "jam"],
-            "after_two_raises": ["jam"],
-        }
+        default_factory=lambda: _postflop_template_defaults()
     )
     jam_spr_threshold: NonNegFloat = Field(default=2.0)
     raise_count_rules: dict[str, str] = Field(

@@ -31,6 +31,11 @@ from src.interfaces.errors import CommandError
 from src.shared import records, repo
 
 
+def _takes_limit(parser: argparse.ArgumentParser) -> None:
+    """See `_takes_command` next door: `add_argument` returns its Action."""
+    parser.add_argument("--limit", default=0)
+
+
 @pytest.fixture
 def capturable(monkeypatch):
     """Let ``caplog`` see records from the ``src`` package logger.
@@ -59,7 +64,7 @@ def recording(tmp_path, monkeypatch):
 def _command(handler, add_arguments=None, name="probe") -> Command:
     return Command(
         name=name,
-        add_arguments=add_arguments or (lambda parser: parser.add_argument("--limit", default=0)),
+        add_arguments=add_arguments or _takes_limit,
         run=handler,
         render=lambda payload: None,
     )

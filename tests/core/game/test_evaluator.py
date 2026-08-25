@@ -70,7 +70,10 @@ class TestHandEvaluator:
 
         # Only 1 hole card
         with pytest.raises(ValueError, match="exactly 2 hole cards"):
-            evaluator.evaluate((Card.new("Ah"),), (Card.new("2c"), Card.new("7d"), Card.new("9h")))  # type: ignore[arg-type]
+            evaluator.evaluate(
+                (Card.new("Ah"),),  # ty: ignore[invalid-argument-type]
+                (Card.new("2c"), Card.new("7d"), Card.new("9h")),
+            )
 
     def test_compare_hands_hand1_wins(self):
         """Test comparing hands when hand1 is better."""

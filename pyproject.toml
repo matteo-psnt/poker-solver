@@ -170,11 +170,10 @@ dev = [
     "pytest>=9.0.2",
     "ruff>=0.16.4",
     # Pinned exactly: `ty` is pre-1.0 and moves fast enough that a lockfile
-    # refresh can swap the type gate underneath a commit. 0.0.74 exits 1 with 71
-    # diagnostics here -- about half of them lines that already carry a
-    # `# type: ignore[...]`, whose mypy codes are not `ty` rule names -- so the
-    # upgrade is a triage pass, not a version bump.
-    "ty==0.0.12",
+    # refresh can swap the type gate underneath a commit. Raising it is a triage
+    # pass rather than a version bump -- 0.0.12 -> 0.0.74 was 73 diagnostics --
+    # so it moves when someone means it to.
+    "ty==0.0.74",
     "pre-commit>=4.5.1",
     "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.67.0.20250809",

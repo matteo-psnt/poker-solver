@@ -33,10 +33,10 @@ class TestDefaultBehavior:
         cfg = Config()
 
         with pytest.raises(ValidationError):
-            cfg.training.num_iterations = 999
+            cfg.training.num_iterations = 999  # ty: ignore[invalid-assignment]
 
         with pytest.raises(ValidationError):
-            cfg.storage.initial_capacity = 999
+            cfg.storage.initial_capacity = 999  # ty: ignore[invalid-assignment]
 
 
 class TestMergeBehavior:
@@ -250,7 +250,7 @@ class TestValidation:
     def test_log_level_literal(self):
         """Invalid log_level should raise ValidationError."""
         with pytest.raises(ValidationError):
-            SystemConfig(log_level="VERBOSE")  # type: ignore[arg-type]
+            SystemConfig(log_level="VERBOSE")  # ty: ignore[invalid-argument-type]
 
     def test_log_level_valid_values(self):
         """All valid log levels should be accepted."""

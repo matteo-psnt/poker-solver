@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+import numpy.typing as npt
 
 from src.engine.solver.numba_ops import (
     WEIGHTING_CODES,
@@ -204,7 +205,14 @@ class InfoSet:
         self.legal_actions = legal_actions
         self.num_actions = len(legal_actions)
 
-        # CFR data structures
+        # CFR data structures. Declared as `floating` rather than left to be
+        # inferred from the allocation below, because the two are NOT the same
+        # width: a standalone infoset owns float64 arrays, while the static store
+        # attaches float32 VIEWS of its own rows (`REGRET_DTYPE`, half the
+        # footprint at a measured relative error). Both reach the kernels, which
+        # upcast; a reader who assumes float64 here is reading the rarer case.
+        self.regrets: npt.NDArray[np.floating]
+        self.strategy_sum: npt.NDArray[np.floating]
         if allocate_arrays:
             self.regrets = np.zeros(self.num_actions, dtype=np.float64)
             self.strategy_sum = np.zeros(self.num_actions, dtype=np.float64)

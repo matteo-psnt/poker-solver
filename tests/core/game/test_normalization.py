@@ -11,6 +11,13 @@ from src.core.game.actions import bet, call, check, raises
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 
+# These tests are about betting arithmetic and street transitions; the cards are
+# scenery. Real ones rather than strings all the same -- `GameState` declares
+# `Card`, `Card.new` is `lru_cache`d, and a fixture that lies about its types is
+# how a suppression comment ends up outliving the reason it was added.
+BOARD = (Card.new("Ah"), Card.new("Kh"), Card.new("Qh"))
+HOLE = ((Card.new("2c"), Card.new("3c")), (Card.new("4d"), Card.new("5d")))
+
 
 def _deal_board_to(state: GameState, board: list[Card], size: int) -> GameState:
     """Deal the board up to ``size`` cards, mirroring the traversal chance path
@@ -129,8 +136,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=150,  # After bet: 100 + 50
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -152,8 +159,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=275,  # Correct pot: 100 + 50 + 125 = 275
             stacks=(850, 775),  # Player 0: 900 - 50 = 850, Player 1: 900 - 125 = 775
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -174,8 +181,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=275,  # 100 + 50 + 125 = 275
             stacks=(850, 775),  # Player 0: 900 - 50, Player 1: 900 - 125
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -189,8 +196,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=550,  # 200 + 100 + 250 = 550
             stacks=(700, 550),  # Player 0: 800 - 100, Player 1: 800 - 250
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -218,8 +225,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=200,  # 100 + 50 + 50
             stacks=(900, 850),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=0,
             is_terminal=False,
@@ -238,8 +245,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=100,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -261,8 +268,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=280,  # 100 + 30 + 90 + 60 = 280
             stacks=(810, 810),  # Player 0: 900 - 30 - 60, Player 1: 900 - 90
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -288,8 +295,8 @@ class TestBettingNormalization:
             street=Street.FLOP,
             pot=325,  # 100 + 25 + 75 + 125 = 325
             stacks=(750, 825),  # P0: 900 - 25 - 125, P1: 900 - 75
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=0,
             is_terminal=False,

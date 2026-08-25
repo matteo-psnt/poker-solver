@@ -102,7 +102,9 @@ class TestHelpIsGrouped:
         """
         parser = headless.build_parser(["bogus"])
         with pytest.raises(argparse.ArgumentError) as caught:
-            parser._subparsers._group_actions[0](parser, argparse.Namespace(), "bogus")
+            parser._subparsers._group_actions[0](  # ty: ignore[unresolved-attribute]
+                parser, argparse.Namespace(), "bogus"
+            )
         assert "pool-status" in str(caught.value)
 
 

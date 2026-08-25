@@ -208,7 +208,7 @@ class TestActionAbstraction:
 
     def test_init_validation_errors(self):
         try:
-            ActionModel(config="bad")  # type: ignore[arg-type]
+            ActionModel(config="bad")  # ty: ignore[invalid-argument-type]
             raise AssertionError("Expected TypeError")
         except TypeError:
             pass

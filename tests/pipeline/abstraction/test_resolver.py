@@ -46,7 +46,7 @@ def test_resolves_abstraction_with_drifted_metadata(tmp_path):
     loaded = object()
     resolver = ComboAbstractionResolver(
         abstractions_dir=abstractions_dir,
-        loader=lambda path: loaded,
+        loader=lambda path: loaded,  # ty: ignore[invalid-argument-type]
     )
 
     result = resolver.load(abstraction_config="quick_test")
@@ -61,7 +61,7 @@ def test_missing_abstraction_still_raises(tmp_path):
 
     resolver = ComboAbstractionResolver(
         abstractions_dir=abstractions_dir,
-        loader=lambda path: object(),
+        loader=lambda path: object(),  # ty: ignore[invalid-argument-type]
     )
 
     with pytest.raises(FileNotFoundError):
@@ -104,7 +104,7 @@ def test_one_corrupt_directory_does_not_hide_the_others(tmp_path):
     loaded = object()
     resolver = ComboAbstractionResolver(
         abstractions_dir=abstractions_dir,
-        loader=lambda path: loaded,
+        loader=lambda path: loaded,  # ty: ignore[invalid-argument-type]
     )
 
     assert resolver.load(abstraction_config="quick_test") is loaded

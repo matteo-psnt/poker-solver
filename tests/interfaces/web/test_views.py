@@ -73,7 +73,9 @@ class TestOneScreenIsOneRequest:
     def test_now_keeps_every_running_task_and_the_recent_ten(self, monkeypatch):
         """Eleven of twenty-one running tasks had no progress bar: the part was
         cut to the last ten rows, and a running task is not necessarily recent."""
-        rows = [{"task_id": f"old-{i}", "ended_at": "2026-08-01"} for i in range(30)]
+        rows: list[dict[str, str | None]] = [
+            {"task_id": f"old-{i}", "ended_at": "2026-08-01"} for i in range(30)
+        ]
         rows += [{"task_id": f"live-{i}", "ended_at": None} for i in range(21)]
         rows += [{"task_id": f"done-{i}", "ended_at": "2026-08-22"} for i in range(10)]
 

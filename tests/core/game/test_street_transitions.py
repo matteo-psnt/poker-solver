@@ -9,6 +9,13 @@ from src.core.game.actions import bet, call, check, raises
 from src.core.game.rules import GameRules
 from src.core.game.state import Card, GameState, Street
 
+# These tests are about betting arithmetic and street transitions; the cards are
+# scenery. Real ones rather than strings all the same -- `GameState` declares
+# `Card`, `Card.new` is `lru_cache`d, and a fixture that lies about its types is
+# how a suppression comment ends up outliving the reason it was added.
+BOARD = (Card.new("Ah"), Card.new("Kh"), Card.new("Qh"))
+HOLE = ((Card.new("2c"), Card.new("3c")), (Card.new("4d"), Card.new("5d")))
+
 
 class TestStreetTransitions:
     """Test street advancement logic."""
@@ -21,8 +28,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,  # Out of position acts first
             is_terminal=False,
@@ -45,8 +52,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -70,8 +77,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -99,8 +106,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -121,8 +128,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(900, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,
@@ -167,8 +174,8 @@ class TestStreetTransitions:
             street=Street.FLOP,
             pot=200,
             stacks=(850, 900),
-            board=("Ah", "Kh", "Qh"),  # type: ignore[arg-type]
-            hole_cards=(("2c", "3c"), ("4d", "5d")),  # type: ignore[arg-type]
+            board=BOARD,
+            hole_cards=HOLE,
             button_position=0,
             current_player=1,
             is_terminal=False,

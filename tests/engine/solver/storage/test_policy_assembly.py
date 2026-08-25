@@ -245,7 +245,10 @@ def test_gamma_reweighting_survives_production_magnitudes(tree, tmp_path):
     assemble_policy(fresh, tmp_path, avg_gamma=0.0, source_gamma=2.0, loaded_iteration=rungs[-1])
 
     coefficients = _window_coefficients(list(rungs), 0.0, 2.0)
-    expected = sum(c * band for c, band in zip(coefficients, bands, strict=True))
+    expected = sum(
+        (c * band for c, band in zip(coefficients, bands, strict=True)),
+        np.zeros_like(bands[0]),
+    )
     # Row-normalised at read time, so only the ratio within a row matters.
     for node_id in range(len(tree)):
         for bucket in range(int(tree.buckets_per_node[node_id])):

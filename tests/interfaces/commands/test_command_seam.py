@@ -64,7 +64,9 @@ def _placeholder(action: argparse.Action) -> Any:
     """
     if action.choices:
         return next(iter(action.choices))
-    return action.type("1") if callable(action.type) else "x"
+    # `Action.type` is `Callable[[str], Any] | None`, which `callable()` narrows
+    # for a reader but not into a signature.
+    return action.type("1") if callable(action.type) else "x"  # ty: ignore[call-top-callable]
 
 
 class TestInvokeBuildsArgumentsFromTheParser:
