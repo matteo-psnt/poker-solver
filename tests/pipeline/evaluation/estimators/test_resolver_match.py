@@ -28,6 +28,23 @@ def _build_solver(iterations: int) -> StaticTreeSolver:
     return build_trained_test_solver(iterations)
 
 
+# How many CFR iterations one resolver decision gets. See
+# `TestParallelDealsAreTheSameExperiment` for why it is a count and not a clock.
+RESOLVER_ITERATIONS = 200
+
+
+def _pinned_solver(
+    iterations: int, resolver_iterations: int = RESOLVER_ITERATIONS
+) -> StaticTreeSolver:
+    """A blueprint whose resolver stops on an iteration count, not a stopwatch.
+
+    Module-level so the worker processes can pickle it as a factory. The depth
+    is an argument because only the reproducibility test needs a solve worth
+    comparing; a structural test wants it cheap.
+    """
+    return build_trained_test_solver(iterations, **{"resolver.max_iterations": resolver_iterations})
+
+
 class TestDuplicateDealing:
     """Board cards must come off fixed deck positions, street by street."""
 
@@ -80,25 +97,35 @@ class TestParallelDealsAreTheSameExperiment:
     """
 
     DEALS = 4
-    BUDGET_MS = 20
     SEED = 5
+    # The budget is an ITERATION count, not a clock. Under `time_budget_ms` the
+    # parallel arm -- three processes on the same cores -- gets through fewer
+    # solve iterations than the serial one in the same 20ms, and lands on a
+    # different `resolver_decisions`. Every SCORE still matched exactly, so the
+    # test failed about once in three on the one number that measured how busy
+    # the machine was. `resolver.py` names this as the way out: "pass
+    # `config.max_iterations` to remove the wall-clock variability".
+    #
+    # The clock is left far above the iteration cost on purpose, so it is never
+    # the binding constraint and cannot creep back in as the flake.
+    BUDGET_MS = 60_000
 
     @pytest.mark.slow
     @pytest.mark.timeout(180)
     def test_three_workers_reproduce_the_serial_numbers_exactly(self):
         serial = play_resolver_match(
-            _build_solver(3),
+            _pinned_solver(3),
             num_deals=self.DEALS,
             time_budget_ms=self.BUDGET_MS,
             seed=self.SEED,
         )
         parallel = play_resolver_match(
-            _build_solver(3),
+            _pinned_solver(3),
             num_deals=self.DEALS,
             time_budget_ms=self.BUDGET_MS,
             seed=self.SEED,
             workers=3,
-            blueprint_factory=functools.partial(build_trained_test_solver, 3),
+            blueprint_factory=functools.partial(_pinned_solver, 3),
         )
 
         assert parallel.pair_samples_mbb == serial.pair_samples_mbb
@@ -112,7 +139,11 @@ class TestParallelDealsAreTheSameExperiment:
     def test_without_a_factory_it_stays_serial_rather_than_failing(self):
         """`workers` alone cannot split: a solver cannot cross a process boundary."""
         result = play_resolver_match(
-            _build_solver(3),
+            # Pinned like its neighbour, and shallow: `BUDGET_MS` is a ceiling
+            # the iteration count reaches first, so an unpinned resolver would
+            # sit under it for the full minute. Nothing here reads a number --
+            # the claim is that eight workers without a factory stay serial.
+            _pinned_solver(3, resolver_iterations=5),
             num_deals=self.DEALS,
             time_budget_ms=self.BUDGET_MS,
             seed=self.SEED,
