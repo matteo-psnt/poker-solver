@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from src.engine.solver.storage.static_array import StaticArrayStorage
+    from src.shared.config.schema import SolverConfig
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,19 @@ PolicyIterate = Literal["average", "current"]
 # no window evidence shrinks back toward the average, which is the honest
 # answer where the window has nothing to say.
 WINDOW_SHRINKAGE = 1e-3
+
+
+def source_gamma_of(solver: SolverConfig) -> float:
+    """The exponent a run actually weighted its ``strategy_sum`` contributions by.
+
+    ``iteration_weighting`` decides it, not ``dcfr_gamma``: a linear run adds
+    `t^1` and never reads the gamma field, so reweighting a linear run from
+    gamma=2 would be correcting an exponent it never used. The PCS flagship is
+    a linear run.
+    """
+    if solver.iteration_weighting == "dcfr":
+        return float(solver.dcfr_gamma)
+    return 1.0 if solver.iteration_weighting == "linear" else 0.0
 
 
 def assemble_policy(
@@ -170,4 +184,4 @@ def _accumulate(
     storage.strategy_sum += np.float32(weight) * read_strategy_sum(storage, checkpoint_dir, rung)
 
 
-__all__ = ("WINDOW_SHRINKAGE", "PolicyIterate", "assemble_policy")
+__all__ = ("WINDOW_SHRINKAGE", "PolicyIterate", "assemble_policy", "source_gamma_of")

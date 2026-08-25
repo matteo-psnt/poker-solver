@@ -20,7 +20,11 @@ from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.protocols import BucketingStrategy
-from src.engine.solver.storage.policy_assembly import PolicyIterate, assemble_policy
+from src.engine.solver.storage.policy_assembly import (
+    PolicyIterate,
+    assemble_policy,
+    source_gamma_of,
+)
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
@@ -108,7 +112,7 @@ def build_static_evaluation_solver(
         iterate=policy_iterate,
         window_from=avg_window_from,
         avg_gamma=avg_gamma,
-        source_gamma=config.solver.dcfr_gamma,
+        source_gamma=source_gamma_of(config.solver),
         loaded_iteration=loaded,
     )
     solver = StaticTreeSolver(action_model, card_abstraction, storage, config, tree=tree)

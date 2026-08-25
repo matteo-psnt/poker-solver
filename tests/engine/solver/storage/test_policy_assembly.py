@@ -25,6 +25,7 @@ from src.engine.solver.storage.policy_assembly import (
     WINDOW_SHRINKAGE,
     _window_coefficients,
     assemble_policy,
+    source_gamma_of,
 )
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import (
@@ -32,6 +33,7 @@ from src.engine.solver.storage.static_checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+from src.shared.config.schema import SolverConfig
 from tests.test_helpers import make_test_config
 
 BUCKETS = {Street.FLOP: 3, Street.TURN: 3, Street.RIVER: 4}
@@ -253,3 +255,15 @@ def test_gamma_reweighting_survives_production_magnitudes(tree, tmp_path):
                 expected[start:stop] / expected[start:stop].sum(),
                 rtol=1e-4,
             )
+
+
+@pytest.mark.parametrize(
+    ("weighting", "gamma", "expected"),
+    [("dcfr", 2.0, 2.0), ("dcfr", 1.0, 1.0), ("linear", 2.0, 1.0), ("none", 2.0, 0.0)],
+)
+def test_the_source_exponent_follows_the_weighting_not_the_gamma_field(weighting, gamma, expected):
+    """A linear run adds `t^1` and never reads `dcfr_gamma`; reweighting it as
+    if it were gamma=2 would correct an exponent it never used. The PCS
+    flagship is a linear run, so this is the reachable case, not a hypothetical."""
+    solver = SolverConfig(iteration_weighting=weighting, dcfr_gamma=gamma)
+    assert source_gamma_of(solver) == expected
