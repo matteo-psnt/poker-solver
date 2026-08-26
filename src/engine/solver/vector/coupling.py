@@ -47,7 +47,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import sparse
-from sklearn.cluster import KMeans
 
 from src.core.game.state import Street
 from src.engine.solver.vector.bucket_game import STREET_STEPS
@@ -164,6 +163,13 @@ def _partition(embedding: np.ndarray, classes: int, seed: int) -> np.ndarray:
         return np.zeros(embedding.shape[0], dtype=np.int64)
     if classes >= embedding.shape[0]:
         return np.arange(embedding.shape[0], dtype=np.int64)
+    # DEFERRED, and it is 790 ms. `sklearn.cluster` is the single heaviest
+    # import in the tree, and `pipeline.services` reaches this module through
+    # `pcs_training` -- so every CLI command that touched services paid it,
+    # including read-only ones that never cluster anything. `runinfo` spent
+    # more time importing sklearn than talking to either store.
+    from sklearn.cluster import KMeans  # noqa: PLC0415 -- see above
+
     fitted = KMeans(n_clusters=classes, n_init=4, random_state=seed).fit(embedding)
     return np.asarray(fitted.labels_, dtype=np.int64)
 

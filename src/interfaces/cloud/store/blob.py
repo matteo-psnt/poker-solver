@@ -253,14 +253,11 @@ def _client(config: Any, run_id: str, object_name: str) -> Any:
     has the account key and the SDK, so it goes direct. Both halves exist
     because since rungs live in the container, questions about a rung -- does it
     exist, how big is it, delete it -- are asked on both sides of a dispatch.
-    """
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
 
-    service = BlobServiceClient(
-        account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
-    )
-    return service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
+    Through the SHARED container client: these are the per-rung questions, asked
+    in a loop, and a client each meant a TLS handshake each.
+    """
+    return _container(config, CONTAINER).get_blob_client(f"{run_id}/{object_name}")
 
 
 def read_task_log(config: Any, task_id: str) -> str | None:
@@ -372,15 +369,35 @@ def published_record(config: Any) -> dict[str, dict[str, Any]]:
     return found
 
 
-def _container(config: Any, name: str) -> Any:
-    """A container client. The SDK is imported here and nowhere at module scope:
-    `blob` is reached from the node's closure, which has no Azure SDK."""
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+# One client per (account, container), for the life of the process.
+#
+# A NEW CLIENT IS A NEW TLS HANDSHAKE. Measured against this account from a
+# laptop: the same HEAD is 523ms on a fresh client and 113ms once a connection
+# is pooled -- 410ms of handshake, and the storage region is a continent away.
+# Every one of these functions built its own, so `prune-checkpoints` asking
+# about one rung at a time paid it per rung: a 91-rung sweep is ~37s of
+# handshake before a single byte moves.
+#
+# Keyed without the credential because `CloudConfig.load()` is itself cached per
+# process, so the key cannot go stale under a live key rotation.
+_CONTAINERS: dict[tuple[str, str], Any] = {}
 
-    return BlobServiceClient(
-        account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
-    ).get_container_client(name)
+
+def _container(config: Any, name: str) -> Any:
+    """A container client, reusing this process's connection to the account.
+
+    The SDK is imported here and nowhere at module scope: `blob` is reachable
+    from the node's closure, which has no Azure SDK.
+    """
+    key = (config.storage_account, name)
+    if key not in _CONTAINERS:
+        from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+        _CONTAINERS[key] = BlobServiceClient(
+            account_url=f"https://{config.storage_account}.blob.core.windows.net",
+            credential=config.share_key,
+        ).get_container_client(name)
+    return _CONTAINERS[key]
 
 
 def published_run_ids(config: Any) -> list[str]:

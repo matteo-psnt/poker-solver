@@ -248,7 +248,7 @@ def parse_overrides(pairs: list[str]) -> dict[str, Any]:
 
 
 @contextmanager
-def records_root(args: argparse.Namespace) -> Iterator[Path]:
+def records_root(args: argparse.Namespace, *, run: str | None = None) -> Iterator[Path]:
     """The published record, materialised into a temporary tree.
 
     Every reader answers against the share, because the share is the only place
@@ -267,7 +267,10 @@ def records_root(args: argparse.Namespace) -> Iterator[Path]:
         share_records,
     )
 
-    with share_records(run=getattr(args, "run", None) or None) as root:
+    # `run` overrides for a command whose flag is not spelled `--run` into
+    # `args.run`: a scoped pull is one prefix listing and one manifest against
+    # 331 manifest downloads, which is no longer a rounding error.
+    with share_records(run=run or getattr(args, "run", None) or None) as root:
         yield root
 
 

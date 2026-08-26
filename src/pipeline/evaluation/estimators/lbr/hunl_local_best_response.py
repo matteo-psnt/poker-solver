@@ -75,7 +75,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy import stats
 from tqdm import tqdm
 
 from src.core.game.actions import Action, ActionType
@@ -673,6 +672,11 @@ def compute_lbr_exploitability(
     se_mbb = chips_to_mbb(se, big_blind)
     # t-multiplier with n-1 df, matching the sibling evaluators' summarize_samples;
     # a fixed z=1.96 understates the interval at the small hand counts LBR often runs.
+    # DEFERRED: `scipy.stats` is 334 ms to import and this is its only use in
+    # the module, while `pipeline.services` pulls the module in for every CLI
+    # command -- a reader paid it to compute nothing.
+    from scipy import stats  # noqa: PLC0415 -- see above
+
     t_mult = float(stats.t.ppf(0.975, len(samples) - 1)) if len(samples) >= 2 else 0.0
     return LBRResult(
         exploitability_mbb=exploitability_mbb,

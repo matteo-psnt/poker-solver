@@ -61,8 +61,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--run",
         # `dest` is NOT `run`: `records_root` reads `args.run` to scope its pull
-        # to ONE run, and a repeatable flag hands it a list. The whole record is
-        # cheap to materialise and this filters it locally.
+        # to ONE run, and a repeatable flag hands it a list. `run()` scopes the
+        # pull itself when exactly one is named -- the whole record was cheap to
+        # materialise when this was written and is now 331 manifest downloads.
         dest="runs",
         action="append",
         default=None,
@@ -179,7 +180,11 @@ def run(args: argparse.Namespace) -> PrunePlan:
     engine = connect.engine_from_environment()
     scored_by_run = queries.scored_rungs(engine)
     plan = PrunePlan(applied=bool(args.apply))
-    with records_root(args) as root:
+    # ONE named run scopes the pull; several still filter a whole-record tree,
+    # because the alternative is a listing per run against a store in another
+    # country.
+    scoped = args.runs[0] if args.runs and len(args.runs) == 1 else None
+    with records_root(args, run=scoped) as root:
         wanted = (
             [resolve_run_dir(name, str(root)) for name in args.runs]
             if args.runs
