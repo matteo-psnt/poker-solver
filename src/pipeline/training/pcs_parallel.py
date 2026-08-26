@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
     from src.engine.solver.betting_tree import BettingTree
     from src.engine.solver.protocols import BucketingStrategy
+    from src.engine.solver.vector.compiled_tree import CompiledTree
     from src.engine.solver.vector.hand_context import HandContext
     from src.shared.config import Config
 
@@ -139,8 +140,7 @@ def trunk_arrays(config: Config, tree: BettingTree) -> dict[str, int]:
 
 
 def worker_bytes(
-    tree: BettingTree,
-    num_terminals: int,
+    compiled: CompiledTree,
     *,
     br_streets: str = "off",
     runouts: int = 1,
@@ -149,14 +149,26 @@ def worker_bytes(
 ) -> int:
     """Private bytes one worker allocates, from the tree's shape.
 
+    Takes the COMPILED tree, not a `(tree, num_terminals)` pair: the pair could
+    come from two different compilations, and the level offsets the frontier
+    ring is sized from live here anyway.
+
     ``kernels`` is 1 whenever the driver can rebind a single kernel per runout,
     which is what keeps ``runouts_per_flop`` above 1 affordable. A LEGAL TURN
     best response cannot: its maximisation is joint over the runouts sharing the
     turn, so their values must exist together and the scratch multiplies.
     """
+    tree = compiled.tree
+    num_terminals = compiled.num_terminals
     item = np.dtype(DTYPE).itemsize
     per_hand = 4 * LIVE_HANDS * item
-    scratch = kernels * (len(tree) + num_terminals) * per_hand  # reach, value, both players
+    # Nodes are a two-slot RING holding one level each, not the whole tree --
+    # `VectorCFR` allocates `(2 ring, 2 seats, widest level, hands)` for reach
+    # and again for value. At 200 bb that is 1.33 GB where the tree-wide
+    # allocation was 2.81. Terminals are still tree-wide: `terminal_value` is
+    # written in the forward half and read in the backward half, so one of that
+    # pair has to survive the whole walk.
+    scratch = kernels * (2 * compiled.widest_level + num_terminals) * per_hand
     cache = kernels * tree.num_slots * item  # bucket-space strategy cache
     temporaries = 6 * MAX_BLOCK_ELEMENTS * item  # one chunk's blocks
     picks = 0
@@ -185,8 +197,7 @@ def node_memory_bytes() -> int:
 
 
 def ram_safe_workers(
-    tree: BettingTree,
-    num_terminals: int,
+    compiled: CompiledTree,
     *,
     shared_bytes: int,
     memory: int | None = None,
@@ -204,8 +215,7 @@ def ram_safe_workers(
     total = node_memory_bytes() if memory is None else memory
     available = total - shared_bytes - max(NODE_HEADROOM_BYTES, int(NODE_HEADROOM_FRACTION * total))
     per_worker = worker_bytes(
-        tree,
-        num_terminals,
+        compiled,
         br_streets=br_streets,
         runouts=runouts,
         kernels=kernels,
