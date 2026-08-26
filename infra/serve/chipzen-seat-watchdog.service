@@ -1,0 +1,8 @@
+[Unit]
+Description=Check the Chipzen seat is still receiving on its socket
+# No OnFailure: the watchdog failing is a lost probe, not a reason to touch
+# anything. It restarts the seat by running systemctl, never by dying.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/chipzen-seat-watchdog

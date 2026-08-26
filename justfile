@@ -100,6 +100,39 @@ serve-destroy:
     {{tfv}} destroy
 
 # --------------------------------------------------------------------------- #
+# the chipzen seat
+# --------------------------------------------------------------------------- #
+# Seating is a DELIBERATE act, which is why `serve-deploy` installs the unit and
+# stops. `enable` is the half that matters: an unsupervised seat died at 04:2x on
+# 08-25 and nothing noticed for 26 hours, and every match dispatched in that
+# window met an empty chair.
+
+# Put Blueprint on the ladder, and keep it there across a crash or a reboot.
+seat-on:
+    ssh solver@$({{tfv}} output -raw public_ip) \
+        'sudo systemctl enable --now chipzen-seat chipzen-seat-watchdog.timer && \
+         sleep 12 && systemctl is-active chipzen-seat && \
+         journalctl -u chipzen-seat -n 15 --no-pager'
+
+# Take it off the ladder. Stops the watchdog too, so it does not put it back.
+seat-off:
+    ssh solver@$({{tfv}} output -raw public_ip) \
+        'sudo systemctl disable --now chipzen-seat chipzen-seat-watchdog.timer'
+
+# A live process on a dead socket looks identical from `ps`, so this asks the
+# only question that separates them: is the socket still receiving?
+seat-status:
+    ssh solver@$({{tfv}} output -raw public_ip) \
+        'systemctl is-enabled chipzen-seat; systemctl is-active chipzen-seat; \
+         sudo ss -tnpi state established "( dport = :443 )" | grep -E "lastrcv|ESTAB"; \
+         systemctl list-timers chipzen-seat-watchdog.timer --no-pager'
+
+# Follow the seat. Matches log at their boundaries, so silence is the norm.
+seat-log:
+    ssh -t solver@$({{tfv}} output -raw public_ip) \
+        'journalctl -u chipzen-seat -n 100 -f'
+
+# --------------------------------------------------------------------------- #
 # emergency
 # --------------------------------------------------------------------------- #
 

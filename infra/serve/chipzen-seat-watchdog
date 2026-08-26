@@ -1,0 +1,60 @@
+#!/bin/bash
+# Restart the seat when its socket is dead but its process is not.
+#
+# `Restart=always` only ever sees an exit. The failure it cannot see is the one
+# that matters here: the seat alive, the lobby WebSocket silently gone, and the
+# platform dispatching matches into a connection nobody is reading. Liveness for
+# this service is LAST BYTE RECEIVED, not "the pid exists".
+#
+# Runs as root from chipzen-seat-watchdog.timer; every path out is exit 0 so a
+# probe that cannot decide never reads as a failure.
+set -uo pipefail
+
+# The SDK answers a lobby ping every 15 s, so a healthy socket is never quiet
+# for more than that plus jitter. 180 s is twelve missed pings -- far outside
+# normal, and by then any match in progress is lost anyway.
+SILENT_MS=${SILENT_MS:-180000}
+# Loading the blueprint and dialling the lobby takes ~10 s, during which there
+# is legitimately no socket. Judging inside that window would restart the seat
+# for the crime of starting up.
+GRACE_S=${GRACE_S:-120}
+
+UNIT=chipzen-seat.service
+
+systemctl is-active --quiet "$UNIT" || exit 0
+
+active_us=$(systemctl show -p ActiveEnterTimestampMonotonic --value "$UNIT")
+now_us=$(( $(cut -d' ' -f1 /proc/uptime | tr -d '.') * 10000 ))
+[ "${active_us:-0}" -gt 0 ] || exit 0
+[ $(( (now_us - active_us) / 1000000 )) -ge "$GRACE_S" ] || exit 0
+
+# The unit's whole cgroup, not MainPID: `uv run` is the main process and its
+# python CHILD is what holds the socket.
+procs=/sys/fs/cgroup/system.slice/$UNIT/cgroup.procs
+[ -r "$procs" ] || exit 0
+pids="|$(tr '\n' '|' < "$procs")"
+
+# The lobby and an in-progress match are both TLS to the same host, so take the
+# freshest of whatever the seat holds -- one live socket is proof it is talking.
+freshest=""
+while read -r pid ms; do
+    case "$pids" in *"|$pid|"*) ;; *) continue ;; esac
+    if [ -z "$freshest" ] || [ "$ms" -lt "$freshest" ]; then
+        freshest=$ms
+    fi
+done < <(ss -tnpi state established '( dport = :443 )' 2>/dev/null | awk '
+    match($0, /pid=[0-9]+/) { pid = substr($0, RSTART + 4, RLENGTH - 4); next }
+    pid != "" && match($0, /lastrcv:[0-9]+/) {
+        print pid, substr($0, RSTART + 8, RLENGTH - 8)
+        pid = ""
+    }')
+
+if [ -z "$freshest" ]; then
+    echo "seat holds no established socket to :443 -- restarting"
+elif [ "$freshest" -gt "$SILENT_MS" ]; then
+    echo "seat silent for ${freshest} ms (limit ${SILENT_MS}) -- restarting"
+else
+    exit 0
+fi
+
+systemctl restart "$UNIT"

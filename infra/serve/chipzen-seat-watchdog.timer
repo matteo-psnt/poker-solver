@@ -1,0 +1,12 @@
+[Unit]
+Description=Probe the Chipzen seat's socket every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+# The probe is nearly free and the thing it guards is a ladder slot, so it runs
+# on the minute rather than being spread out.
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
