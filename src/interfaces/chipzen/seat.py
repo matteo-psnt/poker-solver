@@ -56,13 +56,17 @@ logger = logging.getLogger(__name__)
 # worst (+795), 9000 ms ran 9380 ms worst (+380). So the headroom to keep is a
 # constant, not a percentage, and a fraction alone wastes most of a long clock.
 #
-# Compute is not the constraint here, so take nearly all of the clock: 90% of it
-# less the overshoot allowance. That is 26.2 s of a 30 s casual clock and 1.0 s
-# of a 2 s tournament one. Whether more resolver time actually plays better is
-# NOT measured -- the -527 mbb/hand that justifies arming it at all was taken
-# near the shipped 300 ms.
+# Compute is cheap, but the CLOCK is not compute -- overrunning it forfeits. At
+# 90% the seat took 27 s of a 30 s clock on every decision, ran 42 hands, then
+# lost the socket and was refused on reconnect (403) with the match abandoned.
+# Nine seconds per decision had completed a match cleanly the run before, so
+# half the clock is a correction back toward the setting that demonstrably
+# worked while still buying ~1.6x that thinking time.
+#
+# Whether more resolver time plays better is STILL not measured: the
+# -527 mbb/hand justifying the resolver was taken near its shipped 300 ms.
 TIGHT_CLOCK_MS = 2000
-CLOCK_FRACTION = 0.90
+CLOCK_FRACTION = 0.50
 OVERSHOOT_ALLOWANCE_MS = 800
 
 # What a fixed default costs when nothing says otherwise. Assumes the TIGHT

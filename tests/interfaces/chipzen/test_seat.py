@@ -111,12 +111,12 @@ class TestBudget:
         the SDK ever sends, so pinning it made this test assert nothing."""
         relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
         built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
-        assert built.budget_ms == 26_200
+        assert built.budget_ms == 14_200
 
     def test_an_unstated_clock_assumes_the_tight_one(self, blueprint):
         """`decision_timeout_ms` is absent on exactly the fast-clock matches."""
         built = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, use_resolver=False)
-        assert built.budget_ms == 1000
+        assert built.budget_ms == 200
 
     def test_an_explicit_budget_wins(self, blueprint):
         relaxed = {**MATCH_INFO, "turn_timeout_ms": 30_000}
@@ -127,7 +127,7 @@ class TestBudget:
 
     @pytest.mark.parametrize(
         ("clock", "expected"),
-        [(2000, 1000), (30_000, 26_200), (None, 1000), (0, 1000), (100, 50)],
+        [(2000, 200), (30_000, 14_200), (None, 200), (0, 200), (100, 50)],
     )
     def test_the_rule_across_clocks(self, clock, expected):
         assert budget_for(clock) == expected
@@ -136,9 +136,15 @@ class TestBudget:
         """Budget plus the measured additive overshoot must fit the clock."""
         assert budget_for(None) + OVERSHOOT_ALLOWANCE_MS <= TIGHT_CLOCK_MS * CLOCK_FRACTION
 
-    def test_a_long_clock_is_nearly_all_used(self):
-        """Compute is not the constraint; leaving 70% of a 30 s clock idle was."""
-        assert budget_for(30_000) > 25_000
+    def test_a_long_clock_buys_real_thinking_time(self):
+        """Much more than the shipped 300 ms, without eating the clock."""
+        assert budget_for(30_000) > 10_000
+
+    @pytest.mark.parametrize("clock", [2000, 5000, 30_000])
+    def test_the_worst_case_never_exceeds_half_the_clock(self, clock):
+        """At 90% the seat took 27 s of a 30 s clock and lost the match on a
+        refused reconnect. The margin is the point, not the leftover."""
+        assert budget_for(clock) + OVERSHOOT_ALLOWANCE_MS <= clock * 0.5
 
 
 class TestEffectiveDepth:
@@ -283,7 +289,7 @@ class TestWarmUp:
             built = BlueprintSeat.for_match(blueprint, relaxed, seat=0, use_resolver=False)
 
         assert seen == [WARM_BUDGET_MS], "the warm decision must not use the match budget"
-        assert built.budget_ms == 26_200, "and the match budget must survive it"
+        assert built.budget_ms == 14_200, "and the match budget must survive it"
 
     def test_a_seat_arrives_already_warm(self, blueprint, caplog):
         with caplog.at_level(logging.INFO, logger="src.interfaces.chipzen.seat"):

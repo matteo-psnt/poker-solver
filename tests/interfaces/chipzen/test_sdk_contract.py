@@ -161,7 +161,7 @@ class TestTheMatchStartFrame:
         from src.interfaces.chipzen.seat import _self_seat, budget_for
 
         assert _self_seat(match_start) == 0
-        assert budget_for(match_start["turn_timeout_ms"]) == 3700
+        assert budget_for(match_start["turn_timeout_ms"]) == 1700
 
 
 class TestRunExternalBot:

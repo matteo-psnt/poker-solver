@@ -59,12 +59,25 @@ echo "==> run $RUN_ID"
 # --------------------------------------------------------------------------- #
 # code
 # --------------------------------------------------------------------------- #
-# The newest snapshot. Snapshot names sort lexicographically by timestamp, which
-# is what makes `tail -1` the newest rather than merely the last listed.
-snapshot=$(find "$SHARE/code" -maxdepth 1 -name '*.tar.gz' | sort | tail -1)
-if [ -z "$snapshot" ]; then
-    echo "No code snapshot on the share. Run: poker-solver push-code" >&2
-    exit 1
+# $CODE pins a snapshot; without it, the newest. Names sort lexicographically by
+# timestamp, which is what makes `tail -1` the newest rather than merely last.
+#
+# PIN IT when it matters. The share is shared: three other sessions pushed
+# snapshots within 15 seconds of one here, so "newest" deployed somebody else's
+# tree and the box came up without the package this deploy existed to ship.
+# `push-code` echoes the id to pass back in.
+if [ -n "${CODE:-}" ]; then
+    snapshot="$SHARE/code/${CODE%.tar.gz}.tar.gz"
+    if [ ! -f "$snapshot" ]; then
+        echo "No snapshot '$CODE' on the share." >&2
+        exit 1
+    fi
+else
+    snapshot=$(find "$SHARE/code" -maxdepth 1 -name '*.tar.gz' | sort | tail -1)
+    if [ -z "$snapshot" ]; then
+        echo "No code snapshot on the share. Run: poker-solver push-code" >&2
+        exit 1
+    fi
 fi
 echo "==> code $(basename "$snapshot")"
 
