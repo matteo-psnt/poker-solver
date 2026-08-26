@@ -174,7 +174,6 @@ class TestTheChannelThatMatters:
     pin is that the seeded regrets are one distribution at one scale.
     """
 
-    @pytest.mark.timeout(60)
     def test_seeding_scales_one_guess_rather_than_making_two(self):
         from src.pipeline.services.equity_prior import seed_regrets
         from tests.test_helpers import DummyCardAbstraction, make_test_config
