@@ -1,0 +1,20 @@
+# CONTROL arm for the raise-gear experiment: production's action menu, with the
+# sampler and BR width that measured best on the gate (`river-r4`, 748.6 mbb
+# thresholded). Trained fresh at THIS commit so the treatment has a matched
+# partner -- the treatment changes the tree fingerprint, so exact_br cannot
+# compare the two and only a head-to-head duel can, which needs both arms to
+# differ in exactly one thing.
+#
+# A config file rather than `--set` flags on purpose: `--set` is DROPPED on
+# resume, and a multi-task run that silently reverts to the defaults halfway
+# measures nothing.
+
+extends: production.yaml
+
+pcs:
+  cfr_br: river
+  runout_mode: turn
+  runouts_per_flop: 4
+
+system:
+  config_name: "production_r4river"

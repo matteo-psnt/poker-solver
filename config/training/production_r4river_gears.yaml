@@ -1,0 +1,25 @@
+# TREATMENT arm: production plus ONE intermediate raise gear when facing a bet.
+#
+# `facing_bet` jumped from `min_raise` (raise by the call) straight to
+# `pot_raise`, which at any real depth is a jam in all but name -- so "raise as
+# a semi-bluff" and "ship it" were the same button. MEASURED over 504 live
+# matches: this seat commits its whole stack on 12.76% of hands against the
+# field's 3.61%, for a THINNER edge per shot (+1.41 vs +1.87 bb). A float token
+# is a pot-FRACTION raise, so 0.5 is the missing gear.
+#
+# ONE variable moves. `after_one_raise` and `after_two_raises` keep their
+# menus -- including jam-only after two raises -- so a result is attributable.
+#
+# The ACTION hash changes deliberately: this is a new tree and a new lineage,
+# 81,518 -> 154,370 nodes and 45.5M -> 87.1M rows (1.89x). That is affordable
+# because the CFR-BR plateau is RUNG-indexed, not visit-indexed -- the 200 bb
+# tree is 2.0x the 100 bb one and both flatten at ~4,000 rungs.
+
+extends: production_r4river.yaml
+
+action_model:
+  postflop_templates:
+    facing_bet: ["min_raise", 0.5, "pot_raise", "jam"]
+
+system:
+  config_name: "production_r4river_gears"
