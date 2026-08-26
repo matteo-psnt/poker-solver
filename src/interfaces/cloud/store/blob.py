@@ -414,6 +414,26 @@ def rungs_for(config: Any, run_id: str) -> set[str]:
     }
 
 
+def published_record_for(config: Any, run_id: str) -> dict[str, dict[str, Any]]:
+    """One run's record, in the shape :func:`published_record` returns.
+
+    A reader scoped to a run was downloading all 331 manifests to keep one --
+    `runinfo --run X` measured 7.9s, of which ~6.7s was manifests it discarded.
+    One prefix listing and one GET is the same answer.
+    """
+    container = _container(config, CONTAINER)
+    entry: dict[str, Any] = {"rungs": set(), "manifest": None}
+    for name in container.list_blob_names(name_starts_with=f"{run_id}/"):
+        leaf = name.partition("/")[2]
+        if not leaf:
+            continue
+        if leaf == records.STATIC_CHECKPOINT:
+            entry["manifest"] = container.download_blob(name).readall()
+        else:
+            entry["rungs"].add(leaf)
+    return {run_id: entry}
+
+
 def published_rungs(config: Any) -> dict[str, set[str]]:
     """Every rung the container holds, as `{run_id: {object name}}`.
 

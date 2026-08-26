@@ -42,6 +42,10 @@ _PARALLEL_DOWNLOADS = 64
 # file beside the run directories is invisible to them.
 _ETAGS_NAME = "records.etags"
 
+# Every run id a node publishes starts with this; a reader's `--run` that does
+# not is a fragment, and resolving one needs the whole id list.
+RUN_ID_PREFIX = "run-"
+
 
 def pull_metadata(
     destination: Path,
@@ -354,8 +358,35 @@ def _link(source: Path, destination: Path) -> None:
 
 
 def _materialise(root: Path, *, run: str | None, previous: Path | None = None) -> None:  # noqa: ARG001 -- `previous` is the console's cache handle, kept while it still passes one
-    """Pull the published record into ``root``."""
-    pull_metadata(root, blob.published_record(CloudConfig.load()), run=run)
+    """Pull the published record into ``root``.
+
+    SCOPED WHEN IT CAN BE. A reader asking about one run pulled every run's
+    manifest and threw 330 of them away; resolving the fragment needs only the
+    id list, which is a delimiter walk. The unscoped path is the console's,
+    where the whole tree answers every panel.
+    """
+    config = CloudConfig.load()
+    if run is None:
+        pull_metadata(root, blob.published_record(config))
+        return
+    # A FULL id needs no id list at all: the prefix either matches objects or it
+    # does not. Gated on the SHAPE rather than tried speculatively, because a
+    # FRAGMENT is what a person types -- `ctl-30m`, `15261` -- and making the
+    # typed case pay a failed listing to speed up the scripted one is backwards.
+    if run.startswith(RUN_ID_PREFIX):
+        exact = blob.published_record_for(config, run)
+        if exact[run]["manifest"] is not None or exact[run]["rungs"]:
+            pull_metadata(root, exact)
+            return
+    # Matched HERE so the refusals stay identical -- both name what is
+    # published, and `pull_metadata` cannot do it from a one-run record.
+    published = blob.published_run_ids(config)
+    matches = run_names.matching(run, published)
+    if len(matches) > 1:
+        raise CommandError(run_names.ambiguous_message(run, matches))
+    if not matches:
+        raise CommandError(run_names.unknown_message(run, published))
+    pull_metadata(root, blob.published_record_for(config, matches[0]))
 
 
 def _require_published(root: Path, run: str) -> None:
