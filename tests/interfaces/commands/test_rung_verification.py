@@ -39,7 +39,11 @@ def container_holding(monkeypatch):
                 lambda cls: SimpleNamespace(storage_account="a", share_name="s", share_key="k")
             ),
         )
-        monkeypatch.setattr(blob, "published_rungs", lambda config: {RUN: set(names)})
+        # BY PREFIX: the gate asks about ONE run, and used to page through
+        # every other run's rungs to find it.
+        monkeypatch.setattr(
+            blob, "rungs_for", lambda config, run_id: set(names) if run_id == RUN else set()
+        )
         return workspace
 
     return _install

@@ -97,14 +97,17 @@ def resolve_published_run(run: str) -> str:
     matcher. Unresolved, `score --run 15261` cost a snapshot upload, a node
     allocation and three retries before failing "no such run".
 
-    Resolved against the CONTAINER's own listing, because that is the store a
-    node will fetch from. Asking the share instead is what made every run
-    invisible to dispatch the moment the snapshots stopped landing there: the
-    listing went empty and `score --run` refused a run whose rungs were all
-    present, a gate reading the store that no longer answers.
+    Resolved against the CONTAINER, because that is the store a node will fetch
+    from. Asking the share instead is what made every run invisible to dispatch
+    the moment the snapshots stopped landing there: the listing went empty and
+    `score --run` refused a run whose rungs were all present, a gate reading the
+    store that no longer answers.
+
+    A DELIMITER walk, so resolving a name costs 332 prefixes rather than all
+    1,695 objects -- 0.27s against 2.40s.
     """
     config = CloudConfig.load()
-    published = sorted(blob.published_rungs(config))
+    published = blob.published_run_ids(config)
     matches = run_names.matching(run, published)
     if len(matches) > 1:
         raise CommandError(run_names.ambiguous_message(run, matches))
@@ -132,7 +135,9 @@ def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
     if not wanted:
         return
     config = CloudConfig.load()
-    held = blob.published_rungs(config).get(run_id, set())
+    # BY PREFIX. This asked for every run's rungs and kept one run's: 0.23s
+    # against 2.40s, paid on every `score --at` before anything is dispatched.
+    held = blob.rungs_for(config, run_id)
     published = {
         name.removeprefix("static-").removesuffix(records.SNAPSHOT_SUFFIX): name for name in held
     }
