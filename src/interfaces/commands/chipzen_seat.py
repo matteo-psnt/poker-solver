@@ -307,15 +307,22 @@ def _build_blueprint(
     for the fall-through action, and a transform applied at one call site would
     reach one of the three.
     """
+    from src.adapters.postgres import connect  # noqa: PLC0415 -- see above
     from src.engine.solver.policy.threshold import (  # noqa: PLC0415 -- see module docstring
         apply_policy_threshold,
     )
+    from src.pipeline.services.runs import load_run_metadata  # noqa: PLC0415 -- see above
     from src.pipeline.services.scoring._shared import (  # noqa: PLC0415 -- see above
         build_blueprint_for,
     )
-    from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
-    metadata = RunTracker.load(run_dir).metadata
+    # ASK THE RECORD, not just the directory. Once the run log stopped being
+    # published, a staged run is its manifest and its checkpoints and nothing
+    # that says what they are -- `RunTracker.load(run_dir)` alone raises
+    # `No run record in ...` for every run published since. That is not an edge
+    # case: it is every future blueprint, and it silently limits the seat to
+    # runs old enough to carry a legacy `run.jsonl`.
+    metadata = load_run_metadata(run_dir, connect.record_source_from_environment())
     solver, storage, _policy = build_blueprint_for(
         run_dir,
         metadata,
