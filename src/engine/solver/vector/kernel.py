@@ -38,7 +38,7 @@ Values carried:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
@@ -59,6 +59,24 @@ NUM_CARDS = 52
 MAX_BLOCK_ELEMENTS = 8_000_000
 
 DTYPE = np.float32
+
+
+class OpponentStrategy(Protocol):
+    """A strategy substituted for one player at its own nodes, in both passes.
+
+    ``block`` returns ``(array, per_hand)``: a ``(n, B, A)`` bucket strategy, or
+    with ``per_hand`` a ``(n, H)`` array of chosen action indices -- what a best
+    response is, since it sees its exact holding and so mixes nothing. Indices
+    rather than a one-hot because the cache is held for a whole forward pass: at
+    production settings a one-hot would cost 1.8x the bucket block it replaces
+    on 93% of the table, the indices 1/16th of it. ``position`` counts
+    ``(group, chunk)`` pairs in forward order, so a backward pass that recorded
+    something can find it again.
+    """
+
+    player: int
+
+    def block(self, group: NodeGroup, chunk: slice, position: int) -> tuple[np.ndarray, bool]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +116,13 @@ def child_targets(
     return compiled.edge_target[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
 
 
+def regret_match(block: np.ndarray, uniform: np.floating) -> np.ndarray:
+    """Positive-regret normalisation over the last axis, ``uniform`` where nothing is positive."""
+    positive = np.maximum(block, 0.0)
+    total = positive.sum(axis=-1, keepdims=True)
+    return np.where(total > 0, positive / np.where(total > 0, total, 1.0), uniform)
+
+
 def strategy_block(
     source: np.ndarray, compiled: CompiledTree, group: NodeGroup, chunk: slice, uniform: np.floating
 ) -> np.ndarray:
@@ -105,10 +130,7 @@ def strategy_block(
     num_actions = group.num_actions
     num_buckets = compiled.tree.num_buckets(group.street)
     block = source[slot_index(compiled, group, chunk)].reshape(-1, num_buckets, num_actions)
-
-    positive = np.maximum(block, 0.0)
-    total = positive.sum(axis=-1, keepdims=True)
-    return np.where(total > 0, positive / np.where(total > 0, total, 1.0), uniform)
+    return regret_match(block, uniform)
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +232,11 @@ class VectorCFR:
         self.terminal_reach = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
         self.terminal_value = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
 
-        self.strategy_cache: list[np.ndarray] = []
+        # (array, per_hand): a bucket block, or pure per-hand action indices.
+        # Only a substituted opponent produces the latter.
+        self.strategy_cache: list[tuple[np.ndarray, bool]] = []
+        # A CFR-BR opponent, substituted into both passes at its own nodes.
+        self.opponent: OpponentStrategy | None = None
         # When set, regret increments land here instead of in ``regrets`` and the
         # CFR+ floor is the caller's business. See ``_scatter_to_buckets``.
         self.regret_target: np.ndarray | None = None
@@ -301,16 +327,29 @@ class VectorCFR:
             buckets = self.context.buckets_for(group.street)
             for chunk in self.chunks(group):
                 nodes = group.node_ids[chunk]
-                bucket_strategy = self._strategy_block(group, chunk, use_average=use_average)
-                self.strategy_cache.append(bucket_strategy)
-                strategy = bucket_strategy[:, buckets, :]
+                position = len(self.strategy_cache)
+                if self.opponent is not None and actor == self.opponent.player:
+                    bucket_strategy, per_hand = self.opponent.block(group, chunk, position)
+                else:
+                    bucket_strategy = self._strategy_block(group, chunk, use_average=use_average)
+                    per_hand = False
+                self.strategy_cache.append((bucket_strategy, per_hand))
                 targets, is_terminal = self.child_targets(group, chunk)
 
-                actor_reach = self.reach[actor, nodes][:, :, None] * strategy
+                own_reach = self.reach[actor, nodes]
+                if per_hand:
+                    actor_reach = np.zeros((*own_reach.shape, group.num_actions), dtype=DTYPE)
+                    np.put_along_axis(
+                        actor_reach,
+                        bucket_strategy.astype(np.int64)[:, :, None],
+                        own_reach[:, :, None],
+                        2,
+                    )
+                else:
+                    actor_reach = own_reach[:, :, None] * bucket_strategy[:, buckets, :]
+                    if not use_average:
+                        self._accumulate_strategy_sum(group, chunk, bucket_strategy)
                 other_reach = self.reach[other, nodes]
-
-                if not use_average:
-                    self._accumulate_strategy_sum(group, chunk, bucket_strategy)
 
                 for action in range(group.num_actions):
                     target = targets[:, action]
@@ -418,13 +457,18 @@ class VectorCFR:
 
             for chunk in reversed(self.chunks(group)):
                 nodes = group.node_ids[chunk]
-                strategy = next(cached)[:, buckets, :]
+                block, per_hand = next(cached)
                 targets, is_terminal = self.child_targets(group, chunk)
 
                 actor_children = self.gather_children(targets, is_terminal, actor)
                 other_children = self.gather_children(targets, is_terminal, other)
 
-                actor_value = (strategy * actor_children).sum(axis=-1)
+                if per_hand:
+                    actor_value = np.take_along_axis(
+                        actor_children, block.astype(np.int64)[:, :, None], axis=2
+                    )[:, :, 0]
+                else:
+                    actor_value = (block[:, buckets, :] * actor_children).sum(axis=-1)
                 self.value[actor, nodes] = actor_value
                 self.value[other, nodes] = other_children.sum(axis=-1)
 
@@ -657,7 +701,10 @@ __all__: Sequence[str] = (
     "MAX_BLOCK_ELEMENTS",
     "BucketSegments",
     "NodeGroup",
+    "OpponentStrategy",
     "VectorCFR",
     "build_groups",
     "build_segments",
+    "regret_match",
+    "slot_index",
 )
