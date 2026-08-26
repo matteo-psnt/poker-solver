@@ -115,7 +115,8 @@ serve-ssh:
 serve-deploy run code="" at="" rungs="":
     ssh solver@$({{tfv}} output -raw public_ip) \
         "CODE={{code}} AT={{at}} RUNGS={{rungs}} bash -s" \
-        -- {{run}} "$({{tfs}} output -raw postgres_dsn)" < infra/serve/deploy.sh
+        -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
+           "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.
