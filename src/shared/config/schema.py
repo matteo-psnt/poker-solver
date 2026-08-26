@@ -365,6 +365,12 @@ class PcsConfig(StrictFrozenModel):
     # with the runout in hand. `turn_river`/`postflop` are ablations that price
     # exactly that. Costs ~3 tree passes an iteration instead of one.
     cfr_br: Literal["off", "river", "turn_river", "postflop"] = Field(default="off")
+    # Which chance event the runouts share. `flop` re-draws turn and river, so
+    # every turn is alone in its partition and a turn best response would read
+    # an undealt river. `turn` shares the turn too, which is what makes a turn
+    # BR legal -- at the cost of holding one kernel per runout, since the joint
+    # maximisation needs their values at the same time.
+    runout_mode: Literal["flop", "turn"] = Field(default="flop")
 
 
 # ---------------------------------------------------------------------------

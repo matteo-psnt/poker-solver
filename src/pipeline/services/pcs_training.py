@@ -141,6 +141,18 @@ def train_pcs(
             "seat at a time against that seat's own best-responding opponent, and alternating "
             "on top of it would halve each seat's updates for nothing."
         )
+    if config.pcs.runout_mode == "turn" and config.pcs.runouts_per_flop < 2:
+        raise ValueError(
+            "pcs.runout_mode='turn' shares one turn across the iteration's runouts so a turn "
+            "best response can maximise over them; with runouts_per_flop=1 there is nothing to "
+            "maximise over and the sampler is just a slower way to draw one board."
+        )
+    if config.pcs.cfr_br in ("turn_river", "postflop") and config.pcs.runout_mode != "turn":
+        raise ValueError(
+            f"pcs.cfr_br={config.pcs.cfr_br!r} best-responds on the turn, but "
+            "pcs.runout_mode='flop' gives every runout its own turn -- the argmax would read a "
+            "river that has not been dealt. Set pcs__runout_mode=turn, or use cfr_br=river."
+        )
     extra = pcs_parallel.trunk_arrays(config, tree)
     shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1) + 4 * sum(extra.values())
     safe = pcs_parallel.ram_safe_workers(
@@ -159,6 +171,7 @@ def train_pcs(
             compiled.num_terminals,
             br_streets=config.pcs.cfr_br,
             runouts=config.pcs.runouts_per_flop,
+            kernels=config.pcs.runouts_per_flop if config.pcs.runout_mode == "turn" else 1,
         )
         / 1e9,
         config.pcs.runouts_per_flop,
