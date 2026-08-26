@@ -40,6 +40,7 @@ from src.interfaces.errors import CommandError
 from src.interfaces.gtowizard import agents, session
 from src.interfaces.gtowizard.client import DEFAULT_VERSION, KEY_ENV, BenchmarkClient
 from src.interfaces.gtowizard.protocol import GAME_NAME
+from src.shared.cloudtask.node.paths import NodePaths
 
 if TYPE_CHECKING:
     import argparse
@@ -81,8 +82,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", default=None, help="Run id, fragment, or path (blueprint only).")
     parser.add_argument(
         "--runs-dir",
-        default="/mnt/work/runs",
-        help="Where runs live on this box. Local disk, never the share.",
+        default=str(NodePaths.from_environment().runs),
+        help="Where runs live on this box; the node's own runs directory by default.",
     )
     parser.add_argument(
         "--at", type=int, default=None, help="Seat the checkpoint at this iteration."

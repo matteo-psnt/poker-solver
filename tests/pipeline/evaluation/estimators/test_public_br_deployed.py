@@ -2,6 +2,14 @@
 
 The estimator's value is that it is a best response to a FIXED strategy and
 that two runs agree bit for bit. Both are easy to lose here, so both are pinned.
+
+Every walk here runs a resolver, which makes these the slowest tests in the fast
+gate: MEASURED serially on an idle machine, 39.4s, 31.1s and 15s twice. Against
+the 60s default that leaves the slowest 1.5x of headroom, and `-n auto` then
+runs it beside eleven competing workers -- so the timeout fired on whichever of
+them lost the CPU race, a different one each time. The explicit timeouts below
+are that measurement plus room for a loaded machine, NOT an assertion about
+speed.
 """
 
 from __future__ import annotations
@@ -36,12 +44,14 @@ def _score(solver, *, deployed: bool) -> float:
     return walker.evaluate().exploitability_mbb
 
 
+@pytest.mark.timeout(300)
 class TestTheResolverIsActuallyMeasured:
     def test_deployed_differs_from_the_blueprint(self, solver):
         """A resolver that never ran would return the blueprint's own number."""
         assert _score(solver, deployed=True) != _score(solver, deployed=False)
 
 
+@pytest.mark.timeout(300)
 class TestTheNumberIsReproducible:
     """Zero evaluation variance is what makes two checkpoints exactly paired.
 
@@ -109,6 +119,7 @@ class TestTheLedgerCanTellTheArmsApart:
         assert other != deployed
 
 
+@pytest.mark.timeout(300)
 class TestTheResolverCacheIsBounded:
     """Keyed by (context, BOARD), the resolver cache grows with the walk instead
     of saturating like the blueprint's per-context table -- and the fork-join's

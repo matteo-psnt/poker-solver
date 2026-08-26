@@ -31,6 +31,7 @@ from src.interfaces.chipzen.seat import (
 )
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
+from src.shared.cloudtask.node.paths import NodePaths
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ BOT_ENV = "CHIPZEN_BOT_ID"
 # Where `infra/serve/deploy.sh` actually puts a staged run -- it writes
 # `RUNS_DIR=$WORK/data/runs` into /etc/blueprint.env, and the `data` directory is
 # a symlink the deploy makes because the abstraction resolver scans `<cwd>/data`.
-# `blueprint-serve` defaults to /mnt/work/runs and gets away with it only because
-# systemd passes RUNS_DIR explicitly; nothing passes it to this command.
-BOX_RUNS_DIR = "/mnt/work/data/runs"
+# From the node's own paths, not a fourth copy of the string: `benchmark` and
+# `blueprint-serve` each carried one that had lost its `data/` component.
+BOX_RUNS_DIR = str(NodePaths.from_environment().runs)
 # Their names, not ours -- the SDK resolves exactly these three and "production"
 # is not one of them.
 #
