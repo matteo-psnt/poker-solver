@@ -1,0 +1,19 @@
+#!/bin/bash
+# May this box switch itself off? Exit 0 yes, 1 no.
+#
+# The reader's idle timer asks "has anyone opened the console lately", which says
+# nothing about the seat. A box holding a Chipzen ladder slot must not deallocate
+# because nobody read a strategy for half an hour: the seat's whole job is to be
+# there when a match is dispatched, and no amount of `Restart=always` brings a
+# service back on a machine that is powered down.
+#
+# Consulted by BOTH routes to `deallocate-box` -- `deallocate-if-idle` on the
+# clean idle exit, and `blueprint-deallocate.service` on the OnFailure path,
+# which is independent and would otherwise never see this check.
+#
+# `just seat-off` is how you give the box permission to sleep again.
+if systemctl is-enabled --quiet chipzen-seat 2>/dev/null; then
+    echo "the chipzen seat is enabled -- this box stays up"
+    exit 1
+fi
+exit 0
