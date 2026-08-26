@@ -20,6 +20,8 @@ import threading
 import time
 from typing import IO, TYPE_CHECKING
 
+from src.shared.cloudtask.node import profile
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -119,6 +121,7 @@ def run_guarded(
     timeout: int,
     log: TaskLogger,
     stdout_to: Path | None = None,
+    profile_dir: Path | None = None,
 ) -> int:
     """Run a subprocess under a wall-clock ceiling, teeing its output.
 
@@ -129,6 +132,11 @@ def run_guarded(
 
     ``stdout_to`` captures stdout to a file instead of teeing it, for the one
     command whose stdout is a JSON payload rather than a log.
+
+    ``profile_dir`` arms the sampling profiler: this is where the child's pid
+    lives, and an operator asks for a profile by dropping a file there. Off
+    unless a caller passes one, and see :mod:`.profile` for why nothing it does
+    can fail the task.
     """
     sink = stdout_to.open("wb") if stdout_to else None
     try:
@@ -164,6 +172,12 @@ def run_guarded(
         daemon=True,
     )
     pump.start()
+    profiler = None
+    if profile_dir is not None:
+        with contextlib.suppress(Exception):
+            _, profiler = profile.watcher(
+                process.pid, profile_dir, os.environ.get("AZ_BATCH_TASK_ID", "local"), log
+            )
     timed_out = False
     try:
         try:
@@ -178,6 +192,8 @@ def run_guarded(
         _terminate(process)
         raise
     finally:
+        if profiler is not None:
+            profiler.set()
         pump.join(timeout=GRACE_SECONDS)
         if sink:
             sink.close()
