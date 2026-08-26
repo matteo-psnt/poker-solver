@@ -23,6 +23,7 @@ from src.interfaces.chipzen.seat import (
     BlueprintSeat,
     budget_for,
     sdk_state_payload,
+    surface_sdk_logs,
 )
 from tests.interfaces.chipzen.test_adapter import (
     BB,
@@ -145,6 +146,47 @@ class TestBudget:
         """At 90% the seat took 27 s of a 30 s clock and lost the match on a
         refused reconnect. The margin is the point, not the leftover."""
         assert budget_for(clock) + OVERSHOOT_ALLOWANCE_MS <= clock * 0.5
+
+
+class TestSdkLogsAreVisible:
+    """A disconnect must diagnose itself rather than be inferred an hour later.
+
+    A 42-hand match ended with `reconnect budget exhausted (...)` and nothing
+    else, because `configure_logging` cuts propagation on the `src` logger and
+    `chipzen`'s records fell through to Python's last-resort handler at WARNING.
+    The three `reconnecting in Xs (attempt N/3; REASON)` lines that carry the
+    close reason were dropped, so `closed without match_end` and a websocket
+    exception were indistinguishable from the outside.
+    """
+
+    def test_the_sdk_logger_is_lowered_to_our_level(self):
+        surface_sdk_logs(logging.INFO)
+        assert logging.getLogger("chipzen").level == logging.INFO
+
+    def test_an_info_record_from_the_sdk_survives(self, caplog):
+        """WARNING already got through; INFO is the one that was being lost."""
+        surface_sdk_logs(logging.INFO)
+        with caplog.at_level(logging.INFO, logger="chipzen"):
+            logging.getLogger("chipzen").info(
+                "reconnecting in 1.0s (attempt 1/3; closed without match_end)"
+            )
+        assert "closed without match_end" in caplog.text
+
+    def test_our_handler_is_borrowed_when_there_is_one(self):
+        """On the box `configure_logging` has run, so records go to our stream."""
+        ours = logging.getLogger("src")
+        theirs = logging.getLogger("chipzen")
+        added = logging.NullHandler()
+        ours.addHandler(added)
+        theirs.handlers.clear()
+        try:
+            surface_sdk_logs(logging.INFO)
+            assert added in theirs.handlers
+            assert theirs.propagate is False, "borrowed, so it must not double-print"
+        finally:
+            ours.removeHandler(added)
+            theirs.handlers.clear()
+            theirs.propagate = True
 
 
 class TestEffectiveDepth:
