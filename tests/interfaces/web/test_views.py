@@ -234,6 +234,26 @@ class TestOverHttp:
         assert [row["task_id"] for row in first["run_tasks"]] == ["t1", "t3"]
         assert [row["task_id"] for row in second["run_tasks"]] == ["t2"]
 
+    def test_two_views_sharing_a_part_answer_it_once(self, client, answers):
+        """`tasks` is in all three views, and it is a 15,684-row read and a 0.94s
+        join. The fan-out used to call commands DIRECTLY, so it re-ran every
+        part the server was already caching -- clicking through runs paid for
+        the same task log each time while `/api/tasks` served it from memo."""
+        client.get("/api/view/run/run-a")
+        before = list(answers)
+        client.get("/api/view/run/run-b")
+        fresh = [name for name, _ in answers[len(before) :]]
+        assert "tasks" not in fresh, f"a shared part was answered twice: {fresh}"
+
+    def test_a_parameterised_endpoint_keeps_its_own_entry(self, client, answers):
+        """NOT a missed optimisation. `/api/tasks?limit=N` is a different
+        question from the view's unparameterised part, and they are keyed on the
+        arguments precisely so one cannot answer for the other."""
+        client.get("/api/view/now")
+        before = len(answers)
+        client.get("/api/tasks?limit=5")
+        assert len(answers) == before + 1
+
     def test_a_repeat_request_is_served_from_the_memo(self, client, answers):
         client.get("/api/view/now")
         before = len(answers)

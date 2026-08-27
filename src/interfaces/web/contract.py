@@ -142,6 +142,9 @@ class Part[T](Payload):
 
     payload: T | None = None
     error: str | None = None
+    elapsed_seconds: float = 0.0
+    """What THIS part cost. The fan-out is only as fast as its slowest part, and
+    the view's own total cannot say which one that is."""
 
 
 class View(Payload):
@@ -151,7 +154,7 @@ class View(Payload):
     at: str
     elapsed_seconds: float
     """Wall clock of the whole fan-out. Equal to the sum of its parts means the
-    concurrency has silently become serial."""
+    concurrency has silently become serial; equal to the MAX of them is healthy."""
 
 
 class NowParts(Payload):

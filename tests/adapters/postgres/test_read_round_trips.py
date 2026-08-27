@@ -24,7 +24,7 @@ def _widest_screen(monkeypatch) -> int:
     """
     seen: list[int] = []
 
-    def _record(_op, parts, join=None):
+    def _record(_op, parts, join=None, invoke=None):
         seen.append(len(parts))
         return {"parts": {part.key: {} for part in parts}}
 

@@ -1404,6 +1404,11 @@ export interface components {
         Outcome: "done" | "failed" | "timed out" | "cancelled";
         /** Part[CurvePayload] */
         Part_CurvePayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["CurvePayload"] | null;
@@ -1412,6 +1417,11 @@ export interface components {
         };
         /** Part[JobsPayload] */
         Part_JobsPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["JobsPayload"] | null;
@@ -1420,6 +1430,11 @@ export interface components {
         };
         /** Part[LedgerPayload] */
         Part_LedgerPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["LedgerPayload"] | null;
@@ -1428,6 +1443,11 @@ export interface components {
         };
         /** Part[PoolPayload] */
         Part_PoolPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["PoolPayload"] | null;
@@ -1436,6 +1456,11 @@ export interface components {
         };
         /** Part[ProgressPayload] */
         Part_ProgressPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["ProgressPayload"] | null;
@@ -1444,6 +1469,11 @@ export interface components {
         };
         /** Part[RunInfoPayload] */
         Part_RunInfoPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["RunInfoPayload"] | null;
@@ -1452,6 +1482,11 @@ export interface components {
         };
         /** Part[RunsPayload] */
         Part_RunsPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["RunsPayload"] | null;
@@ -1460,6 +1495,11 @@ export interface components {
         };
         /** Part[TasksPayload] */
         Part_TasksPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["TasksPayload"] | null;
@@ -1468,6 +1508,11 @@ export interface components {
         };
         /** Part[TasksSummary] */
         Part_TasksSummary_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["TasksSummary"] | null;

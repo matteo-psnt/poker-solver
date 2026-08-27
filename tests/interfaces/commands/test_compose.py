@@ -54,7 +54,10 @@ def _part(name: str, command: Command, **arguments: Any) -> Part:
 class TestOnePartCannotTakeOutTheOthers:
     def test_a_command_error_becomes_an_unavailable_part(self):
         answered = fan_out([_part("tasks", _raising("tasks", CommandError("share unreachable")))])
-        assert answered["tasks"] == {"payload": None, "error": "share unreachable"}
+        failed = answered["tasks"]
+        assert failed["payload"] is None
+        assert failed["error"] == "share unreachable"
+        assert "elapsed_seconds" in failed, "a failed part still says what it cost"
 
     def test_an_expired_login_reads_as_itself(self):
         """The single most likely failure. It must name the fix, not just fail."""
