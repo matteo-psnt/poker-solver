@@ -5,33 +5,34 @@ rest of that script is deployment and none of it changes when you only want to
 look at a different run; separating them turns a three-minute SSH round trip
 into an in-process load.
 
-Copied rather than served off the share, because the share is SMB and a
-checkpoint is ~5,500 small files the read path mmaps -- every page fault would
-be a network round trip.
+**FETCHING IS GONE, and this only answers from local disk now.** It used to
+copy one rung off the SMB share; the share holds nothing since the move to blob
+(`infra/serve/deploy.sh`, measured 09-10: `/mnt/shared` mounts EMPTY). A reader
+kept against it does not fail, it answers "no published run" about a run that is
+published -- the confident-and-wrong answer that deploy script exists to refuse.
 
-ONE checkpoint, not the run directory. A published run holds its whole ladder at
-~850 MB and ~5,500 files per rung, so copying the directory moves ~127 GB in
-400,000 files to load one of them -- about six hours at the box's measured 950
-files/min. The manifest is read first and exactly one rung is staged: the head,
-or the one `at_iteration` names. That is what makes `at` worth having.
+So `/api/load` can switch to a run the box already holds and says plainly what
+is missing otherwise. Restoring the fetch means pulling `<run>/` out of the
+`checkpoints` container the way `deploy.sh` does, which is real work and is NOT
+what this module does today.
 
-The abstraction is NOT copied either. It is ~773 MB and shared by every run
-trained against it, so the common case is that the box already holds the right
-one. When it does not, `build_card_abstraction` raises against the local
-directory and the server reports that, rather than silently pulling most of a
-gigabyte over SMB while a caller waits on an HTTP request.
+ONE checkpoint, not the run directory -- the shape that survives. A published
+run holds its whole ladder at ~850 MB and ~5,500 files per rung, so a directory
+copy moves ~127 GB in 400,000 files to load one of them. The manifest names the
+rung; `at_iteration` picks it.
+
+The abstraction is separate and is not staged here either: ~773 MB shared by
+every run trained against it, so the box normally holds the right one already,
+and `build_card_abstraction` raises against the local directory when it does not.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-#: Where the durable store is mounted on the blueprint box, read-only. Matches
-#: `infra/serve/main.tf`'s `mnt-shared.mount`, which the unit already waits for.
-DEFAULT_SHARE = Path("/mnt/shared")
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: The manifest naming the head checkpoint and the rungs kept beside it. Its
 #: presence is also what marks a directory as a run this solver can load.
@@ -49,66 +50,34 @@ def stage_run(
     run: str,
     *,
     runs_dir: Path,
-    share: Path = DEFAULT_SHARE,
     at_iteration: int | None = None,
 ) -> Path:
     """Make ``run`` loadable under ``runs_dir`` and return its directory.
 
-    Staged means "the manifest, the run log and ONE checkpoint are here" -- not
-    "the published directory has been mirrored". A run already carrying the
-    checkpoint being asked for is served from disk without touching the share at
-    all, which is both the fast path and the only path that works on a laptop
-    with nothing mounted.
+    Staged means "the manifest, the run log and ONE checkpoint are here". That
+    is a question about local disk and nothing else -- see the module docstring
+    for why the fetch went away with the share.
     """
     local = runs_dir / run
     manifest = _read(local / MANIFEST)
-
-    # Already here, with the rung being asked for? Nothing to do.
-    if manifest is not None:
-        wanted = _checkpoint(manifest, at_iteration)
-        if wanted and _complete(local, wanted):
-            return local
-
-    published = share / "archive" / run
-    if not published.is_dir():
-        # Named separately from "not on the share", because a box with no share
-        # mounted and a genuinely unknown run are different problems.
-        if not share.is_dir():
-            raise StagingError(
-                f"'{run}' is not on local disk and the share is not mounted at {share}, "
-                "so there is nowhere to fetch it from."
-            )
-        raise StagingError(f"No published run '{run}' under {share / 'archive'}.")
-
-    published_manifest = _read(published / MANIFEST)
-    if published_manifest is None:
+    if manifest is None:
         raise StagingError(
-            f"'{run}' has no {MANIFEST}, so it is not a run this solver can load. "
-            "Checkpoints from the retired dynamic backend are unreadable at HEAD "
-            "by design."
+            f"'{run}' is not on this box. Runs live in the `checkpoints` container "
+            "now, and nothing here fetches from it -- stage it with "
+            "`just serve-deploy <run>`, which pulls the rung and restarts the server."
         )
 
-    zarr = _checkpoint(published_manifest, at_iteration)
-    if zarr is None:
-        rungs = ", ".join(str(rung) for rung in _iterations(published_manifest)) or "none"
+    wanted = _checkpoint(manifest, at_iteration)
+    if wanted is None:
+        rungs = ", ".join(str(rung) for rung in _iterations(manifest)) or "none"
         raise StagingError(
             f"'{run}' has no checkpoint at iteration {at_iteration}. It has: {rungs}."
         )
-
-    local.mkdir(parents=True, exist_ok=True)
-    try:
-        # The two small files first: a manifest present beside an absent
-        # checkpoint would make the fast path above claim a run is staged when
-        # the expensive half never arrived.
-        _copy_tree(published / zarr, local / zarr)
-        _marker(published, local, zarr)
-        _copy_file(published / RUN_LOG, local / RUN_LOG)
-        _copy_file(published / MANIFEST, local / MANIFEST)
-    except OSError as error:
-        raise StagingError(f"Could not copy '{run}' from the share: {error}") from error
-
-    if not _complete(local, zarr):
-        raise StagingError(f"'{run}' staged, but {zarr} did not arrive complete.")
+    if not _complete(local, wanted):
+        raise StagingError(
+            f"'{run}' has {wanted} listed but not complete on disk. Re-stage it with "
+            "`just serve-deploy <run>`; a half-copied rung fails deep in the loader."
+        )
     return local
 
 
@@ -153,40 +122,3 @@ def _complete(run_dir: Path, zarr: str) -> bool:
     attempt.
     """
     return (run_dir / zarr).is_dir() and (run_dir / f".complete-{zarr}").is_file()
-
-
-def _marker(source: Path, target: Path, zarr: str) -> None:
-    """Copy the completion sentinel, if the publisher wrote one."""
-    sentinel = source / f".complete-{zarr}"
-    if sentinel.is_file():
-        _copy_file(sentinel, target / f".complete-{zarr}")
-
-
-def _copy_file(source: Path, target: Path) -> None:
-    """One file, skipped when the local copy already matches."""
-    if not source.is_file():
-        return
-    if target.is_file():
-        here, there = target.stat(), source.stat()
-        if here.st_size == there.st_size and here.st_mtime >= there.st_mtime:
-            return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-
-
-def _copy_tree(source: Path, target: Path) -> None:
-    """`cp -ru`, which is what `deploy.sh` has always used, and for good reason.
-
-    A blind `copytree` re-reads every file on every attempt. Over SMB, where
-    per-file overhead dominates, that is the difference between a resumed copy
-    finishing in seconds and one starting over -- and an interrupted stage is the
-    normal case, being what a caller who lost patience and clicked again leaves
-    behind. Size-and-mtime rather than content is sound because a published run
-    is immutable once archived.
-    """
-    for entry in source.rglob("*"):
-        destination = target / entry.relative_to(source)
-        if entry.is_dir():
-            destination.mkdir(parents=True, exist_ok=True)
-        else:
-            _copy_file(entry, destination)
