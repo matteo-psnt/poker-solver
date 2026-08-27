@@ -193,7 +193,7 @@ def run_guarded(
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            log(f"TIMEOUT after {timeout}s -- guard fired; published rungs are on the share")
+            log(f"TIMEOUT after {timeout}s -- guard fired; published rungs are in the store")
             terminate(process)
     except Killed:
         # The wrapper itself was signalled. Take the child down with it, then

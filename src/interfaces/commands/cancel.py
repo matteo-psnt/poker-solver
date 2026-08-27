@@ -49,7 +49,7 @@ def run(args: argparse.Namespace) -> CancelledPayload:
 
 def render(payload: CancelledPayload) -> None:
     print(f"Terminated {payload.task_id} in {payload.job_id}.")
-    print("  Partial progress up to the last retained rung is published on the share.")
+    print("  Partial progress up to the last retained rung is published to the store.")
 
 
 COMMAND = Command(
