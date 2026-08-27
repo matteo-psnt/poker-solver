@@ -125,6 +125,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Play a single match and exit, rather than holding the seat.",
     )
+    parser.add_argument(
+        "--no-seek",
+        action="store_true",
+        help="Hold the lobby but never join the matchmaking queue, so the seat "
+        "plays only matches someone else starts. The default JOINS: their SDK "
+        "never does, and a bot that only waits measured zero matches in nine "
+        "hours connected.",
+    )
 
 
 class ChipzenSeatPayload(BaseModel):
@@ -143,6 +151,8 @@ class ChipzenSeatPayload(BaseModel):
     env: str | None = None
     bot_id: str | None = None
     once: bool = False
+    seek: bool = True
+    """Whether to ask for matches. False is an explicit `--no-seek`."""
     # Replay only.
     decision: dict[str, Any] | None = None
     depth_matches: bool | None = None
@@ -188,6 +198,7 @@ def run(args: argparse.Namespace) -> ChipzenSeatPayload:
         env=args.env,
         bot_id=bot_id,
         once=args.once,
+        seek=not args.no_seek,
     )
 
 
@@ -303,6 +314,7 @@ def _play(payload: ChipzenSeatPayload) -> None:
         use_resolver=payload.resolver,
         budget_ms=payload.budget_ms,
         max_matches=1 if payload.once else None,
+        seek_matches=payload.seek,
     )
 
 
