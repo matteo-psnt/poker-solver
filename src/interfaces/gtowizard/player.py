@@ -113,7 +113,8 @@ class BlueprintPlayer:
             # while offering only fold and call; sending a bet there is a 4xx,
             # and a 4xx mid-hand abandons a hand that would have been scored.
             return _passive(turn, off_tree=spot.off_tree)
-        return Move(BET, wire_amount(chosen, turn, frame.game, spot), off_tree=spot.off_tree)
+        sent, clamped = wire_amount(chosen, turn, frame.game, spot)
+        return Move(BET, sent, off_tree=spot.off_tree, clamped=clamped)
 
 
 def _passive(turn: Turn, *, off_tree: int = 0, truncated: bool = False) -> Move:

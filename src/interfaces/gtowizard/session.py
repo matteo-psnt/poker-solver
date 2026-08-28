@@ -74,6 +74,7 @@ class HandRecord:
     decisions: int
     off_tree: int = 0
     truncated: bool = False
+    clamped: int = 0
 
     def as_json(self) -> str:
         return json.dumps(
@@ -85,6 +86,7 @@ class HandRecord:
                 "decisions": self.decisions,
                 "off_tree": self.off_tree,
                 "truncated": self.truncated,
+                "clamped": self.clamped,
             }
         )
 
@@ -131,6 +133,17 @@ class Tally:
         return 100.0 * statistics.fmean(self._per_hand_bb("winnings"))
 
     @property
+    def clamp_rate(self) -> float:
+        """Our own bets per hand that their raise range moved.
+
+        A clamp is a size the strategy did not choose, so a run carrying many of
+        them is not measuring the strategy that was fielded.
+        """
+        if not self.hands:
+            return 0.0
+        return statistics.fmean(hand.clamped for hand in self.hands)
+
+    @property
     def off_tree_rate(self) -> float:
         """Opponent actions per hand that had to be snapped onto our tree."""
         if not self.hands:
@@ -151,6 +164,7 @@ def play_hand(client: Server, agent: Agent, *, game_name: str = GAME_NAME) -> Ha
     frame = client.new_hand(game_name)
     decisions = 0
     off_tree = 0
+    clamped = 0
     truncated = False
     while not frame.turn.is_hand_over:
         if decisions >= MAX_DECISIONS_PER_HAND:
@@ -172,6 +186,7 @@ def play_hand(client: Server, agent: Agent, *, game_name: str = GAME_NAME) -> Ha
         frame = client.act(frame.hand_id, move.action, amount)
         decisions += 1
         off_tree += move.off_tree
+        clamped += int(move.clamped)
         truncated = truncated or move.truncated
     turn = frame.turn
     if turn.winnings is None or turn.aivat_score is None:
@@ -183,6 +198,7 @@ def play_hand(client: Server, agent: Agent, *, game_name: str = GAME_NAME) -> Ha
         aivat=turn.aivat_score,
         decisions=decisions,
         off_tree=off_tree,
+        clamped=clamped,
         truncated=truncated,
     )
 

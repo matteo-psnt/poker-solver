@@ -539,6 +539,7 @@ PAYLOADS: dict[str, Any] = {
         aivat_std_bb_per_100=4.7,
         raw_bb_per_100=-241.0,
         off_tree_per_hand=1.5,
+        clamped_per_hand=0.4,
         truncated_hands=2,
         expected="check-call",
         within_expectation=True,
