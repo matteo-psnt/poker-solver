@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import itertools
 import random
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -29,6 +31,7 @@ from src.core.game.state import Card, Street
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import (
     LBRConfig,
     compute_lbr_exploitability,
@@ -51,14 +54,16 @@ class GoldenBuckets:
         return BUCKETS[street]
 
 
-def _trained_solver(iterations: int) -> StaticTreeSolver:
+def _build_solver() -> StaticTreeSolver:
     config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=20)
     action_model = ActionModel(config)
     abstraction = GoldenBuckets()
     tree = build_betting_tree(GameRules(1, 2), action_model, abstraction, starting_stack=20)
-    solver = StaticTreeSolver(
-        action_model, abstraction, StaticArrayStorage(tree), config, tree=tree
-    )
+    return StaticTreeSolver(action_model, abstraction, StaticArrayStorage(tree), config, tree=tree)
+
+
+def _trained_solver(iterations: int) -> StaticTreeSolver:
+    solver = _build_solver()
     random.seed(1)
     np.random.seed(1)
     for _ in range(iterations):
@@ -161,3 +166,37 @@ def test_lbr_is_bit_stable():
         assert result.num_hands == 12
     finally:
         solver.storage.close()
+
+
+@pytest.mark.timeout(120)
+def test_a_checkpoint_round_trip_does_not_move_the_score():
+    """The ruler must survive PERSISTENCE, not only live in memory.
+
+    Every other golden number here scores a solver that was never written to
+    disk, so a change to the checkpoint format or its row layout moves every
+    recorded score while this file stays green. Scored under the production
+    tier's knobs (conditional chance + thresholding), which nothing else pins.
+    """
+    scoring = PublicBRConfig(
+        num_flops=2,
+        num_turns=1,
+        num_rivers=1,
+        board_seed=7,
+        conditional_chance=True,
+        policy_threshold=0.02,
+    )
+    solver = _trained_solver(400)
+    reloaded = None
+    try:
+        before = compute_public_tree_br(solver, scoring, starting_stack=20)
+        with tempfile.TemporaryDirectory() as tmp:
+            save_checkpoint(solver.storage, Path(tmp), 400)
+            reloaded = _build_solver()
+            assert load_checkpoint(reloaded.storage, Path(tmp)) == 400
+            after = compute_public_tree_br(reloaded, scoring, starting_stack=20)
+        assert after.exploitability_mbb == pytest.approx(before.exploitability_mbb, abs=1e-9)
+        assert after.missing_policy_mass == pytest.approx(before.missing_policy_mass, abs=1e-12)
+    finally:
+        solver.storage.close()
+        if reloaded is not None:
+            reloaded.storage.close()
