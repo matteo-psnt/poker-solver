@@ -10,6 +10,7 @@ from src.pipeline.evaluation import ledger
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.ledger import records as eval_records
 from src.pipeline.evaluation.ledger import records as ledger_records
+from src.pipeline.evaluation.ledger import tiers
 from src.shared import gitinfo
 from src.shared.cloudtask import task_log
 from tests.test_helpers import seed_ledger
@@ -530,3 +531,50 @@ class TestTheRecordNamesTheCodeItRan:
         and the commit already describes it as well as anything can."""
         monkeypatch.delenv(gitinfo.SNAPSHOT_ENV, raising=False)
         assert gitinfo.get_code_snapshot() is None
+
+
+class TestWhichCodeMeasuredTheNumber:
+    """One unchanged checkpoint at identical knobs scored 812.2 mbb on 09-03 and
+    775.0 on 09-10, across the storage rewrite. Both rows carried byte-identical
+    knobs, so they shared a tier and any curve drawn from them mixed two
+    instruments. `tier_mismatches` cannot help -- it refuses every exact_br pair
+    before reaching the knobs -- so the grouping key is the only guard."""
+
+    def _row(self, **over):
+        row = {
+            "method": "exact_br",
+            "card_abstraction_hash": "a1542e88be59da97",
+            "action_config_hash": "eb598d79",
+            "eval_tree_fingerprint": "37c7818a12cf353c",
+            "eval_git_commit": "1111111111111111111111111111111111111111",
+            "knobs": {
+                "num_flops": 4,
+                "num_turns": 16,
+                "num_rivers": 16,
+                "base_seed": 17,
+                "policy_threshold": 0.02,
+                "conditional_chance": True,
+            },
+        }
+        row.update(over)
+        return row
+
+    def test_different_scoring_code_is_a_different_tier(self):
+        other = self._row(eval_git_commit="2222222222222222222222222222222222222222")
+        assert ledger.tier_key(self._row()) != ledger.tier_key(other)
+        assert tiers.tier_digest(self._row()) != tiers.tier_digest(other)
+
+    def test_the_same_code_still_shares_a_tier(self):
+        """The split must be on the commit alone, or every row becomes its own
+        tier and the grouping stops meaning anything."""
+        assert ledger.tier_key(self._row()) == ledger.tier_key(self._row())
+
+    def test_pairing_says_to_rescore_rather_than_remember(self):
+        reasons = ledger.tier_mismatches(
+            self._row(),
+            self._row(eval_git_commit="2222222222222222222222222222222222222222"),
+        )
+        assert any("different scoring code" in r for r in reasons)
+
+    def test_the_label_names_the_code(self):
+        assert "11111111" in ledger.tier_label(self._row())
