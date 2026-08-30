@@ -112,9 +112,9 @@ serve-ssh:
 #
 # The record's address rides along as $2: the box reads the run from Postgres
 # and has no Terraform of its own to ask.
-serve-deploy run code="" at="" rungs="":
+serve-deploy run code="" at="" rungs="" budget="":
     ssh solver@$({{tfv}} output -raw public_ip) \
-        "CODE={{code}} AT={{at}} RUNGS={{rungs}} bash -s" \
+        "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} bash -s" \
         -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
            "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 

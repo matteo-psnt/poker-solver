@@ -411,7 +411,12 @@ RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
-SEAT_EXTRA=${AT:+--at $AT}$SEAT_RUNGS
+# $BUDGET_MS caps the per-decision budget. It is a REAL knob, not a detail:
+# the resolver spends the whole budget, and MEASURED 09-10 its stack-off rate
+# rises with it -- 32.5% of one spot at 200 ms against 41.0% at 900 -- while
+# the +528 mbb that justifies the resolver at all was measured near 300 ms.
+# Unset leaves the seat's own sizing (900 ms under `MAX_BUDGET_MS`).
+SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}$SEAT_RUNGS
 EOF
 # The DSN carries a password, and this file gained one the moment the seat began
 # reading run metadata from the record. Same mode as `/etc/blueprint.env`.
