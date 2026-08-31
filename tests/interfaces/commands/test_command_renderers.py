@@ -44,6 +44,7 @@ from src.interfaces.commands.curve import CurvePayload
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
+from src.interfaces.commands.net_probe import Check, ProbePayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.profile import ProfilePayload
@@ -59,6 +60,7 @@ from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
 from src.interfaces.commands.submit_coupling import SubmitCouplingPayload
+from src.interfaces.commands.submit_net_probe import SubmitNetProbePayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload
@@ -154,6 +156,23 @@ PAYLOADS: dict[str, Any] = {
         ],
         best_exploitability=0.5392,
         best_at_iterations=400,
+    ),
+    "net-probe": ProbePayload(
+        hostname="a1b2c3d4e5",
+        region="eastus",
+        vm_size="Standard_D16als_v6",
+        egress_ip="20.51.0.7",
+        checks=[
+            Check(name="imds-instance", outcome="open", detail="Standard_D16als_v6", ms=4.2),
+            Check(name="tcp[portquiz.net:5432]", outcome="open", detail="tcp", ms=61.0),
+            Check(name="aad-token", outcome="error", detail="HTTP 400: no identity", ms=12.5),
+        ],
+    ),
+    "submit-net-probe": SubmitNetProbePayload(
+        flags=["--port", "5432"],
+        code_snapshot="code-20260805_000000",
+        job_id="poker-20260805",
+        tasks=["net-probe-000000-1"],
     ),
     "submit-coupling": SubmitCouplingPayload(
         abstractions=[
