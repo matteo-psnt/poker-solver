@@ -174,8 +174,8 @@ def walk_files(
     path: str,
     *,
     skip_dir: Callable[[str], bool] | None = None,
-) -> Iterator[str]:
-    """Yield every file path beneath ``path``, depth first.
+) -> Iterator[tuple[str, str | None]]:
+    """Yield ``(path, etag)`` for every file beneath ``path``, depth first.
 
     Used by the metadata sync, which needs to see the whole published tree in
     order to pick the small JSON out of it.
@@ -184,15 +184,19 @@ def walk_files(
     snapshots hold thousands of chunk files each, and listing them is a round
     trip per directory -- filtering them out AFTER the walk still paid for the
     walk, which is where the time went: 167s to pull 146 small JSON files.
+
+    The etag rides along because it costs nothing here and is the whole basis of
+    an incremental refresh: a published record never changes once written, so an
+    unchanged etag means the caller already has the bytes.
     """
-    for entry in list_entries(service, share, path):
+    for entry in list_entries(service, share, path, etags=True):
         child = f"{path}/{entry.name}"
         if entry.is_directory:
             if skip_dir is not None and skip_dir(entry.name):
                 continue
             yield from walk_files(service, share, child, skip_dir=skip_dir)
         else:
-            yield child
+            yield child, entry.etag
 
 
 def task_log_names(service: ShareServiceClient, share: str) -> list[str]:

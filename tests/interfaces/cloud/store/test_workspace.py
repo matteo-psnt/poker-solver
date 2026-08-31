@@ -36,6 +36,8 @@ class _FakeShare:
     def __init__(self, files: dict[str, str]):
         self.files = files
         self.written: dict[str, str] = {}
+        self.etags: dict[str, str] = {}
+        self.downloads: list[str] = []
 
 
 @pytest.fixture
@@ -60,10 +62,10 @@ def fake(monkeypatch):
             parts = p[len(prefix) :].split("/")
             if skip_dir is not None and any(skip_dir(part) for part in parts[:-1]):
                 continue
-            found.append(p)
+            found.append((p, service.etags.get(p, "v1")))
         return found
 
-    def list_entries(service, share_name, path):
+    def list_entries(service, share_name, path, *, etags=False):
         names = set()
         prefix = f"{path}/"
         for p in service.files:
@@ -73,6 +75,7 @@ def fake(monkeypatch):
         return [share.ShareEntry(name=n, is_directory=d, size=0) for n, d in sorted(names)]
 
     def download_file(service, share_name, path, destination):
+        service.downloads.append(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(service.files[path])
 
@@ -308,3 +311,59 @@ class TestSharedTrees:
         with workspace.shared_record_cache(ttl=60.0) as cache:
             assert workspace.active_cache() is cache
         assert workspace.active_cache() is None
+
+
+class TestIncrementalRefresh:
+    """A published record never changes once written, so a refresh should fetch
+    only what moved. The console rebuilds this tree every 45s; before this it
+    re-downloaded all 4,251 immutable documents each time -- 6.4s of a 24.4s
+    rebuild, and `_checkout` blocks every other request while it runs."""
+
+    def test_a_refresh_against_an_unchanged_share_downloads_nothing(self, fake, tmp_path):
+        first = tmp_path / "first"
+        workspace.pull_metadata(fake, "s", first)
+        assert fake.downloads, "the first pull must actually fetch"
+
+        fake.downloads.clear()
+        second = tmp_path / "second"
+        fetched = workspace.pull_metadata(fake, "s", second, previous=first)
+
+        assert fetched == 0
+        assert fake.downloads == []
+        # And the tree is COMPLETE, not merely cheap.
+        assert (second / "run-a" / "evals" / "slug1.json").is_file()
+        assert (second / "run-b" / "run.jsonl").is_file()
+
+    def test_only_the_changed_document_is_refetched(self, fake, tmp_path):
+        first = tmp_path / "first"
+        workspace.pull_metadata(fake, "s", first)
+
+        fake.etags["archive/run-a/evals/slug1.json"] = "v2"
+        fake.downloads.clear()
+        second = tmp_path / "second"
+        fetched = workspace.pull_metadata(fake, "s", second, previous=first)
+
+        assert fetched == 1
+        assert fake.downloads == ["archive/run-a/evals/slug1.json"]
+
+    def test_a_new_document_is_picked_up(self, fake, tmp_path):
+        first = tmp_path / "first"
+        workspace.pull_metadata(fake, "s", first)
+
+        fake.files["archive/run-b/evals/slug9.json"] = json.dumps({"run_id": "run-b"})
+        second = tmp_path / "second"
+        workspace.pull_metadata(fake, "s", second, previous=first)
+
+        assert (second / "run-b" / "evals" / "slug9.json").is_file()
+
+    def test_a_previous_tree_with_no_manifest_is_ignored_not_trusted(self, fake, tmp_path):
+        """A tree from before this existed has no etags. Reusing its files on
+        name alone would serve whatever it happened to hold."""
+        stale = tmp_path / "stale"
+        (stale / "run-a" / "evals").mkdir(parents=True)
+        (stale / "run-a" / "evals" / "slug1.json").write_text("STALE")
+
+        fresh = tmp_path / "fresh"
+        workspace.pull_metadata(fake, "s", fresh, previous=stale)
+
+        assert (fresh / "run-a" / "evals" / "slug1.json").read_text() != "STALE"
