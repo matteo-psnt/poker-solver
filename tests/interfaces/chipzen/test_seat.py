@@ -654,3 +654,72 @@ class TestTheBudgetCeiling:
         assert budget_for(TIGHT_CLOCK_MS) == max(
             50, int(TIGHT_CLOCK_MS * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS
         )
+
+
+class TestResolverOnlyOffTree:
+    """The resolver runs only where its edge was measured.
+
+    Its 528 mbb/hand is an OFF-TREE gain. On tree it measured -203.6 +/- 133.1
+    -- nothing -- while DOUBLING the stack-off rate, because its local tree ends
+    at the next street and CFR then converges to shipping whenever equity is
+    ahead (DEC-0013). This gate keeps that cost off the on-tree spots.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch) -> list:
+        """Record the `use_resolver` each decision asks for."""
+        import src.engine.search.agent as agent_module
+        from src.core.game.actions import Action, ActionType
+
+        seen: list = []
+
+        class _Spy:
+            def __init__(self, _blueprint, *, use_resolver=None, rng=None):
+                seen.append(use_resolver)
+
+            def act(self, _state, time_budget_ms=None):
+                return Action(type=ActionType.FOLD)
+
+        monkeypatch.setattr(agent_module, "BlueprintAgent", _Spy)
+        return seen
+
+    @staticmethod
+    def _spot(seat, off_tree: int):
+        from src.core.game.state import FULL_DECK
+        from src.interfaces.chipzen.adapter import Spot
+
+        state = seat.blueprint.rules.create_initial_state(
+            starting_stack=seat.blueprint.config.game.starting_stack,
+            hole_cards=((FULL_DECK[0], FULL_DECK[1]), (FULL_DECK[2], FULL_DECK[3])),
+            button=0,
+        )
+        return Spot(state=state, scale=seat.scale, seat=0, off_tree=off_tree, truncated=False)
+
+    def test_an_off_tree_spot_gets_the_resolver(self, blueprint, monkeypatch) -> None:
+        seat = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, resolver_only_off_tree=True)
+        seen = self._spy(monkeypatch)
+        seat._choose(self._spot(seat, off_tree=2))
+        assert seen == [True]
+
+    def test_an_on_tree_spot_does_not(self, blueprint, monkeypatch) -> None:
+        seat = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0, resolver_only_off_tree=True)
+        seen = self._spy(monkeypatch)
+        seat._choose(self._spot(seat, off_tree=0))
+        assert seen == [False]
+
+    def test_no_resolver_still_wins(self, blueprint, monkeypatch) -> None:
+        # Two switches that can disagree is the bug this avoids: an explicit
+        # `--no-resolver` must not be re-enabled by an off-tree spot.
+        seat = BlueprintSeat.for_match(
+            blueprint, MATCH_INFO, seat=0, use_resolver=False, resolver_only_off_tree=True
+        )
+        seen = self._spy(monkeypatch)
+        seat._choose(self._spot(seat, off_tree=5))
+        assert seen == [False]
+
+    def test_it_is_off_by_default(self, blueprint, monkeypatch) -> None:
+        # Unset must still defer to `resolver.enabled`, not to this gate.
+        seat = BlueprintSeat.for_match(blueprint, MATCH_INFO, seat=0)
+        seen = self._spy(monkeypatch)
+        seat._choose(self._spot(seat, off_tree=0))
+        assert seen == [None]

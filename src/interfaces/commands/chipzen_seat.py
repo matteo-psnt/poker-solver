@@ -119,6 +119,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the bare blueprint since the shadow board-sync fix.",
     )
     parser.add_argument(
+        "--resolver-off-tree-only",
+        action="store_true",
+        help="Run the resolver ONLY once the hand has left our tree. Its "
+        "measured 528 mbb/hand is an OFF-TREE gain; on tree it is worth "
+        "-203.6 +/- 133.1 -- nothing -- while DOUBLING the stack-off rate "
+        "(5.25%% vs 2.37%%). Its local tree ends at the next street, so it has "
+        "no future betting to extract with and CFR converges to shipping "
+        "whenever equity is ahead (DEC-0013). Doubling variance for a "
+        "statistically-zero edge loses in an ELIMINATION format.",
+    )
+    parser.add_argument(
         "--budget-ms",
         type=int,
         default=None,
@@ -180,6 +191,7 @@ class ChipzenSeatPayload(BaseModel):
     mode: Literal["replay", "live"]
     resolver: bool | None = None
     """None follows `resolver.enabled`; False is an explicit `--no-resolver`."""
+    resolver_off_tree_only: bool = False
     budget_ms: int | None = None
     """None lets each match size it from the clock it enforces."""
     env: str | None = None
@@ -259,6 +271,7 @@ def _replay_payload(args: argparse.Namespace, run_dir: Path) -> ChipzenSeatPaylo
         {"game_config": recorded["game_config"]},
         seat=int(recorded.get("seat", 0)),
         use_resolver=False if args.no_resolver else None,
+        resolver_only_off_tree=args.resolver_off_tree_only,
         budget_ms=args.budget_ms,
     )
     decision = seat.decide_frame(recorded["state"])
@@ -435,6 +448,7 @@ def _play(payload: ChipzenSeatPayload) -> None:
         token=os.environ.get(TOKEN_ENV),
         env=payload.env or DEFAULT_ENV,
         use_resolver=payload.resolver,
+        resolver_only_off_tree=payload.resolver_off_tree_only,
         budget_ms=payload.budget_ms,
         max_matches=1 if payload.once else None,
         seek_matches=payload.seek,
