@@ -341,9 +341,23 @@ def _build_ladder(payload: ChipzenSeatPayload):
     from src.interfaces.chipzen.ladder import DepthLadder  # noqa: PLC0415 -- see above
 
     specs = [(Path(payload.run_dir), payload.at_iteration), *_parse_rungs(payload)]
-    return DepthLadder(
-        [_build_blueprint(d, at, payload.policy_threshold, play_only=True) for d, at in specs]
-    )
+    loaded = []
+    for index, (run_dir, at) in enumerate(specs):
+        try:
+            loaded.append(_build_blueprint(run_dir, at, payload.policy_threshold, play_only=True))
+        except Exception:
+            # A SHALLOW rung that will not load costs coverage at that depth; the
+            # seat playing on without it is strictly better than a seat that
+            # cannot start. `--run` is different: losing it leaves nothing to
+            # play, so that one is allowed to propagate and take the process
+            # down, where `Restart=always` retries it.
+            if index == 0:
+                raise
+            logger.exception(
+                "Rung %s failed to load; the ladder continues without it.", run_dir.name
+            )
+    logger.info("Ladder built from %d of %d rung(s).", len(loaded), len(specs))
+    return DepthLadder(loaded)
 
 
 def _parse_rungs(payload: ChipzenSeatPayload) -> list[tuple[Path, int | None]]:

@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 import pytest
 
 from src.interfaces.commands import chipzen_seat
 from src.interfaces.errors import CommandError
+from tests.test_helpers import build_trained_test_solver
 
 FIXTURE = Path(__file__).parent / "fixtures" / "turn_preflop_sb.json"
 
@@ -134,3 +136,48 @@ class TestLoadingARecording:
 
     def test_the_shipped_fixture_loads(self):
         assert chipzen_seat._load_recording(FIXTURE)["seat"] == 1
+
+
+class TestALadderSurvivesABadRung:
+    """A rung that will not load must not take the seat down with it.
+
+    This runs unattended for a six-day competition. Losing coverage at one depth
+    costs mbb; refusing to start costs every fixture until a human notices.
+    """
+
+    def test_a_broken_shallow_rung_is_skipped(self, tmp_path, monkeypatch, caplog):
+        from src.interfaces.commands import chipzen_seat as module
+
+        calls: list[int] = []
+
+        def _load(run_dir, at, threshold=0.0, *, play_only=False):
+            calls.append(len(calls))
+            if len(calls) == 2:
+                raise RuntimeError("this rung's checkpoint is corrupt")
+            return build_trained_test_solver(iterations=2, starting_stack=100 * len(calls))
+
+        monkeypatch.setattr(module, "_build_blueprint", _load)
+        monkeypatch.setattr(module, "_parse_rungs", lambda p: [(tmp_path / "b", None)])
+        payload = module.ChipzenSeatPayload(
+            run="a", run_dir=str(tmp_path / "a"), runs_dir=str(tmp_path), mode="live"
+        )
+        with caplog.at_level(logging.ERROR, logger="src.interfaces.commands.chipzen_seat"):
+            ladder = module._build_ladder(payload)
+        assert [r.depth for r in ladder.rungs] == [1.0]
+        assert "continues without it" in caplog.text
+
+    def test_a_broken_deepest_rung_still_raises(self, tmp_path, monkeypatch):
+        # Nothing left to play, so failing loudly into `Restart=always` is the
+        # only honest outcome.
+        from src.interfaces.commands import chipzen_seat as module
+
+        def _load(*_args, **_kwargs):
+            raise RuntimeError("no checkpoint")
+
+        monkeypatch.setattr(module, "_build_blueprint", _load)
+        monkeypatch.setattr(module, "_parse_rungs", lambda p: [])
+        payload = module.ChipzenSeatPayload(
+            run="a", run_dir=str(tmp_path / "a"), runs_dir=str(tmp_path), mode="live"
+        )
+        with pytest.raises(RuntimeError, match="no checkpoint"):
+            module._build_ladder(payload)
