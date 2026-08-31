@@ -64,9 +64,18 @@ variable "postgres_database" {
 variable "operator_ip" {
   description = <<-EOT
     The laptop's public address, allowed through the server firewall so the
-    console and the CLI can read. A home ISP rotates it; when psql starts
-    TIMING OUT rather than refusing, this is stale. `null` omits the rule.
+    console and the CLI can read.
+
+    NO DEFAULT, on purpose. A home ISP rotates this, and a committed default
+    would keep opening the firewall to whoever holds the address next -- a
+    stale allow-rule that nothing would ever report. Set it per-apply:
+
+        terraform apply -var "operator_ip=$(curl -s https://api.ipify.org)"
+
+    or put it in `infra/store/terraform.tfvars`, which `.gitignore` covers.
+    Left unset, the rule is simply not created and the laptop cannot connect --
+    which is the safe direction to fail.
   EOT
   type        = string
-  default     = "189.217.93.232"
+  default     = null
 }
