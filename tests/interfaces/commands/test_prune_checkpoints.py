@@ -111,3 +111,70 @@ class TestTheSafetyCatch:
         _run(published, "run-a", rungs=[100, 200])
         with pytest.raises(CommandError, match="at least 1"):
             _plan(published, keep=0)
+
+
+class TestTheOrphanSweep:
+    """`--apply` deletes the marker BEFORE the bytes, so an interrupted sweep
+    leaves an unclaimed directory rather than a rung that lies about existing.
+    That trade is only sound if the leftovers are actually collected."""
+
+    @staticmethod
+    def _share(monkeypatch, files):
+        from src.interfaces.cloud import config as cloud_config
+        from src.interfaces.cloud.store import share
+
+        deleted: list[str] = []
+
+        def list_entries(_service, _name, path, *, etags=False):
+            seen: dict[str, bool] = {}
+            for candidate in files:
+                if candidate.startswith(f"{path}/"):
+                    rest = candidate[len(path) + 1 :]
+                    seen[rest.split("/")[0]] = "/" in rest
+            return [
+                share.ShareEntry(name=n, is_directory=d, size=1) for n, d in sorted(seen.items())
+            ]
+
+        def walk(_service, _name, path, *, skip_dir=None):
+            return [(p, "v1") for p in list(files) if p.startswith(f"{path}/")]
+
+        def delete_file(_service, _name, path):
+            deleted.append(path)
+            return files.discard(path) is None
+
+        def delete_directory(_service, _name, path):
+            return not any(p.startswith(f"{path}/") for p in files)
+
+        monkeypatch.setattr(share, "list_entries", list_entries)
+        monkeypatch.setattr(share, "walk_files", walk)
+        monkeypatch.setattr(share, "delete_file", delete_file)
+        monkeypatch.setattr(share, "delete_directory", delete_directory)
+        monkeypatch.setattr(share, "share_client", lambda _c: object())
+        monkeypatch.setattr(cloud_config.CloudConfig, "load", staticmethod(lambda: _Config()))
+        return deleted
+
+    def test_an_unclaimed_snapshot_is_swept_and_a_claimed_one_is_not(self, published, monkeypatch):
+        _run(published, "run-a", rungs=[100, 200, 300, 400])
+        base = "archive/run-a"
+        # The markers live on the SHARE, which is where `claimed` is read from --
+        # not in the local record tree the plan was decided against.
+        files = {
+            f"{base}/{archive.MARKER_PREFIX}static-300.zarr",
+            f"{base}/{archive.MARKER_PREFIX}static-400.zarr",
+            # 300 and 400 are KEPT: claimed by a marker, so never touched.
+            f"{base}/static-300.zarr/c/0",
+            f"{base}/static-400.zarr/c/0",
+            # 999 is the leftover shape: bytes with no marker naming them.
+            f"{base}/static-999.zarr/c/0",
+        }
+        deleted = self._share(monkeypatch, set(files))
+
+        prune_checkpoints.COMMAND.invoke(keep=2, price=False, apply=True, runs=["run-a"])
+
+        assert f"{base}/static-999.zarr/c/0" in deleted, "the orphan's bytes were left behind"
+        assert f"{base}/static-300.zarr/c/0" not in deleted
+        assert f"{base}/static-400.zarr/c/0" not in deleted
+
+
+class _Config:
+    share_name = "s"
