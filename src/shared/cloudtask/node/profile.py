@@ -203,7 +203,7 @@ def record(pid: int, seconds: int, destination: Path, log: Callable[[str], None]
             # BOTH streams. `uv run --with` writes its own download chatter to
             # stderr, which is what the first failure on a node reported --
             # py-spy's actual complaint was nowhere in the log.
-            log(f"profile: --native exited {done.returncode}: {_said(done)}")
+            log(f"profile: --native on pid {pid} exited {done.returncode}: {_said(done)}")
             log(f"profile: yama ptrace_scope={_ptrace_scope()} (1 = descendants only)")
             done = _py_spy(pid, seconds, destination, native=False)
     except (OSError, subprocess.SubprocessError) as error:
@@ -211,7 +211,7 @@ def record(pid: int, seconds: int, destination: Path, log: Callable[[str], None]
         return False
 
     if done.returncode != 0:
-        log(f"profile: py-spy exited {done.returncode}: {_said(done)}")
+        log(f"profile: py-spy on pid {pid} exited {done.returncode}: {_said(done)}")
         return False
 
     log(f"profile: {seconds}s of pid {pid} -> {destination.name}")
