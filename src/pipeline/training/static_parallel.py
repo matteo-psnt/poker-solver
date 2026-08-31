@@ -306,6 +306,12 @@ def _collect(result_queue: _Results, processes: Sequence[Any]) -> list[dict[str,
             dead = [p for p in processes if p.exitcode not in (None, 0)]
             if dead:
                 codes = ", ".join(f"pid {p.pid} exit {p.exitcode}" for p in dead)
+                # The survivors are not daemons, so an un-terminated one holds
+                # the task for the rest of its chunk under multiprocessing's
+                # atexit join -- still mapping the shared segments a killed leg
+                # is known to poison the next one with.
+                for process in processes:
+                    process.terminate()
                 raise RuntimeError(
                     f"{len(dead)} of {len(processes)} static workers died without a result "
                     f"({codes}); a negative code is a signal, and -9 is the OOM killer -- "
