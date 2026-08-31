@@ -26,3 +26,25 @@ output "smb_path" {
   description = "UNC path the boxes mount."
   value       = "//${azurerm_storage_account.store.name}.file.core.windows.net/${azurerm_storage_share.data.name}"
 }
+
+output "postgres_host" {
+  value = azurerm_postgresql_flexible_server.record.fqdn
+}
+
+output "postgres_database" {
+  value = azurerm_postgresql_flexible_server_database.record.name
+}
+
+# Sensitive so it never reaches a log or a plan diff. `terraform output -raw
+# postgres_dsn` is the only path that prints it -- the same shape as the share's
+# access key above.
+output "postgres_dsn" {
+  value = format(
+    "postgresql://%s:%s@%s:5432/%s?sslmode=require",
+    var.postgres_admin_user,
+    urlencode(random_password.postgres.result),
+    azurerm_postgresql_flexible_server.record.fqdn,
+    azurerm_postgresql_flexible_server_database.record.name,
+  )
+  sensitive = true
+}
