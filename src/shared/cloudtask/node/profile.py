@@ -29,7 +29,7 @@ import os
 import subprocess
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,12 +46,21 @@ POLL_SECONDS = 15
 _PYTHON_NAMES = ("python", "python3", "python3.13")
 
 
-def _proc_stat(pid: int) -> tuple[str, int] | None:
-    """``(comm, ppid)`` for one pid, or None if it is gone.
+class Proc(NamedTuple):
+    """What ``/proc/<pid>/stat`` is read for: the tree, and who is working."""
+
+    comm: str
+    ppid: int
+    ticks: int  # utime + stime, cumulative since the process started
+
+
+def _proc_stat(pid: int) -> Proc | None:
+    """One pid's stat line, or None if it is gone.
 
     Parsed off the end rather than by splitting: a process can be named
     ``my prog) x`` and `comm` is the only field that may contain spaces or
-    parentheses, so the closing one is the anchor.
+    parentheses, so the closing one is the anchor. Indices below are relative
+    to the field AFTER it, so ppid is 1 and utime/stime are 11 and 12.
     """
     try:
         raw = Path(f"/proc/{pid}/stat").read_text()
@@ -62,55 +71,58 @@ def _proc_stat(pid: int) -> tuple[str, int] | None:
         return None
     comm = raw[raw.find("(") + 1 : close]
     fields = raw[close + 2 :].split()
-    if len(fields) < 2:
+    if len(fields) < 13:
         return None
     try:
-        return comm, int(fields[1])
+        return Proc(comm, int(fields[1]), int(fields[11]) + int(fields[12]))
     except ValueError:
         return None
 
 
 def python_worker(root: int) -> int | None:
-    """The busiest interpreter under ``root``, or None while none is running.
+    """The BUSIEST interpreter under ``root``, or None while none is running.
 
-    Returns a DESCENDANT, not the child: the wrapper starts `uv run`, which
-    execs the CLI, which forks its own workers. Whichever it is, the answer is
-    the deepest python in the tree -- the shallowest is the launcher.
+    Ranked by CPU time, not by depth. Depth was the first rule and it profiled
+    `multiprocessing.resource_tracker` for thirty seconds -- a bookkeeping
+    process that sits in `select()`, ties for deepest, and yields a plausible
+    flamegraph that is 100% the wrong process. CPU time is the property that
+    actually separates a worker from a helper, and it is already in the stat
+    line being read for the tree.
     """
     try:
         pids = [int(entry.name) for entry in Path("/proc").iterdir() if entry.name.isdigit()]
     except OSError:
         return None
 
-    parents: dict[int, int] = {}
-    names: dict[int, str] = {}
+    stats: dict[int, Proc] = {}
     for pid in pids:
-        stat = _proc_stat(pid)
-        if stat is not None:
-            names[pid], parents[pid] = stat
+        found = _proc_stat(pid)
+        if found is not None:
+            stats[pid] = found
 
-    def depth(pid: int) -> int | None:
-        """How far below ``root`` this pid sits, or None if it is elsewhere."""
-        steps = 0
+    def under_root(pid: int) -> bool:
+        """Whether ``pid`` sits anywhere below ``root``."""
         seen = set()
         while pid not in seen:
             if pid == root:
-                return steps
+                return True
             seen.add(pid)
-            parent = parents.get(pid)
+            parent = stats[pid].ppid if pid in stats else None
             if parent is None or parent <= 1:
-                return None
-            pid, steps = parent, steps + 1
-        return None
+                return False
+            pid = parent
+        return False
 
     best: tuple[int, int] | None = None
-    for pid, name in names.items():
-        if not name.startswith(_PYTHON_NAMES):
+    for pid, proc in stats.items():
+        if not proc.comm.startswith(_PYTHON_NAMES) or not under_root(pid):
             continue
-        below = depth(pid)
-        if below is not None and (best is None or below > best[0]):
-            best = (below, pid)
-    return best[1] if best else None
+        if best is None or proc.ticks > best[0]:
+            best = (proc.ticks, pid)
+    # Zero ticks everywhere means nothing has run yet, which is a "not ready",
+    # not a pick: profiling whichever process sorted first is how the wrong one
+    # gets chosen in the first place.
+    return best[1] if best and best[0] > 0 else None
 
 
 def take_request(profile_dir: Path, task_id: str) -> int | None:
@@ -160,6 +172,11 @@ def _py_spy(
 ) -> subprocess.CompletedProcess[str]:
     """One `py-spy record` invocation.
 
+    `--idle` because without it py-spy DROPS threads it reads as idle, and a
+    worker inside a numba kernel is one of them: the first profile taken on a
+    node came back a valid speedscope document with zero frames in it. An empty
+    profile is worse than a failure -- it looks like an answer.
+
     `uv run --with` rather than a dependency: the nodes sync the dev group and
     have no use for a profiler in every image. By the time any child is running
     `uv sync` has completed, so the tool resolves from a warm cache.
@@ -179,6 +196,7 @@ def _py_spy(
         "speedscope",
         "--output",
         str(destination),
+        "--idle",
         "--nonblocking",
     ]
     if native:
