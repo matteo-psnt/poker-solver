@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Protocol
 from src.interfaces.gtowizard.protocol import BET, CHECK, FOLD, GAME_NAME, Frame
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
     from src.interfaces.gtowizard.agents import Agent
@@ -54,12 +54,6 @@ class Server(Table, Protocol):
     """Playing: a hand to deal, and the actions to play it with."""
 
     def new_hand(self, game_name: str = ...) -> Frame: ...
-
-
-class Lobby(Table, Protocol):
-    """Draining: what is open, and a way to end it."""
-
-    def in_progress(self, game_name: str = ...) -> Sequence[Frame]: ...
 
 
 logger = logging.getLogger(__name__)
@@ -208,15 +202,19 @@ def concede(client: Table, frame: Frame) -> bool:
     return frame.turn.is_hand_over
 
 
-def drain(client: Lobby, *, game_name: str = GAME_NAME) -> list[int]:
-    """Close every open hand, returning the ids that gave their slot back.
+def drain(client: Table, frames: Iterable[Frame]) -> list[int]:
+    """Close each open hand, returning the ids that gave their slot back.
+
+    Takes the frames rather than fetching them, so the caller reporting what
+    was open and this closing it are looking at ONE listing. Two would let the
+    report name a hand the drain never saw.
 
     Each one is SCORED as the fold it is, against the account's public record.
     That is the cheaper side of the trade: eleven abandoned hands cost eleven
     small folds once, against every future run losing over half its concurrency
     to them.
     """
-    return [frame.hand_id for frame in client.in_progress(game_name) if concede(client, frame)]
+    return [frame.hand_id for frame in frames if concede(client, frame)]
 
 
 def play_hand(client: Server, agent: Agent, *, game_name: str = GAME_NAME) -> HandRecord:
