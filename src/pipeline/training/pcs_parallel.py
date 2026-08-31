@@ -55,8 +55,11 @@ LIVE_HANDS = int(enumerate_live_hands(np.arange(BOARD_CARDS)).shape[0])
 # pages; six workers ran on the 32 GiB node. Revise from the task log's
 # "peak RSS" line, not from here.
 WORKER_OVERHEAD_BYTES = 1_600_000_000
-# The coordinator, the shared table's page cache and the OS.
+# The coordinator, the shared table's page cache and the OS. The floor suits a
+# small node; the fraction is what keeps a big one from running at 99%, where
+# one worker over is an OOM kill rather than a slowdown.
 NODE_HEADROOM_BYTES = 3_000_000_000
+NODE_HEADROOM_FRACTION = 0.05
 
 
 def sample_boards(rng: np.random.Generator, runouts: int) -> list[np.ndarray]:
@@ -142,6 +145,7 @@ def worker_bytes(
     br_streets: str = "off",
     runouts: int = 1,
     kernels: int = 1,
+    showdown: str = "walk",
 ) -> int:
     """Private bytes one worker allocates, from the tree's shape.
 
@@ -150,10 +154,11 @@ def worker_bytes(
     best response cannot: its maximisation is joint over the runouts sharing the
     turn, so their values must exist together and the scratch multiplies.
     """
-    per_hand = 4 * LIVE_HANDS * np.dtype(DTYPE).itemsize
+    item = np.dtype(DTYPE).itemsize
+    per_hand = 4 * LIVE_HANDS * item
     scratch = kernels * (len(tree) + num_terminals) * per_hand  # reach, value, both players
-    cache = kernels * tree.num_slots * np.dtype(DTYPE).itemsize  # bucket-space strategy cache
-    temporaries = 6 * MAX_BLOCK_ELEMENTS * np.dtype(DTYPE).itemsize  # one chunk's blocks
+    cache = kernels * tree.num_slots * item  # bucket-space strategy cache
+    temporaries = 6 * MAX_BLOCK_ELEMENTS * item  # one chunk's blocks
     picks = 0
     if br_streets != "off":
         # One int8 action per (best-response node, live hand), held from the
@@ -161,7 +166,18 @@ def worker_bytes(
         streets = frozenset(BR_REGIONS[br_streets])
         nodes = sum(1 for node in tree.nodes if node.street in streets)
         picks = nodes * LIVE_HANDS * runouts
-    return scratch + cache + temporaries + picks + WORKER_OVERHEAD_BYTES
+    # `evaluate_terminals` peaks well above the arrays it reads, and nothing
+    # above counted it. MEASURED at 200 bb: this said 10.85 GB against a
+    # worker's 12.17 GB, so the clamp put 11 workers on a box that held 10 and
+    # the OOM killer took one -- costing a 40-minute probe every rung it ran.
+    #
+    # Half of any tree's terminals are showdowns; a line ends folded or shown.
+    # `walk` holds the fancy-index copy of one seat's showdown reaches while the
+    # rank walk builds its output -- two (showdowns, hands) arrays. `matmul`
+    # stacks BOTH seats before the product, so each of its two is twice as wide.
+    showdowns = num_terminals // 2
+    live = 2 * (num_terminals if showdown == "matmul" else showdowns)
+    return scratch + cache + temporaries + picks + live * LIVE_HANDS * item + WORKER_OVERHEAD_BYTES
 
 
 def node_memory_bytes() -> int:
@@ -177,12 +193,23 @@ def ram_safe_workers(
     br_streets: str = "off",
     runouts: int = 1,
     kernels: int = 1,
+    showdown: str = "walk",
 ) -> int:
-    """How many workers this node can hold, from the arithmetic above."""
+    """How many workers this node can hold, from the arithmetic above.
+
+    Headroom is a FRACTION with a floor, not the flat 3 GB it used to be: that
+    was 2.2% of a 128 GiB box and 0.5% of a 512 GB one, so the bigger the node
+    the less margin it left, which is backwards.
+    """
     total = node_memory_bytes() if memory is None else memory
-    available = total - shared_bytes - NODE_HEADROOM_BYTES
+    available = total - shared_bytes - max(NODE_HEADROOM_BYTES, int(NODE_HEADROOM_FRACTION * total))
     per_worker = worker_bytes(
-        tree, num_terminals, br_streets=br_streets, runouts=runouts, kernels=kernels
+        tree,
+        num_terminals,
+        br_streets=br_streets,
+        runouts=runouts,
+        kernels=kernels,
+        showdown=showdown,
     )
     return max(1, int(available // per_worker))
 
