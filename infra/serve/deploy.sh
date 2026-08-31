@@ -250,10 +250,14 @@ sudo install -m 0644 "$units/chipzen-seat-watchdog.service" /etc/systemd/system/
 sudo install -m 0644 "$units/chipzen-seat-watchdog.timer" /etc/systemd/system/
 sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 
+# POLICY_THRESHOLD must never be empty here: the unit expands it unquoted into
+# argparse. 0.02 is the measured point (940.1 -> 854.0 mbb/hand on the gate over
+# three seeds); 0 fields the table as trained.
 sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
+POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
 EOF
 
 sudo systemctl daemon-reload

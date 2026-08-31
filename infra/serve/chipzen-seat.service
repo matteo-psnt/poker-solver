@@ -18,8 +18,12 @@ User=solver
 EnvironmentFile=/etc/chipzen-seat.env
 Environment=POKER_SOLVER_CACHE=/mnt/work/cache
 WorkingDirectory=/mnt/work/code
+# POLICY_THRESHOLD is always written by deploy.sh, so the expansion is never
+# empty -- an empty ${POLICY_THRESHOLD} would reach argparse as a bare
+# `--policy-threshold` and refuse to start.
 ExecStart=/home/solver/.local/bin/uv run poker-solver chipzen-seat \
-  --run ${RUN} --runs-dir ${RUNS_DIR} --env ${CHIPZEN_ENV} --log-level INFO
+  --run ${RUN} --runs-dir ${RUNS_DIR} --env ${CHIPZEN_ENV} \
+  --policy-threshold ${POLICY_THRESHOLD} --log-level INFO
 # ALWAYS, not on-failure. A standing seat has no successful exit: the one
 # observed exit took none of the SDK's three documented paths and left no
 # traceback, so "it returned 0" is not evidence it meant to stop.
