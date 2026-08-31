@@ -31,6 +31,7 @@ from src.interfaces.commands.arms import ArmsPayload
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
 from src.interfaces.commands.benchmark import BenchmarkPayload
 from src.interfaces.commands.benchmark_board import BoardPayload, BoardRow
+from src.interfaces.commands.benchmark_drain import DrainPayload
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.chart import ChartPayload
@@ -544,6 +545,13 @@ PAYLOADS: dict[str, Any] = {
         expected="check-call",
         within_expectation=True,
         z_score=0.1,
+    ),
+    # One slot given back and one that would not close: a drain that reports
+    # every hand it looked at as released is the failure this guards.
+    "benchmark-drain": DrainPayload(
+        game="HUNL 200BB",
+        open_hands=[3321480, 3326317],
+        released=[3321480],
     ),
     "benchmark-board": BoardPayload(
         game="HUNL 200BB",

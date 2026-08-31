@@ -29,7 +29,6 @@ working tree and would carry it to every node.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -38,7 +37,11 @@ from pydantic import BaseModel
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
 from src.interfaces.gtowizard import agents, session
-from src.interfaces.gtowizard.client import DEFAULT_VERSION, KEY_ENV, BenchmarkClient
+from src.interfaces.gtowizard.client import (
+    DEFAULT_VERSION,
+    BenchmarkClient,
+    key_from_environment,
+)
 from src.interfaces.gtowizard.protocol import GAME_NAME
 from src.shared.cloudtask.node.paths import NodePaths
 
@@ -230,12 +233,7 @@ def _check_expectation(
 
 def run(args: argparse.Namespace) -> BenchmarkPayload:
     """Play hands against GTO Wizard AI and report the score."""
-    key = os.environ.get(KEY_ENV)
-    if not key:
-        raise CommandError(
-            f"No API key. Set ${KEY_ENV} to the key GTO Wizard approved "
-            "(request one at https://benchmark.gtowizard.com/)."
-        )
+    key = key_from_environment()
     agent = _agent(args)
     log_path = Path(args.log) if args.log else None
     with BenchmarkClient(key) as client:

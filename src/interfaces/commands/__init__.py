@@ -154,6 +154,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "benchmark",
                 "Play hands against GTO Wizard AI and score them in AIVAT bb/100.",
             ),
+            CommandRef(
+                "benchmark-drain",
+                "Fold hands left open against GTO Wizard, freeing their concurrency slots.",
+            ),
         ),
     ),
     CommandGroup(
