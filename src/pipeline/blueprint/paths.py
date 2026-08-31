@@ -176,13 +176,13 @@ def replay(
 
     consumed = 0
     for token in parse_path(path):
-        state, consumed = _advance_chance(state, board, consumed)
+        state, consumed = advance_chance(state, board, consumed)
         if state.is_terminal:
             raise PathError(f"'{token}' comes after the hand has already ended.")
         legal = rules.get_legal_actions(state, action_model=blueprint.action_model)
         state = state.apply_action(match_action(token, legal), rules)
 
-    state, consumed = _advance_chance(state, board, consumed)
+    state, consumed = advance_chance(state, board, consumed)
     terminal = state.is_terminal
     return ReplayedNode(
         state=state,
@@ -194,7 +194,7 @@ def replay(
     )
 
 
-def _advance_chance(
+def advance_chance(
     state: GameState, board: tuple[Card, ...], consumed: int
 ) -> tuple[GameState, int]:
     """Deal from ``board`` for as long as the state is waiting on cards."""

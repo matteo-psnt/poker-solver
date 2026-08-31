@@ -22,8 +22,9 @@ from src.interfaces.commands import load_all
 # publishing. `blueprint-serve` is NOT a pool task -- it runs on the long-lived
 # reader in `infra/serve/` -- but it belongs here for the same reason: it mmaps a
 # checkpoint and the card abstraction from local disk, which is a place, not a
-# record.
-NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve"})
+# record. `benchmark` is the same shape: it FIELDS a blueprint against an
+# external opponent, so it must load one off the box it runs on.
+NODE_SIDE = frozenset({"train-static", "precompute", "evaluate", "blueprint-serve", "benchmark"})
 
 LOCAL_SOURCE_FLAG = "--runs-dir"
 

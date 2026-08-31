@@ -33,6 +33,8 @@ from src.interfaces.commands.abstraction_coupling import (
 )
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
+from src.interfaces.commands.benchmark import BenchmarkPayload
+from src.interfaces.commands.benchmark_board import BoardPayload, BoardRow
 from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.compact_legs import CompactedPayload
@@ -578,6 +580,48 @@ PAYLOADS: dict[str, Any] = {
         ],
         total_failures=41,
         by_surface={"cli": 96, "console": 316},
+    ),
+    # The probe, matching its published figure. `within_expectation=False` is
+    # not a payload that reaches a renderer: `run` refuses instead, so the
+    # renderer stays pure formatting.
+    "benchmark": BenchmarkPayload(
+        agent="check-call",
+        game="HUNL 200BB",
+        hands_played=2000,
+        hands_failed=1,
+        aivat_bb_per_100=-183.4,
+        aivat_std_bb_per_100=4.7,
+        raw_bb_per_100=-241.0,
+        off_tree_per_hand=1.5,
+        truncated_hands=2,
+        expected="check-call",
+        within_expectation=True,
+    ),
+    "benchmark-board": BoardPayload(
+        game="HUNL 200BB",
+        version=2,
+        rows=[
+            BoardRow(
+                bot_name="Bitcrumbs",
+                organization="Individual",
+                version=2,
+                hands=44717,
+                aivat_bb_per_100=-3.11,
+                aivat_std_bb_per_100=0.99,
+                raw_bb_per_100=-9.15,
+            ),
+            # An entry with no organisation renders as a bare name, not as
+            # "name ()".
+            BoardRow(
+                bot_name="testbot",
+                organization="",
+                version=2,
+                hands=100659,
+                aivat_bb_per_100=-19.43,
+                aivat_std_bb_per_100=0.74,
+                raw_bb_per_100=-24.45,
+            ),
+        ],
     ),
     "configs": ConfigsPayload(
         root="/repo/config",
