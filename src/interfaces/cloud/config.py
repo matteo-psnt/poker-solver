@@ -132,12 +132,14 @@ class CloudConfig:
     pool_id: str
     pool_big_id: str
     pool_huge_id: str
+    pool_mem_id: str
     storage_account: str
     share_name: str
     share_key: str
     hourly_cost: str
     pool_big_hourly_cost: str
     pool_huge_hourly_cost: str
+    pool_mem_hourly_cost: str
     subscription_id: str
 
     @classmethod
@@ -151,11 +153,13 @@ class CloudConfig:
             pool_id=_value(str(INFRA_DIR), "pool_id"),
             pool_big_id=_optional_value(str(INFRA_DIR), "pool_big_id"),
             pool_huge_id=_optional_value(str(INFRA_DIR), "pool_huge_id"),
+            pool_mem_id=_optional_value(str(INFRA_DIR), "pool_mem_id"),
             storage_account=_value(str(STORE_DIR), "storage_account"),
             share_name=_value(str(STORE_DIR), "share_name"),
             share_key=_value(str(STORE_DIR), "access_key"),
             hourly_cost=_value(str(INFRA_DIR), "hourly_cost"),
             pool_big_hourly_cost=_optional_value(str(INFRA_DIR), "pool_big_hourly_cost"),
             pool_huge_hourly_cost=_optional_value(str(INFRA_DIR), "pool_huge_hourly_cost"),
+            pool_mem_hourly_cost=_optional_value(str(INFRA_DIR), "pool_mem_hourly_cost"),
             subscription_id=_value(str(INFRA_DIR), "subscription_id"),
         )

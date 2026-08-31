@@ -666,3 +666,134 @@ resource "azurerm_batch_pool" "train_huge" {
     }
   }
 }
+
+# The memory-optimised pool
+# --------------------------------------------------------------------------- #
+# A FOURTH pool, not a resized `train-huge`, because vm_size forces pool
+# replacement and that kills every running task.
+#
+# The als_v6 pools are 2 GiB/vCPU. That was right for the scalar trainer, whose
+# worker holds ~773 MB, and its notes say so outright -- "RAM is NOT the
+# constraint". A PCS/CFR-BR worker on the 200 bb tree holds 10.85 GB, so the
+# same D64 fits 11 of 64 cores. E64ds_v6 has 512 GB and fits ~46. Scale-to-zero
+# means it costs nothing while unused. `just panic` must be run against ALL
+# FOUR pools.
+resource "azurerm_batch_pool" "train_mem" {
+  name                = "train-mem"
+  resource_group_name = azurerm_resource_group.main.name
+  account_name        = azurerm_batch_account.main.name
+  display_name        = "poker-solver memory-optimised pool (512 GB)"
+  vm_size             = var.pool_mem_vm_size
+  node_agent_sku_id   = "batch.node.ubuntu 22.04"
+
+  # `just panic` disables autoscale and forces a resize to zero, which leaves a
+  # pending resize operation behind. Without this flag the very next `just create`
+  # -- the documented way to re-arm autoscale after a panic -- fails with "because
+  # of pending resize operation", stranding the pool with autoscale off. The
+  # recovery path has to work unattended, so the pool always yields to Terraform.
+  stop_pending_resize_operation = true
+
+  # Gen2 image, as on the als_v6 pools. Edsv6 is Gen2-only too, and the failure
+  # mode is the same generic `AllocationFailed`.
+  storage_image_reference {
+    publisher = "canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  # Scale to zero at rest. $PendingTasks counts active AND running tasks, so a
+  # node is never counted idle while its task is still going; `taskcompletion`
+  # then guarantees a node is not deallocated out from under a running task -- both
+  # matter here because a task runs for hours.
+  # MEASURED CONSTRAINTS, both found by running this against Azure:
+  #
+  #  * Comments are `//`. A `#` comment is rejected ("Invalid character"), and
+  #    an invalid formula means the pool silently stops autoscaling.
+  #  * GetSample MUST use the two-argument form. The one-argument form demands
+  #    70% sample coverage and THROWS below it, and a thrown formula aborts the
+  #    whole evaluation -- so an idle pool (thin data, by definition) refuses to
+  #    scale UP. Observed: `InsufficientSampleData: wanted 70%, received 50%`
+  #    while the evaluation had already computed the correct target.
+  #
+  # There is deliberately NO CPU-based stall clause here. One was written and
+  # then removed: `$CPUPercent` reports a sample PERCENTAGE on this pool but
+  # yields no usable values -- `avg`/`max`/`Count` over it all fail, and `avg`
+  # returns NaN even with a live busy node and 99% coverage. A backstop that
+  # cannot fire is worse than none, because it reads like protection. Hang
+  # protection is the task-level maxWallClockTime instead; see infra/README.md.
+  auto_scale {
+    evaluation_interval = "PT5M"
+    formula             = <<-EOT
+      maxNodes = ${var.pool_mem_max_nodes};
+      pending = max($PendingTasks.GetSample(5 * TimeInterval_Minute, 20));
+      $TargetDedicatedNodes = min(maxNodes, pending);
+      $NodeDeallocationOption = taskcompletion;
+    EOT
+  }
+
+  # The durable share, mounted on every node. Code snapshots, card abstractions,
+  # published runs and eval records all travel through here.
+  #
+  # MOUNT OPTIONS ARE A RELIABILITY CONTROL, not tuning. Two nodes have gone
+  # `unusable` with MountConfigurationError MID-LEG (not at startup), stranding a
+  # task that Batch then reports as `running` forever. Both happened while
+  # publishing multi-GB checkpoint snapshots, which is the only sustained SMB
+  # load this pool generates.
+  #
+  #   vers=3.1.1    Azure Files' recommended dialect; 3.0 predates the reconnect
+  #                 and encryption improvements, and this share supports it.
+  #   nosharesock   a dedicated TCP connection for this mount rather than one
+  #                 shared across mounts to the same server -- one stalled
+  #                 operation then cannot take the whole mount down with it.
+  #   actimeo=30    caches attributes for 30s. Publishing walks thousands of
+  #                 files with cp -u, which stats every one; without this each
+  #                 stat is a round trip and the metadata traffic alone can
+  #                 exhaust the share's IOPS allowance.
+  #   mfsymlinks    symlink support, so a copy cannot fail on one unexpectedly.
+  mount {
+    azure_file_share {
+      account_name        = data.azurerm_storage_account.store.name
+      account_key         = data.azurerm_storage_account.store.primary_access_key
+      azure_file_url      = "https://${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.store_share_name}"
+      relative_mount_path = "shared"
+      mount_options       = "-o vers=3.1.1,dir_mode=0777,file_mode=0777,serverino,nosharesock,actimeo=30,mfsymlinks"
+    }
+  }
+
+  # Edsv6 DOES have a local temp disk, but the start task finds its working disk
+  # by matching `data_disk_gb` exactly and skipping anything already mounted --
+  # and the agent mounts the temp disk at boot. So an attached disk keeps the
+  # start script identical across all four pools rather than special-casing one.
+  data_disks {
+    lun                  = 0
+    disk_size_gb         = var.data_disk_gb
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+  }
+
+  # Runs once per node, before any task. Inlined rather than fetched from a
+  # resource file so the pool has no external dependency to keep in sync.
+  #
+  # Three jobs: make the data disk usable, install the interpreter toolchain, and
+  # pull the card abstraction down to LOCAL disk. That last one is deliberate --
+  # the abstraction is mmapped during training, and every page fault against the
+  # SMB mount would be a network round-trip.
+  # base64, NOT jsonencode: the script has to survive being a single Batch
+  # command-line string. jsonencode turns newlines into a literal `\n` (so the
+  # whole script arrives as one physical line), escapes `&&` to `&&`,
+  # and any `$`-escaping applied on top is doubly wrong. A base64 blob is
+  # alphanumeric, so nothing in it can be reinterpreted by Terraform or by bash.
+  start_task {
+    command_line       = "/bin/bash -c 'echo ${base64encode(local.start_script)} | base64 -d | bash'"
+    task_retry_maximum = 1
+    wait_for_success   = true
+
+    user_identity {
+      auto_user {
+        elevation_level = "Admin"
+        scope           = "Pool"
+      }
+    }
+  }
+}

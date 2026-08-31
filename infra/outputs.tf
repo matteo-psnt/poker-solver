@@ -10,6 +10,9 @@ locals {
     # 64 x the $0.043/vCPU-hr line the three measured SKUs all land on;
     # re-measure with `poker-solver cost` once the pool has billing history.
     "standard_d64als_v6" = "$2.752/hr/node"
+    # RETAIL, not measured: this pool has no billing history yet. Azure retail
+    # prices API, swedencentral, Linux consumption, read 2026-08-31.
+    "standard_e64ds_v6" = "$5.565/hr/node"
   }
 }
 
@@ -36,6 +39,10 @@ output "pool_big_id" {
 
 output "pool_huge_id" {
   value = azurerm_batch_pool.train_huge.name
+}
+
+output "pool_mem_id" {
+  value = azurerm_batch_pool.train_mem.name
 }
 
 output "resource_group" {
@@ -75,4 +82,9 @@ output "pool_big_hourly_cost" {
 output "pool_huge_hourly_cost" {
   description = "USD/hr PER NODE on the train-huge pool. Same table, other SKU."
   value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_huge.vm_size), "see the Azure price list")
+}
+
+output "pool_mem_hourly_cost" {
+  description = "USD/hr PER NODE on the train-mem pool. Same table, other SKU."
+  value       = lookup(local.node_rates, lower(azurerm_batch_pool.train_mem.vm_size), "see the Azure price list")
 }

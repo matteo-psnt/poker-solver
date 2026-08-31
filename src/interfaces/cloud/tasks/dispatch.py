@@ -148,7 +148,14 @@ def _pool_binding(config: CloudConfig, pool: str) -> tuple[str, str]:
                 "(it adds `train-huge`), then re-run; `--pool train` works now."
             )
         return config.pool_huge_id, "-huge"
-    raise CommandError(f"Unknown pool {pool!r}; expected 'train', 'big' or 'huge'.")
+    if pool == "mem":
+        if not config.pool_mem_id:
+            raise CommandError(
+                "The memory-optimised pool is not in the Terraform state. Apply infra/ "
+                "(it adds `train-mem`), then re-run; `--pool huge` works now."
+            )
+        return config.pool_mem_id, "-mem"
+    raise CommandError(f"Unknown pool {pool!r}; expected 'train', 'big', 'huge' or 'mem'.")
 
 
 def _stamped(task: TaskSpec) -> TaskSpec:

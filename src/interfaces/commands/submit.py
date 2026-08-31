@@ -50,10 +50,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--pool",
-        choices=("train", "big", "huge"),
+        choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it: train (D16), big (the train-big D32 pool) or "
-        "huge (the train-huge D64 pool, 32 physical cores).",
+        help="Which pool runs it: train (D16), big (the train-big D32 pool), "
+        "huge (the train-huge D64 pool, 32 physical cores) or mem (the train-mem "
+        "E64 pool, 512 GB -- the only one that fits a 200 bb PCS run's workers).",
     )
     parser.add_argument(
         "--workers",
