@@ -196,6 +196,12 @@ def _py_spy(
     node came back a valid speedscope document with zero frames in it. An empty
     profile is worse than a failure -- it looks like an answer.
 
+    `--nonblocking` is the DEFAULT and is dropped for the native attempt, which
+    refuses it: "Can't get native stack traces with the --nonblocking option."
+    So the native pass stops the process for each sample and the fallback does
+    not -- which is the honest trade, since native frames are the only reason
+    to pay anything at all here.
+
     `uv run --with` rather than a dependency: the nodes sync the dev group and
     have no use for a profiler in every image. By the time any child is running
     `uv sync` has completed, so the tool resolves from a warm cache.
@@ -216,10 +222,8 @@ def _py_spy(
         "--output",
         str(destination),
         "--idle",
-        "--nonblocking",
     ]
-    if native:
-        argv.append("--native")
+    argv.append("--native" if native else "--nonblocking")
     return subprocess.run(argv, capture_output=True, text=True, timeout=seconds + 180, check=False)
 
 
