@@ -596,6 +596,7 @@ PAYLOADS: dict[str, Any] = {
         truncated_hands=2,
         expected="check-call",
         within_expectation=True,
+        z_score=0.1,
     ),
     "benchmark-board": BoardPayload(
         game="HUNL 200BB",

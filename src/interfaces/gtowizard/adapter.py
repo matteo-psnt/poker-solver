@@ -200,7 +200,11 @@ def reconstruct(blueprint: ScorableBlueprint, frame: Frame, scale: TableScale) -
         if truncated:
             break
 
-    state, consumed = advance_chance(state, board, consumed)
+    if not truncated:
+        # Only past a COMPLETE replay: a `break` above left betting unfinished,
+        # and advancing here would deal the turn and river into a state whose
+        # flop never closed.
+        state, consumed = advance_chance(state, board, consumed)
     if not truncated and (state.is_terminal or state.current_player != seat):
         # Their frame says it is our turn; if ours disagrees the replay drifted,
         # which is worth knowing about rather than answering from the wrong seat.

@@ -183,6 +183,32 @@ class TestLoop:
         assert len(path.read_text().strip().splitlines()) == 4
 
 
+class TestBadFrames:
+    def test_a_live_frame_offering_nothing_is_named_not_answered(self) -> None:
+        """The failure `allows`' old permissive-empty default would have caused.
+
+        Not over, and no legal action: every agent falls through to its last
+        resort and sends something the server rejects, and a 4xx mid-hand
+        abandons a hand that would otherwise have been scored.
+        """
+
+        class OffersNothing(FakeServer):
+            def new_hand(self, game_name: str = "") -> Frame:
+                self.hands += 1
+                return Frame.parse(
+                    {
+                        "hand_id": self.hands,
+                        "game": GAME,
+                        "game_state": state(history=[], legal=[]),
+                    }
+                )
+
+        server = OffersNothing(winnings=0.0, aivat=0.0)
+        tally = session.run(server, CheckCall(), num_hands=1, concurrency=1)
+        assert tally.failed == 1
+        assert server.sent == []
+
+
 class TestRunaway:
     def test_a_hand_that_never_ends_is_cut_off_rather_than_burning_the_run(self) -> None:
         class NeverEnds(FakeServer):

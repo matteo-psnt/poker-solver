@@ -25,7 +25,14 @@ HERO = 1
 VILLAIN = 0
 
 
-def frame(street: str, history: list[str], board: str = "", **overrides: object) -> Frame:
+def frame(
+    street: str,
+    history: list[str],
+    board: str = "",
+    *,
+    legal_actions: list[str] | None = None,
+    **overrides: object,
+) -> Frame:
     state = {
         "street": street,
         "common_pot": 150,
@@ -36,7 +43,7 @@ def frame(street: str, history: list[str], board: str = "", **overrides: object)
             {"name": "GTO Wizard AI", "stack": 19900, "position": "BB", "hole_cards": None},
             {"name": "us", "stack": 19950, "position": "BTN", "hole_cards": "AhKd"},
         ],
-        "legal_actions": ["f", "c", "b"],
+        "legal_actions": ["f", "c", "b"] if legal_actions is None else legal_actions,
         "raise_range": {"min": 200, "max": 20000},
         "action_history": history,
         "has_gto_wizard_folded": False,
@@ -124,6 +131,21 @@ class TestGuards:
     def test_a_missing_required_field_is_named(self) -> None:
         with pytest.raises(ProtocolError, match="game_state"):
             Frame.parse({"hand_id": 1, "game": GAME})
+
+
+class TestAllows:
+    def test_only_what_the_frame_names_is_allowed(self) -> None:
+        turn = frame("preflop", [], legal_actions=["f", "c"]).turn
+        assert turn.allows("f")
+        assert not turn.allows("b")
+
+    def test_an_empty_list_allows_nothing_at_all(self) -> None:
+        # It once allowed everything, on the theory that a fixture predating the
+        # field should still be answered. On a LIVE frame that turns "the server
+        # named nothing" into "yes", and the resulting 4xx abandons a hand that
+        # would otherwise have been scored.
+        turn = frame("preflop", [], legal_actions=[]).turn
+        assert not any(turn.allows(action) for action in ("f", "c", "k", "b"))
 
 
 class TestGame:
