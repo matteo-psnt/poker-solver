@@ -44,6 +44,8 @@ POLL_SECONDS = 15
 # Long enough that a worker between two batches still shows CPU, short enough
 # that nobody notices it before their profile starts.
 SETTLE_SECONDS = 2.0
+# One re-read of a request whose write may still be landing. See `_body`.
+REREAD_SECONDS = 2.0
 
 # `uv run` is the child this wrapper starts; the interpreter doing the work is
 # its grandchild. Profiling the shim shows an empty flamegraph.
@@ -144,6 +146,24 @@ def python_worker(root: int, settle: float = SETTLE_SECONDS) -> int | None:
     return stalled if stalled is not None and total[stalled] > 0 else None
 
 
+def _body(request: Path) -> str:
+    """The request's contents, once they look like a WHOLE write.
+
+    The laptop writes a request over the REST API and this reads it back off an
+    SMB mount, so a poll can see the file before its bytes: the body reads
+    empty, parses as "unset", and 180 seconds silently becomes the 30-second
+    default -- measured, on a request that asked for 180. `profile` therefore
+    ends every request with a newline, and a body without one is re-read once
+    before it is believed. A `touch` has no newline either, so it costs one
+    re-read and then means what it always meant.
+    """
+    raw = request.read_text()
+    if not raw.endswith("\n"):
+        time.sleep(REREAD_SECONDS)
+        raw = request.read_text()
+    return raw.strip()
+
+
 def take_request(profile_dir: Path, task_id: str) -> int | None:
     """Seconds asked for, or None. Consumes the request so it fires once.
 
@@ -155,7 +175,7 @@ def take_request(profile_dir: Path, task_id: str) -> int | None:
     try:
         if not request.is_file():
             return None
-        body = request.read_text().strip()
+        body = _body(request)
     except OSError:
         return None
 
