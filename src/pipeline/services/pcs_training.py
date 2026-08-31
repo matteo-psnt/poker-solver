@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel
 
@@ -66,6 +66,26 @@ class PcsTrainingOutput(BaseModel):
 # not carry into a continuation, so the run's own record is the only thing that
 # knows; RunTracker.verify_trainer_knobs is where that is enforced.
 TRAINER_BLOCKS = ("solver", "pcs")
+
+
+class WorkerFootprint(TypedDict):
+    br_streets: str
+    runouts: int
+    kernels: int
+
+
+def worker_footprint(config: Config) -> WorkerFootprint:
+    """The kwargs describing one worker's memory, for the clamp AND the log line.
+
+    ``runout_mode='turn'`` holds one kernel per runout, because the joint
+    maximisation needs their values at the same time; sizing the clamp for a
+    single kernel oversubscribes the node by that factor.
+    """
+    return {
+        "br_streets": config.pcs.cfr_br,
+        "runouts": config.pcs.runouts_per_flop,
+        "kernels": config.pcs.runouts_per_flop if config.pcs.runout_mode == "turn" else 1,
+    }
 
 
 def train_pcs(
@@ -155,8 +175,9 @@ def train_pcs(
         )
     extra = pcs_parallel.trunk_arrays(config, tree)
     shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1) + 4 * sum(extra.values())
+    footprint = worker_footprint(config)
     safe = pcs_parallel.ram_safe_workers(
-        tree, compiled.num_terminals, shared_bytes=shared, br_streets=config.pcs.cfr_br
+        tree, compiled.num_terminals, shared_bytes=shared, **footprint
     )
     requested = num_workers or (os.cpu_count() or 1)
     workers = min(requested, safe)
@@ -166,14 +187,7 @@ def train_pcs(
         workers,
         requested,
         safe,
-        pcs_parallel.worker_bytes(
-            tree,
-            compiled.num_terminals,
-            br_streets=config.pcs.cfr_br,
-            runouts=config.pcs.runouts_per_flop,
-            kernels=config.pcs.runouts_per_flop if config.pcs.runout_mode == "turn" else 1,
-        )
-        / 1e9,
+        pcs_parallel.worker_bytes(tree, compiled.num_terminals, **footprint) / 1e9,
         config.pcs.runouts_per_flop,
         config.pcs.cfr_br,
     )
