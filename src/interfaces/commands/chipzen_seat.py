@@ -17,15 +17,22 @@ to the share.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from src.interfaces.chipzen.seat import CLOCK_FRACTION, TIGHT_CLOCK_MS
+from src.interfaces.chipzen.seat import (
+    CLOCK_FRACTION,
+    DEFAULT_POLICY_THRESHOLD,
+    TIGHT_CLOCK_MS,
+)
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import argparse
@@ -121,6 +128,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the whole budget, so this is how long each decision takes.",
     )
     parser.add_argument(
+        "--policy-threshold",
+        type=float,
+        default=DEFAULT_POLICY_THRESHOLD,
+        help="Zero every action below this share of its infoset's average "
+        f"strategy, then renormalise (default {DEFAULT_POLICY_THRESHOLD}, which "
+        "measured 940.1 -> 854.0 mbb/hand on the programme gate over three "
+        "seeds). 0 disables it; 0.10 measured WORSE, so this is not a knob to "
+        "turn up. Applied once at load, so the resolver reads the thresholded "
+        "table too -- a composite the gate has NOT measured.",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="Play a single match and exit, rather than holding the seat.",
@@ -150,6 +168,8 @@ class ChipzenSeatPayload(BaseModel):
     """None lets each match size it from the clock it enforces."""
     env: str | None = None
     bot_id: str | None = None
+    policy_threshold: float = DEFAULT_POLICY_THRESHOLD
+    """Zeroed below this share of a row, at load. 0 fields the table as trained."""
     once: bool = False
     seek: bool = True
     """Whether to ask for matches. False is an explicit `--no-seek`."""
@@ -197,6 +217,7 @@ def run(args: argparse.Namespace) -> ChipzenSeatPayload:
         budget_ms=args.budget_ms,
         env=args.env,
         bot_id=bot_id,
+        policy_threshold=args.policy_threshold,
         once=args.once,
         seek=not args.no_seek,
     )
@@ -213,7 +234,7 @@ def _replay_payload(args: argparse.Namespace, run_dir: Path) -> ChipzenSeatPaylo
     from src.interfaces.chipzen.seat import BlueprintSeat  # noqa: PLC0415 -- see module docstring
 
     recorded = _load_recording(Path(args.replay))
-    blueprint = _build_blueprint(run_dir, args.at)
+    blueprint = _build_blueprint(run_dir, args.at, args.policy_threshold)
     seat = BlueprintSeat.for_match(
         blueprint,
         {"game_config": recorded["game_config"]},
@@ -230,6 +251,7 @@ def _replay_payload(args: argparse.Namespace, run_dir: Path) -> ChipzenSeatPaylo
         mode="replay",
         resolver=False if args.no_resolver else None,
         budget_ms=args.budget_ms,
+        policy_threshold=args.policy_threshold,
         decision=decision,
         depth_matches=seat.scale.depth_matches,
         their_depth=seat.scale.their_depth,
@@ -253,20 +275,38 @@ def _load_recording(path: Path) -> dict[str, Any]:
     return recorded
 
 
-def _build_blueprint(run_dir: Path, at_iteration: int | None):
-    """A run directory on local disk -> a blueprint. ~1 min in production."""
-    from src.pipeline.services.scoring._shared import (  # noqa: PLC0415 -- see module docstring
+def _build_blueprint(run_dir: Path, at_iteration: int | None, policy_threshold: float = 0.0):
+    """A run directory on local disk -> a blueprint. ~1 min in production.
+
+    ``policy_threshold`` is spent HERE, once, rather than per decision: the
+    resolver reads the blueprint for leaf values and range inference as well as
+    for the fall-through action, and a transform applied at one call site would
+    reach one of the three.
+    """
+    from src.engine.solver.policy.threshold import (  # noqa: PLC0415 -- see module docstring
+        apply_policy_threshold,
+    )
+    from src.pipeline.services.scoring._shared import (  # noqa: PLC0415 -- see above
         build_blueprint_for,
     )
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
     metadata = RunTracker.load(run_dir).metadata
-    solver, _storage, _policy = build_blueprint_for(
+    solver, storage, _policy = build_blueprint_for(
         run_dir,
         metadata,
         abstraction_hash=metadata.card_abstraction_hash,
         at_iteration=at_iteration,
     )
+    if policy_threshold > 0.0:
+        changed, trained = apply_policy_threshold(storage, solver.tree, policy_threshold)
+        logger.info(
+            "Policy threshold %.3f pruned %s of %s trained rows (%.1f%%).",
+            policy_threshold,
+            f"{changed:,}",
+            f"{trained:,}",
+            100.0 * changed / trained if trained else 0.0,
+        )
     return solver
 
 
@@ -307,7 +347,7 @@ def _play(payload: ChipzenSeatPayload) -> None:
         f"Seating {payload.run} on chipzen {payload.env} as {payload.bot_id or 'the configured bot'}."
     )
     run_seat(
-        lambda: _build_blueprint(run_dir, payload.at_iteration),
+        lambda: _build_blueprint(run_dir, payload.at_iteration, payload.policy_threshold),
         bot_id=payload.bot_id,
         token=os.environ.get(TOKEN_ENV),
         env=payload.env or DEFAULT_ENV,
