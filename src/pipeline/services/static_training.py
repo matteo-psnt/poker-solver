@@ -40,8 +40,9 @@ PROGRESS_ARTIFACT = "train-progress.json"
 logger = logging.getLogger(__name__)
 
 # What the scalar trainer IS, for the resume guard. No `pcs` section: this
-# trainer never reads one, so a difference there is not a lineage break.
-TRAINER_BLOCKS = ("solver",)
+# trainer never reads one, so a difference there is not a lineage break. `game`
+# is one, though -- it sizes the tree the checkpoint is shaped for.
+TRAINER_BLOCKS = ("game", "solver")
 
 
 class StaticTrainingOutput(BaseModel):

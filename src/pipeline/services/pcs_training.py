@@ -65,7 +65,12 @@ class PcsTrainingOutput(BaseModel):
 # The config sections that decide what the PCS trainer IS. `--set` overrides do
 # not carry into a continuation, so the run's own record is the only thing that
 # knows; RunTracker.verify_trainer_knobs is where that is enforced.
-TRAINER_BLOCKS = ("solver", "pcs")
+#
+# `game` is in here because it sizes the TREE: a dropped
+# `--set game__starting_stack=400` rebuilds a 100 bb tree and appends its rungs
+# to a 200 bb checkpoint, and the action hash, the abstraction hash and the
+# kernel name all still match.
+TRAINER_BLOCKS = ("game", "solver", "pcs")
 
 
 class WorkerFootprint(TypedDict):

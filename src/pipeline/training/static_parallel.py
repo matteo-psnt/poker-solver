@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import queue
 import random
 import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
@@ -41,7 +42,7 @@ from src.shared import run_events
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from src.engine.solver.protocols import BucketingStrategy
@@ -277,6 +278,42 @@ def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
         logger.warning("Could not record the checkpoint event; training continues.", exc_info=True)
 
 
+REAP_POLL_SECONDS = 30.0
+
+
+class _Results(Protocol):
+    """The read side of the result queue -- narrow, so a `queue.Queue` can stand in."""
+
+    def get(self, block: bool = ..., timeout: float | None = ...) -> dict[str, Any]: ...
+
+
+def _collect(result_queue: _Results, processes: Sequence[Any]) -> list[dict[str, Any]]:
+    """One result per worker, or the reason there will never be one.
+
+    A worker killed outright -- the OOM killer's pick when the clamp
+    oversubscribes the node -- never puts a result, and a bare `get()` then
+    blocks until the task's external timeout, discarding a finished chunk that
+    was already complete in shared memory. Measured: one killed worker cost a
+    D64 probe all 40 minutes and every rung it had run.
+    """
+    results: list[dict[str, Any]] = []
+    while len(results) < len(processes):
+        try:
+            results.append(result_queue.get(timeout=REAP_POLL_SECONDS))
+        except queue.Empty:
+            # Only a NONZERO exit is proof of a missing result: a worker that
+            # finished has already put one, and may exit before we read it.
+            dead = [p for p in processes if p.exitcode not in (None, 0)]
+            if dead:
+                codes = ", ".join(f"pid {p.pid} exit {p.exitcode}" for p in dead)
+                raise RuntimeError(
+                    f"{len(dead)} of {len(processes)} static workers died without a result "
+                    f"({codes}); a negative code is a signal, and -9 is the OOM killer -- "
+                    "the node cannot hold this worker count, so lower `--workers`."
+                ) from None
+    return results
+
+
 def train_static_parallel(
     config: Config,
     *,
@@ -402,7 +439,7 @@ def train_static_parallel(
             for process in processes:
                 process.start()
 
-            results = [result_queue.get() for _ in processes]
+            results = _collect(result_queue, processes)
             for process in processes:
                 process.join()
 
