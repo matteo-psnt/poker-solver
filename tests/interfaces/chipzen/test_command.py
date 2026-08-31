@@ -157,7 +157,7 @@ class TestALadderSurvivesABadRung:
             return build_trained_test_solver(iterations=2, starting_stack=100 * len(calls))
 
         monkeypatch.setattr(module, "_build_blueprint", _load)
-        monkeypatch.setattr(module, "_parse_rungs", lambda p: [(tmp_path / "b", None)])
+        monkeypatch.setattr(module, "_parse_rungs", lambda p: [(tmp_path / "b", None, 0.02)])
         payload = module.ChipzenSeatPayload(
             run="a", run_dir=str(tmp_path / "a"), runs_dir=str(tmp_path), mode="live"
         )
@@ -181,3 +181,52 @@ class TestALadderSurvivesABadRung:
         )
         with pytest.raises(RuntimeError, match="no checkpoint"):
             module._build_ladder(payload)
+
+
+class TestPerRungThresholds:
+    """`run:at:threshold` — the optimum moves with depth.
+
+    0.02 is the measured point at 100 bb, but 0.10 beat it by 38.0 +/- 15.6
+    mbb/hand at 25 bb and 0.05 by 19.1 +/- 6.4 at 6 bb. One threshold for every
+    rung would leave that on the table.
+    """
+
+    def _payload(self, tmp_path, rungs, threshold=0.02):
+        # `resolve_run_dir` insists the directory exists, which is the point of
+        # it -- a typo'd rung should fail here rather than at load.
+        for spec in rungs:
+            (tmp_path / spec.partition(":")[0]).mkdir(exist_ok=True)
+        return chipzen_seat.ChipzenSeatPayload(
+            run="a",
+            run_dir=str(tmp_path / "a"),
+            runs_dir=str(tmp_path),
+            mode="live",
+            rungs=rungs,
+            policy_threshold=threshold,
+        )
+
+    def test_a_rung_can_carry_its_own_threshold(self, tmp_path):
+        parsed = chipzen_seat._parse_rungs(self._payload(tmp_path, ["b:4000:0.1"]))
+        assert parsed[0][1] == 4000
+        assert parsed[0][2] == 0.1
+
+    def test_a_rung_without_one_inherits_the_default(self, tmp_path):
+        parsed = chipzen_seat._parse_rungs(self._payload(tmp_path, ["b:4000"]))
+        assert parsed[0][2] == 0.02
+
+    def test_a_bare_rung_name_still_works(self, tmp_path):
+        parsed = chipzen_seat._parse_rungs(self._payload(tmp_path, ["b"]))
+        assert parsed[0][1] is None
+        assert parsed[0][2] == 0.02
+
+    def test_each_rung_is_loaded_with_its_own(self, tmp_path, monkeypatch):
+        seen: list[float] = []
+
+        def _load(run_dir, at, threshold=0.0, *, play_only=False):
+            seen.append(threshold)
+            return build_trained_test_solver(iterations=2, starting_stack=100 * len(seen))
+
+        monkeypatch.setattr(chipzen_seat, "_build_blueprint", _load)
+        chipzen_seat._build_ladder(self._payload(tmp_path, ["b:4000:0.1", "c:4000:0.05"]))
+        # The deepest takes `--policy-threshold`; each rung takes its own.
+        assert seen == [0.02, 0.1, 0.05]
