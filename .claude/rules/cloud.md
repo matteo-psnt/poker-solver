@@ -61,7 +61,11 @@ paths:
   anything. It needs `kernel.yama.ptrace_scope=0`, which the START TASK sets:
   the default 1 permits tracing only DESCENDANTS, and the profiler is the
   trainer's sibling. A node that booted before that line was added refuses
-  every attach, and says so as `Permission Denied`.
+  every attach, and says so as `Permission Denied`. **numba's JIT frames come
+  back as bare addresses against `?:0`** — measured; there is no symbol table in
+  anonymous mmap. numpy's C extension resolves properly, so the split between
+  "in numpy" and "in the JIT" is readable even though the JIT's own names
+  are not.
 - **Never point `runs_dir` at the share.** Active runs live on the node's
   `/mnt/work` data disk and are *published* to the share.
 - **`infra/store/` is a separate Terraform state** holding the durable share, so
