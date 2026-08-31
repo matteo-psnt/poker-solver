@@ -422,6 +422,14 @@ class RunMetadata:
                 start_iter=self.iterations,
                 git_commit=get_git_commit(),
                 git_dirty=is_git_dirty(),
+                # All FOUR, like `new()`. A commit does not identify an arm here
+                # -- work runs in several worktrees at once, each carrying its
+                # change uncommitted, so two arms are routinely the same hash
+                # with the same dirty bit and differ only in branch. Dropping
+                # these two left every RESUMED attempt with null provenance,
+                # which is exactly the case per-attempt provenance exists for.
+                git_branch=get_git_branch(),
+                code_snapshot=get_code_snapshot(),
             )
         )
 

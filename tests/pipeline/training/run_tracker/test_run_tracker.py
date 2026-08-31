@@ -575,6 +575,32 @@ class TestWhichWorktreeTrainedIt:
             "worktree-hybrid-kernels"
         )
 
+    def test_a_resumed_attempt_carries_it_too(self, monkeypatch, tmp_path):
+        """The measured hole: `mark_resumed` recorded commit and dirty but not
+        branch or snapshot, so the provenance per-attempt records exist FOR was
+        null on every resume -- and a resume from another worktree is exactly
+        the case that motivates them."""
+        from src.pipeline.training.run_tracker import metadata as metadata_module
+
+        monkeypatch.setattr(metadata_module, "get_git_branch", lambda: "worktree-a")
+        monkeypatch.setattr(metadata_module, "get_code_snapshot", lambda: "code-20260101_000000")
+        tracker = RunTracker(
+            run_dir=tmp_path / "run-resume-provenance",
+            config_name="quick_test",
+            config=Config.default(),
+            action_config_hash="abc123",
+        )
+        tracker.update(iterations=10, runtime_seconds=1.0, num_infosets=5, storage_capacity=100)
+
+        monkeypatch.setattr(metadata_module, "get_git_branch", lambda: "worktree-b")
+        monkeypatch.setattr(metadata_module, "get_code_snapshot", lambda: "code-20260202_000000")
+        RunTracker.load(tracker.run_dir).mark_resumed()
+
+        resumed = RunTracker.load(tracker.run_dir).metadata.attempts[-1]
+        assert resumed.kind == "resume"
+        assert resumed.git_branch == "worktree-b"
+        assert resumed.code_snapshot == "code-20260202_000000"
+
     def test_the_first_attempt_carries_it_too(self, monkeypatch):
         """Per attempt, because a resume can come from a different worktree."""
         meta = self._metadata(monkeypatch, "worktree-vector-cfr")
