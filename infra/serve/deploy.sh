@@ -253,11 +253,17 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # POLICY_THRESHOLD must never be empty here: the unit expands it unquoted into
 # argparse. 0.02 is the measured point (940.1 -> 854.0 mbb/hand on the gate over
 # three seeds); 0 fields the table as trained.
+#
+# SEAT_EXTRA carries $AT through to the seat, which `blueprint-serve` has no flag
+# for. The two want different things from one staged run: the reader takes the
+# manifest head, and the seat should field the rung a NUMBER was measured at.
+# Empty when $AT is unset, which the unit expands to no arguments.
 sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
+SEAT_EXTRA=${AT:+--at $AT}
 EOF
 
 sudo systemctl daemon-reload
