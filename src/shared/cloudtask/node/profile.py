@@ -28,6 +28,7 @@ import contextlib
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -40,6 +41,9 @@ PROFILE_SUFFIX = ".speedscope.json"
 DEFAULT_SECONDS = 30
 MAX_SECONDS = 600
 POLL_SECONDS = 15
+# Long enough that a worker between two batches still shows CPU, short enough
+# that nobody notices it before their profile starts.
+SETTLE_SECONDS = 2.0
 
 # `uv run` is the child this wrapper starts; the interpreter doing the work is
 # its grandchild. Profiling the shim shows an empty flamegraph.
@@ -79,50 +83,65 @@ def _proc_stat(pid: int) -> Proc | None:
         return None
 
 
-def python_worker(root: int) -> int | None:
-    """The BUSIEST interpreter under ``root``, or None while none is running.
-
-    Ranked by CPU time, not by depth. Depth was the first rule and it profiled
-    `multiprocessing.resource_tracker` for thirty seconds -- a bookkeeping
-    process that sits in `select()`, ties for deepest, and yields a plausible
-    flamegraph that is 100% the wrong process. CPU time is the property that
-    actually separates a worker from a helper, and it is already in the stat
-    line being read for the tree.
-    """
+def _process_table() -> dict[int, Proc]:
+    """Every readable pid on the box, by pid."""
     try:
         pids = [int(entry.name) for entry in Path("/proc").iterdir() if entry.name.isdigit()]
     except OSError:
+        return {}
+    found = {pid: _proc_stat(pid) for pid in pids}
+    return {pid: proc for pid, proc in found.items() if proc is not None}
+
+
+def python_worker(root: int, settle: float = SETTLE_SECONDS) -> int | None:
+    """The interpreter under ``root`` burning the most CPU RIGHT NOW.
+
+    Ranked on a DELTA across ``settle``, not on the cumulative counter, because
+    both cheaper rules picked the wrong process on a node and produced a
+    plausible flamegraph of it:
+
+    - deepest-first profiled `multiprocessing.resource_tracker`, which sits in
+      `select()` and is spawned as deep as the workers;
+    - cumulative CPU profiled the COORDINATOR, which had built 45M rows of
+      shared arrays before forking and so led on total ticks while sitting in
+      `connection._recv` waiting on the workers it had just started.
+
+    When nothing is moving the cumulative counter decides instead: a wedged run
+    is a thing worth profiling, and "no interpreter" would be the least useful
+    answer to "why has it stopped".
+    """
+    before = _process_table()
+    if not before:
         return None
+    time.sleep(settle)
+    after = _process_table()
 
-    stats: dict[int, Proc] = {}
-    for pid in pids:
-        found = _proc_stat(pid)
-        if found is not None:
-            stats[pid] = found
-
-    def under_root(pid: int) -> bool:
+    def under_root(pid: int, table: dict[int, Proc]) -> bool:
         """Whether ``pid`` sits anywhere below ``root``."""
         seen = set()
         while pid not in seen:
             if pid == root:
                 return True
             seen.add(pid)
-            parent = stats[pid].ppid if pid in stats else None
+            parent = table[pid].ppid if pid in table else None
             if parent is None or parent <= 1:
                 return False
             pid = parent
         return False
 
-    best: tuple[int, int] | None = None
-    for pid, proc in stats.items():
-        if not proc.comm.startswith(_PYTHON_NAMES) or not under_root(pid):
+    running: dict[int, int] = {}
+    total: dict[int, int] = {}
+    for pid, proc in after.items():
+        if not proc.comm.startswith(_PYTHON_NAMES) or not under_root(pid, after):
             continue
-        if best is None or proc.ticks > best[0]:
-            best = (proc.ticks, pid)
-    # Zero ticks everywhere means nothing has run yet, which is a "not ready",
-    # not a pick: profiling whichever process sorted first is how the wrong one
-    # gets chosen in the first place.
-    return best[1] if best and best[0] > 0 else None
+        running[pid] = proc.ticks - (before[pid].ticks if pid in before else proc.ticks)
+        total[pid] = proc.ticks
+
+    busiest = max(running, key=lambda pid: running[pid], default=None)
+    if busiest is not None and running[busiest] > 0:
+        return busiest
+    stalled = max(total, key=lambda pid: total[pid], default=None)
+    return stalled if stalled is not None and total[stalled] > 0 else None
 
 
 def take_request(profile_dir: Path, task_id: str) -> int | None:
