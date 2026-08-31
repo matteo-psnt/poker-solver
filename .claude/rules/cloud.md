@@ -50,14 +50,15 @@ paths:
   permanent: it suppresses reconciliation. `poker-solver tasks` is how you find
   out why a task died, because the run log cannot record a death (the container
   is gone first).
-- **To profile a task that is already running**, drop a file next to the run:
-  `<share>/profiles/<task-id>.request`, containing the seconds to sample (empty
-  = 30). The node picks it up within a poll, records the interpreter under its
-  child with `py-spy`, and writes `<task-id>.<attempt>.<n>.speedscope.json`
-  beside it for speedscope.app. Mid-job on purpose — the trigger is a file
-  rather than a submit flag because the environment a task runs under is closed
-  over `wire.KEYS`, and because you ask for a profile AFTER noticing something.
-  Armed for training tasks only, and it cannot fail a task.
+- **To profile a task that is already running**: `poker-solver profile --task
+  <id>`, which writes `<share>/profiles/<id>.request`, waits for the node to
+  serve it and downloads the speedscope document. Mid-job on purpose — the
+  trigger is a file rather than a submit flag because the environment a task
+  runs under is closed over `wire.KEYS`, and because you ask for a profile AFTER
+  noticing something. Armed for training tasks only, and it cannot fail a task.
+  The node's log is the only place the reason for a profile that never arrives
+  is written, so read it (`logs --task <id> | grep profile`) before concluding
+  anything.
 - **Never point `runs_dir` at the share.** Active runs live on the node's
   `/mnt/work` data disk and are *published* to the share.
 - **`infra/store/` is a separate Terraform state** holding the durable share, so

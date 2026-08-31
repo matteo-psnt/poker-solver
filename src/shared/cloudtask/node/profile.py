@@ -138,14 +138,27 @@ def take_request(profile_dir: Path, task_id: str) -> int | None:
     return max(1, min(seconds, MAX_SECONDS))
 
 
-def record(pid: int, seconds: int, destination: Path, log: Callable[[str], None]) -> bool:
-    """Sample ``pid`` for ``seconds`` into ``destination``. Never raises.
+PTRACE_SCOPE = Path("/proc/sys/kernel/yama/ptrace_scope")
 
-    `--native` is asked for because the interesting frames are inside numba
-    kernels and a pure-Python profile of this workload is mostly one line of
-    traversal. Whether it resolves JIT-compiled symbols or reports them as
-    unknown is NOT established -- read the first profile before believing the
-    frame names.
+
+def _ptrace_scope() -> str:
+    """Yama's setting, which decides whether an attach is possible at all.
+
+    ``1`` is the one that matters here and the one a stderr line does not say:
+    a process may then only trace its own DESCENDANTS, and `py-spy` is started
+    by the wrapper, which makes it the trainer's SIBLING. Reading the byte turns
+    "exited 1" into a cause.
+    """
+    try:
+        return PTRACE_SCOPE.read_text().strip()
+    except OSError:
+        return "unreadable"
+
+
+def _py_spy(
+    pid: int, seconds: int, destination: Path, *, native: bool
+) -> subprocess.CompletedProcess[str]:
+    """One `py-spy record` invocation.
 
     `uv run --with` rather than a dependency: the nodes sync the dev group and
     have no use for a profiler in every image. By the time any child is running
@@ -166,31 +179,49 @@ def record(pid: int, seconds: int, destination: Path, log: Callable[[str], None]
         "speedscope",
         "--output",
         str(destination),
-        "--native",
         "--nonblocking",
     ]
+    if native:
+        argv.append("--native")
+    return subprocess.run(argv, capture_output=True, text=True, timeout=seconds + 180, check=False)
+
+
+def record(pid: int, seconds: int, destination: Path, log: Callable[[str], None]) -> bool:
+    """Sample ``pid`` for ``seconds`` into ``destination``. Never raises.
+
+    `--native` first because the interesting frames are inside numba kernels and
+    a pure-Python profile of this workload is mostly one line of traversal. It
+    is also the part most likely to be unavailable, so a failure falls back to
+    the plain profile rather than returning nothing: the two outcomes are
+    different answers -- a build without native support, versus an attach the
+    box will not permit at all.
+    """
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        done = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=seconds + 120,
-            check=False,
-        )
+        done = _py_spy(pid, seconds, destination, native=True)
+        if done.returncode != 0:
+            # BOTH streams. `uv run --with` writes its own download chatter to
+            # stderr, which is what the first failure on a node reported --
+            # py-spy's actual complaint was nowhere in the log.
+            log(f"profile: --native exited {done.returncode}: {_said(done)}")
+            log(f"profile: yama ptrace_scope={_ptrace_scope()} (1 = descendants only)")
+            done = _py_spy(pid, seconds, destination, native=False)
     except (OSError, subprocess.SubprocessError) as error:
         log(f"profile: could not run py-spy ({error})")
         return False
 
     if done.returncode != 0:
-        # The likeliest cause is ptrace being refused, which is a property of
-        # the box and not of this task -- say which so the next reader does not
-        # go looking in the training code.
-        log(f"profile: py-spy exited {done.returncode}: {done.stderr.strip()[:400]}")
+        log(f"profile: py-spy exited {done.returncode}: {_said(done)}")
         return False
 
     log(f"profile: {seconds}s of pid {pid} -> {destination.name}")
     return True
+
+
+def _said(done: subprocess.CompletedProcess[str]) -> str:
+    """Both streams, trimmed. Which one carries the reason is not knowable."""
+    both = f"{done.stdout.strip()} {done.stderr.strip()}".strip()
+    return both[-600:] if len(both) > 600 else both
 
 
 def watch(
@@ -229,7 +260,13 @@ def watch(
 def watcher(
     root: int, profile_dir: Path, task_id: str, log: Callable[[str], None]
 ) -> tuple[threading.Thread, threading.Event]:
-    """A started daemon thread serving profile requests, and its stop flag."""
+    """A started daemon thread serving profile requests, and its stop flag.
+
+    It announces the path it is watching because silence is otherwise
+    unreadable: with no line here, a profile that never appears cannot be told
+    apart from a watcher that never armed.
+    """
+    log(f"profile: watching {profile_dir}/{task_id}{REQUEST_SUFFIX} (seconds in the body)")
     stop = threading.Event()
     thread = threading.Thread(
         target=watch, args=(root, profile_dir, task_id, log, stop), name="profile", daemon=True

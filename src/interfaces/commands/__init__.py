@@ -105,6 +105,9 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "jobs", "Every queued/running task on the pool (--all includes finished jobs)."
             ),
             CommandRef("logs", "Read a task's log from the share (default) or live from its node."),
+            CommandRef(
+                "profile", "Sample a running task's stacks with py-spy and download the result."
+            ),
             CommandRef("tasks", "Per-task outcomes from the share, reconciled against Batch."),
             CommandRef(
                 "cancel", "Terminate a running task; its partial progress is published first."

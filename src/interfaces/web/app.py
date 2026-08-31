@@ -54,6 +54,7 @@ from src.interfaces.commands import (
     ledger,
     logs,
     pool_status,
+    profile,
     progress,
     push_code,
     push_data,
@@ -343,6 +344,19 @@ def create_app() -> FastAPI:
     @app.get("/api/logs/{task_id}", response_model=contract.LogLines, responses=ERRORS)
     def _log(task_id: str, lines: int = 200) -> JSONResponse:
         return answer(cache, logs.COMMAND, task=task_id, lines=lines)
+
+    # Two endpoints, because asking and reading are minutes apart. The node
+    # polls, records for the duration asked and then uploads, so the POST
+    # returns the moment the request is written (`no_wait`) and the listing is
+    # what the console polls -- an endpoint that blocked for the recording would
+    # hold a connection open for the length of a profile.
+    @app.get("/api/profiles", response_model=contract.Profile, responses=ERRORS)
+    def _profiles() -> JSONResponse:
+        return answer(cache, profile.COMMAND, list=True)
+
+    @app.post("/api/tasks/{task_id}/profile", response_model=contract.Profile, responses=ERRORS)
+    def _profile(task_id: str, seconds: int = 30) -> JSONResponse:
+        return answer(TtlCache(0.0), profile.COMMAND, task=task_id, seconds=seconds, no_wait=True)
 
     # A local directory read, and the only endpoint here that touches neither
     # Azure nor the share. It is what makes the dispatch form offerable at all:
