@@ -52,6 +52,7 @@ from src.interfaces.commands.progress import ProgressPayload, ProgressRow
 from src.interfaces.commands.prune_checkpoints import PrunePlan
 from src.interfaces.commands.push_code import PushedCodePayload
 from src.interfaces.commands.push_data import PushedDataPayload
+from src.interfaces.commands.reconcile_runs import Closure, ReconcilePlan
 from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
@@ -156,6 +157,22 @@ PAYLOADS: dict[str, Any] = {
         ],
         best_exploitability=0.5392,
         best_at_iterations=400,
+    ),
+    "reconcile-runs": ReconcilePlan(
+        runs_considered=301,
+        open_runs=28,
+        closures=[
+            Closure(
+                run="run-train-production-to300M-ctrlL-s101-224225-13802",
+                status="failed",
+                task_id="train-production-to300M-ctrlL-s101-224225-13802",
+                cause="killed",
+                cause_source="batch",
+                ended_at="2026-08-24T22:42:25Z",
+            )
+        ],
+        unsettled=["run-pcs-production-to4k-turn-river-072201-7245"],
+        no_evidence=["run-production-025433-1095"],
     ),
     "net-probe": ProbePayload(
         hostname="a1b2c3d4e5",

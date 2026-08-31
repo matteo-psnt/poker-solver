@@ -118,7 +118,9 @@ def _is_terminal(run_dir: Path) -> bool:
     except (OSError, ValueError):
         return False
     status = run_events.tail_value(events, "status", "running", kind=run_events.STATUS)
-    return status in {"completed", "failed", "cancelled"}
+    # `abandoned` is `reconcile-runs`' word for a run whose last task exited
+    # cleanly and was never continued. It stopped, which is all this asks.
+    return status in {"completed", "failed", "cancelled", "abandoned"}
 
 
 def _published_rungs(run_dir: Path) -> list[int]:

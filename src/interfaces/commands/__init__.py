@@ -142,6 +142,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "prune-checkpoints",
                 "Drop retained checkpoint rungs a settled run no longer needs (dry run by default).",
             ),
+            CommandRef(
+                "reconcile-runs",
+                "Close runs whose task died without recording a terminal status (dry run by default).",
+            ),
         ),
     ),
     CommandGroup(
