@@ -42,6 +42,7 @@ would be fielded.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import resource
@@ -54,7 +55,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from src.core.game.state import FULL_DECK, Card, GameState, Street
-from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_combos
+from src.engine.search.range_inference import (
+    ALL_COMBOS,
+    NUM_COMBOS,
+    PlayerRanges,
+    blocked_combos,
+)
+from src.engine.search.resolver import HUResolver
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
 from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.mccfr.chance import begin_street
@@ -70,6 +77,31 @@ if TYPE_CHECKING:
     from src.engine.solver.storage.policy_assembly import PolicyIterate
 
 logger = logging.getLogger(__name__)
+
+# The solve is pinned by ITERATIONS; this only stops the wall-clock budget from
+# cutting it short on a slow box.
+_RESOLVER_NO_CLOCK_MS = 10_000_000
+
+
+def _state_seed(context_key: tuple, board: tuple[Card, ...]) -> int:
+    """A stable seed for one public node.
+
+    blake2b, NOT `hash()`: Python randomizes string hashing per process, so a
+    forked worker seeds differently from its parent and the fork-join stops
+    being bit-identical -- measured as 579.600561 against 579.571435 at two
+    worker counts, and the same run drifting between processes.
+    """
+    payload = repr((context_key, tuple(card.mask for card in board))).encode()
+    return int.from_bytes(hashlib.blake2b(payload, digest_size=8).digest(), "big")
+
+
+def _normalized(reach: np.ndarray) -> np.ndarray:
+    """A reach vector as a probability range, or uniform when it is all zero."""
+    total = float(reach.sum())
+    if total <= 0.0:
+        return np.full(NUM_COMBOS, 1.0 / NUM_COMBOS, dtype=np.float64)
+    return reach / total
+
 
 _NUM_OPP_DEALS = math.comb(50, 2)
 _CARD_INDEX: dict[int, int] = {card.mask: i for i, card in enumerate(FULL_DECK)}
@@ -143,6 +175,22 @@ class PublicBRConfig:
     decompose: bool = False
     """Attribute the responder's gain to the public nodes it comes from. Does
     not change the number; costs one extra reach vector per walk."""
+    deployed: bool = False
+    """Measure blueprint+RESOLVER, the system actually fielded, instead of the
+    checkpoint's stored rows. The responder still best-responds exactly: the
+    resolver is fed ranges built from the two reach vectors the walk already
+    carries, and BOTH are the BLUEPRINT's (`_responder_values` advances own-reach
+    by the blueprint's sigma, never by the responder's choice), so sigma stays a
+    pure function of the public state and the backward pass is still a best
+    response to a FIXED strategy. Feeding the responder's own reach would be
+    more faithful to deployment and would silently destroy that."""
+    resolver_iterations: int = 200
+    """Pinned, never wall-clock budgeted: a time-budgeted solve makes the
+    measured strategy depend on how busy the box was, and this estimator's whole
+    value is that two runs of one checkpoint agree bit for bit."""
+    resolver_prior_weight: float = 50.0
+    """`resolver.root_prior_weight`. 0 is the unseeded solve, which regret
+    matching from zero regrets makes ~uniform at a pinned iteration count."""
     policy_iterate: PolicyIterate = "average"
     """Which strategy of the checkpoint is measured: the DCFR average, which
     `t^gamma` weighting makes a mostly-recent one, or the current regret-matched
@@ -419,6 +467,26 @@ class PublicTreeBestResponse:
         self._bucket_cache: dict[tuple, np.ndarray] = {}
         self._showdown_cache: dict[tuple, RunoutEvaluator] = {}
         self._policy_cache: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+        # Keyed by (context, BOARD): a resolver row is a subgame solve at the
+        # real state, so unlike the blueprint's per-bucket table it cannot be
+        # shared across the boards that sit under one betting context.
+        self._resolver_cache: dict[tuple, np.ndarray] = {}
+        self._resolver = (
+            HUResolver(
+                blueprint=blueprint,
+                action_model=blueprint.action_model,
+                rules=blueprint.rules,
+                config=blueprint.config.resolver.model_copy(
+                    update={
+                        "max_iterations": config.resolver_iterations,
+                        "root_prior_weight": config.resolver_prior_weight,
+                    }
+                ),
+                rng=np.random.default_rng(0),
+            )
+            if config.deployed
+            else None
+        )
         self._br_seat = 0
         self._tally = _Tally()
         # Fork-join state: a list while the preflop pass RECORDS flop subtrees,
@@ -745,7 +813,13 @@ class PublicTreeBestResponse:
         own_reach: np.ndarray,
         line: str,
     ) -> tuple[np.ndarray, np.ndarray]:
-        sigma, missing = self._policy_matrix(state, legal)
+        # The blueprint path is called with the ORIGINAL arity: the reaches are
+        # only meaningful to the resolver, and an existing test double patches
+        # this method with a two-argument stub.
+        if self._resolver is None:
+            sigma, missing = self._policy_matrix(state, legal)
+        else:
+            sigma, missing = self._policy_matrix(state, legal, (opp_reach, own_reach))
         tally = self._tally
         tally.decision_mass += float(opp_reach.sum())
         tally.missing_mass += float(opp_reach[missing].sum())
@@ -900,7 +974,10 @@ class PublicTreeBestResponse:
             self._on_branch(self._branches_done, self.branch_total)
 
     def _policy_matrix(
-        self, state: GameState, legal: tuple[Action, ...]
+        self,
+        state: GameState,
+        legal: tuple[Action, ...],
+        reaches: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Per-combo blueprint distribution over ``legal`` plus uniform-fallback mask.
 
@@ -926,6 +1003,9 @@ class PublicTreeBestResponse:
         # this method. Being on-tree is not assumed: `rows_at` resolves through
         # `tree.node_id`, which raises on a state the tree does not hold.
         context_key = (state.current_player, state.street, state.normalized_betting_sequence())
+        if self._resolver is not None and reaches is not None:
+            return self._resolver_matrix(state, legal, context_key, reaches)
+
         cached = self._policy_cache.get(context_key)
         if cached is None:
             rows, row_missing = blueprint_policy_table(
@@ -940,6 +1020,63 @@ class PublicTreeBestResponse:
         rows, row_missing = cached
         bucket_vec = self._bucket_vector(state.board, state.street)
         return rows[bucket_vec], row_missing[bucket_vec]
+
+    def _resolver_matrix(
+        self,
+        state: GameState,
+        legal: tuple[Action, ...],
+        context_key: tuple,
+        reaches: tuple[np.ndarray, np.ndarray],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """The DEPLOYED row at ``state``: a subgame solve blended with the blueprint.
+
+        ``reaches`` is ``(opp_reach, own_reach)`` from the walk -- the acting
+        blueprint player's and the responder's, BOTH under the blueprint. Feeding
+        them keeps the resolver's ranges a function of the public line only.
+
+        The seed is derived from the public state, not drawn from a shared RNG:
+        the leaf rollouts sample, and a shared stream would make the answer
+        depend on visit ORDER, which the fork-join is free to change.
+        """
+        board_key = (context_key, state.board)
+        cached = self._resolver_cache.get(board_key)
+        if cached is None:
+            opp_reach, own_reach = reaches
+            actor = state.current_player
+            hero = _normalized(opp_reach)
+            villain = _normalized(own_reach)
+            ranges = (
+                PlayerRanges(p0=hero, p1=villain)
+                if actor == 0
+                else PlayerRanges(p0=villain, p1=hero)
+            )
+            assert self._resolver is not None
+            self._resolver.rng = np.random.default_rng(_state_seed(context_key, state.board))
+            self._resolver.start_hand(state)
+            actions, matrix = self._resolver.solve_strategy_matrix(
+                state, ranges=ranges, time_budget_ms=_RESOLVER_NO_CLOCK_MS
+            )
+            if len(actions) != len(legal):
+                # The resolver's local tree offered a different menu; fall back
+                # to the blueprint rather than pair two different action lists.
+                rows, row_missing = blueprint_policy_table(
+                    self._policy_source.rows_at(state), state, self._rules, legal
+                )
+                bucket_vec = self._bucket_vector(state.board, state.street)
+                alive = bucket_vec >= 0
+                cached = np.zeros((NUM_COMBOS, len(legal)), dtype=np.float64)
+                cached[alive] = transform_policy_rows(rows, row_missing, self._config)[
+                    bucket_vec[alive]
+                ]
+            else:
+                cached = matrix
+            self._resolver_cache[board_key] = cached
+        bucket_vec = self._bucket_vector(state.board, state.street)
+        sigma = np.where((bucket_vec >= 0)[:, None], cached, 0.0)
+        # The resolver always answers, so nothing is a uniform FALLBACK row here.
+        # `missing_mass` therefore reads 0 under `deployed`, and is not evidence
+        # the blueprint covered the tree.
+        return sigma, np.zeros(NUM_COMBOS, dtype=bool)
 
     def _bucket_vector(self, board: tuple[Card, ...], street: Street) -> np.ndarray:
         """Combo -> bucket id over ALL_COMBOS (-1 where blocked by the board)."""

@@ -321,6 +321,16 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             policy_threshold=args.policy_threshold,
             purify=args.purify,
             decompose=args.decompose,
+            # `--opponent deployed` already means "the fielded system" for
+            # lbr; exact_br now honours it instead of silently scoring the
+            # stored rows under a flag that says otherwise.
+            deployed=args.opponent == "deployed",
+            resolver_iterations=args.resolver_iterations,
+            resolver_prior_weight=(
+                args.resolver_prior_weight
+                if args.resolver_prior_weight is not None
+                else PublicBRConfig.resolver_prior_weight
+            ),
             policy_iterate=args.policy_iterate,
             avg_window_from=args.avg_window_from,
             avg_gamma=args.avg_gamma,
