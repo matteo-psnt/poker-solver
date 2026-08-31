@@ -26,7 +26,7 @@ from src.engine.solver.storage.policy_assembly import (
     source_gamma_of,
 )
 from src.engine.solver.storage.static_array import StaticArrayStorage
-from src.engine.solver.storage.static_checkpoint import load_checkpoint
+from src.engine.solver.storage.static_checkpoint import PLAY_ARRAYS, load_checkpoint
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.shared.config import Config
@@ -85,6 +85,7 @@ def build_static_evaluation_solver(
     mix_run: Path | None = None,
     mix_at: int | None = None,
     mix_weight: float = 0.5,
+    play_only: bool = False,
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Build a read-only blueprint over a STATIC checkpoint.
 
@@ -108,7 +109,17 @@ def build_static_evaluation_solver(
     storage = StaticArrayStorage(tree)
     # Verifies the tree fingerprint, so a checkpoint written against a different
     # tree is refused rather than silently reinterpreted row-for-row.
-    loaded = load_checkpoint(storage, checkpoint_dir, at_iteration=at_iteration)
+    if play_only and policy_iterate != "average":
+        raise ValueError(
+            f"play_only loads {PLAY_ARRAYS} and leaves the rest zero, but "
+            f"policy_iterate={policy_iterate!r} reads them. Ask for one or the other."
+        )
+    loaded = load_checkpoint(
+        storage,
+        checkpoint_dir,
+        arrays=PLAY_ARRAYS if play_only else None,
+        at_iteration=at_iteration,
+    )
     policy_record = assemble_policy(
         storage,
         checkpoint_dir,

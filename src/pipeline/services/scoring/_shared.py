@@ -35,6 +35,7 @@ def build_blueprint_for(
     avg_window_from: int | None = None,
     avg_gamma: float | None = None,
     mix: tuple[Path | None, int | None, float] = (None, None, 0.5),
+    play_only: bool = False,
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Load a scoreable blueprint from a run's static checkpoint."""
     return build_static_evaluation_solver(
@@ -48,6 +49,7 @@ def build_blueprint_for(
         mix_run=mix[0],
         mix_at=mix[1],
         mix_weight=mix[2],
+        play_only=play_only,
     )
 
 

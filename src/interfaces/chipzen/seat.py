@@ -40,6 +40,7 @@ from src.interfaces.chipzen.adapter import (
     table_scale,
     wire_action,
 )
+from src.interfaces.chipzen.ladder import DepthLadder
 from src.interfaces.chipzen.protocol import GameConfig, ProtocolError, TurnState
 from src.interfaces.errors import CommandError
 
@@ -183,6 +184,8 @@ class SeatTally:
     #: built from `blueprint.config.game.starting_stack` whatever the table
     #: holds, so each one is a 100 bb strategy fielded in a spot that is not one.
     out_of_tree: int = 0
+    #: Times the ladder moved to a different rung. Zero on a one-rung ladder.
+    rung_switches: int = 0
 
     @property
     def off_tree(self) -> int:
@@ -210,6 +213,7 @@ class SeatTally:
                 if self.out_of_tree
                 else ""
             )
+            + (f", {self.rung_switches} rung switches" if self.rung_switches else "")
         )
 
     def band_census(self) -> str:
@@ -232,6 +236,9 @@ class BlueprintSeat:
     config: GameConfig
     scale: TableScale
     seat: int
+    #: Every rung available to this match. `blueprint` and `scale` are whichever
+    #: one the CURRENT hand selected; a one-rung ladder behaves exactly as before.
+    ladder: DepthLadder | None = None
     use_resolver: bool | None = None
     budget_ms: int = DEFAULT_BUDGET_MS
     tally: SeatTally = field(default_factory=SeatTally)
@@ -245,7 +252,7 @@ class BlueprintSeat:
     @classmethod
     def for_match(
         cls,
-        blueprint: ScorableBlueprint,
+        blueprint: ScorableBlueprint | DepthLadder,
         match_info: dict[str, Any],
         seat: int,
         *,
@@ -269,7 +276,15 @@ class BlueprintSeat:
             clock if clock else f"unstated (assuming {TIGHT_CLOCK_MS})",
             budget,
         )
-        scale = table_scale(config, blueprint)
+        # A match STARTS at full stacks, so the deepest rung is the right one to
+        # open with whatever the ladder holds; escalation moves it down from there.
+        if isinstance(blueprint, DepthLadder):
+            ladder: DepthLadder | None = blueprint
+            chosen = blueprint.deepest.blueprint
+        else:
+            ladder = None
+            chosen = blueprint
+        scale = table_scale(config, chosen)
         if not scale.depth_matches:
             logger.warning(
                 "Table is %.1f bb deep; this blueprint was trained at %.1f bb. "
@@ -278,10 +293,11 @@ class BlueprintSeat:
                 scale.our_depth,
             )
         seated = cls(
-            blueprint=blueprint,
+            blueprint=chosen,
             config=config,
             scale=scale,
             seat=seat,
+            ladder=ladder,
             use_resolver=use_resolver,
             budget_ms=budget,
         )
@@ -403,6 +419,30 @@ class BlueprintSeat:
             return None
         return effective / level
 
+    def _select_rung(self, depth: float, hand: int) -> None:
+        """Point `blueprint` and `scale` at the rung that fits this hand.
+
+        Depth is the EFFECTIVE stack, which is fixed once a hand starts, so this
+        is stable within a hand and re-deriving it per turn cannot move the spot
+        under us mid-hand.
+        """
+        if self.ladder is None:
+            return
+        rung = self.ladder.select(depth)
+        if rung.blueprint is self.blueprint:
+            return
+        previous = self.scale.our_depth
+        self.blueprint = rung.blueprint
+        self.scale = table_scale(self.config, rung.blueprint)
+        self.tally.rung_switches += 1
+        logger.info(
+            "Hand %s is %.1f bb: switching from the %.0f bb rung to the %.0f bb one.",
+            hand,
+            depth,
+            previous,
+            rung.depth,
+        )
+
     def _census(self, depth: float) -> None:
         """Count this decision into its depth band, and against the trained one."""
         band = next(
@@ -410,6 +450,8 @@ class BlueprintSeat:
             f">{DEPTH_BANDS[-1][0]:.0f}bb",
         )
         self.tally.by_band[band] = self.tally.by_band.get(band, 0) + 1
+        # Against the SELECTED rung, so the count means "still off-tree after the
+        # ladder had its say" rather than "off the deepest tree we own".
         if depth < self.scale.our_depth * self.SHALLOW_FRACTION:
             self.tally.out_of_tree += 1
 
@@ -425,6 +467,7 @@ class BlueprintSeat:
         depth = self._depth(turn)
         if depth is None:
             return
+        self._select_rung(depth, turn.hand_number)
         self._census(depth)
         first = turn.hand_number not in self.tally.depth_by_hand
         self.tally.depth_by_hand[turn.hand_number] = depth
@@ -620,28 +663,37 @@ def run_seat(
     surface_sdk_logs()
     started = time.perf_counter()
     blueprint = blueprint_factory()
-    # Warm against the blueprint's OWN game -- a 1:1 table, so no real match is
+    # Warm EVERY rung against its OWN game -- a 1:1 table, so no real match is
     # needed to compile the decision path. What gets compiled does not depend on
-    # the denomination, so the per-match warm that follows costs nothing.
-    game = blueprint.config.game
-    BlueprintSeat.for_match(
-        blueprint,
-        {
-            "game_config": {
-                "variant": "nlhe",
-                "starting_stack": game.starting_stack,
-                "small_blind": game.small_blind,
-                "big_blind": game.big_blind,
-                "ante": 0,
-                "num_players": 2,
-            }
-        },
-        seat=0,
-        use_resolver=use_resolver,
-        budget_ms=budget_ms,
+    # the denomination, so the per-match warm that follows costs nothing. Every
+    # rung rather than only the deepest: a match ESCALATES into the shallow ones,
+    # and a rung first touched mid-match would pay its compile on a live clock.
+    rungs = (
+        [rung.blueprint for rung in blueprint.rungs]
+        if isinstance(blueprint, DepthLadder)
+        else [blueprint]
     )
+    for one in rungs:
+        game = one.config.game
+        BlueprintSeat.for_match(
+            one,
+            {
+                "game_config": {
+                    "variant": "nlhe",
+                    "starting_stack": game.starting_stack,
+                    "small_blind": game.small_blind,
+                    "big_blind": game.big_blind,
+                    "ante": 0,
+                    "num_players": 2,
+                }
+            },
+            seat=0,
+            use_resolver=use_resolver,
+            budget_ms=budget_ms,
+        )
     logger.info(
-        "Blueprint loaded and warm in %.1f s, before dialling the lobby.",
+        "%d rung(s) loaded and warm in %.1f s, before dialling the lobby.",
+        len(rungs),
         time.perf_counter() - started,
     )
 
