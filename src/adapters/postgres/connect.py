@@ -7,12 +7,15 @@ write to. Commands call this; nothing in `pipeline` can.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from src.shared.ports.record import EvalSink, RecordSink
 
 log = logging.getLogger(__name__)
@@ -102,3 +105,32 @@ def eval_sink_from_environment() -> EvalSink | None:
     from src.adapters.postgres.evals import PostgresEvalSink  # noqa: PLC0415
 
     return PostgresEvalSink(engine)
+
+
+# The queue is nearly empty by the end of a run; this is a ceiling on a stall,
+# not a budget. Long enough that a slow last batch still lands.
+FLUSH_TIMEOUT_SECONDS = 30.0
+
+
+@contextlib.contextmanager
+def record_sink() -> Iterator[RecordSink | None]:
+    """A sink for the duration, DRAINED on the way out.
+
+    The drain is the point. `emit` queues and a background thread writes, and
+    that thread is a daemon -- so whatever is still queued when the process
+    exits dies with it. Nothing called `flush`, and the events lost were the
+    LAST ones: measured on three node runs, every one of them reached the
+    database without its `checkpoint` or its `status`. A missing terminal status
+    is a finished run that goes on advertising itself as training, which is the
+    zombie this migration exists to stop creating.
+
+    A lossy drain is LOGGED, never raised. By this point the training has
+    succeeded and the share has the whole record; the database being behind is
+    something to say, not something to fail a run over.
+    """
+    sink = sink_from_environment()
+    try:
+        yield sink
+    finally:
+        if sink is not None and not sink.flush(FLUSH_TIMEOUT_SECONDS):
+            log.warning("record sink dropped events; the database is behind the share")
