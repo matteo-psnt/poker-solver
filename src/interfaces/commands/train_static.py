@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
     parse_overrides,
@@ -127,8 +128,13 @@ class StaticTrainingPayload(services.StaticTrainingOutput):
 
 def run(args: argparse.Namespace) -> StaticTrainingPayload:
     """Argparse transport around :func:`services.train_static`."""
+    # The composition root, and the only layer that may name an adapter:
+    # `the_work_does_not_know_its_adapters` forbids the service from doing this
+    # itself. `None` when no DSN is set, which is the pre-migration behaviour.
+    sink = connect.sink_from_environment()
     out = services.train_static(
         args.config,
+        sink=sink,
         num_workers=args.workers,
         num_iterations=args.iterations,
         seed=args.seed,

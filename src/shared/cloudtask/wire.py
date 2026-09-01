@@ -145,6 +145,18 @@ class Key:
 """Every key on the wire. The order is the order they are emitted."""
 KEYS: tuple[Key, ...] = (
     Key("CODE_SNAPSHOT", "code_snapshot", "code_snapshot"),
+    # The record database, as a DSN carrying a password.
+    #
+    # It reaches the node in the task environment and NOWHERE ELSE: it is not a
+    # field of the durable record, because `task_log.write_node_record` takes an
+    # explicit allowlist of what it writes rather than dumping the plan. That
+    # distinction is the whole reason this is tolerable -- a credential in a
+    # Batch task definition is revocable by rotating it, one in `legs/` on the
+    # share is permanent.
+    #
+    # EMPTY DISABLES IT, and that is the rollout: a task dispatched without this
+    # set behaves exactly as it did before, writing files and nothing else.
+    Key("POKER_SOLVER_RECORD_DSN", "record_dsn", "record_dsn"),
     Key("RUN_OP", "op", "op"),
     Key("RUN_CONFIG", "config", "config"),
     Key("RUN_TO", "to", "to", str, _int),

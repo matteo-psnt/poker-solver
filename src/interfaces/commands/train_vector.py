@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import Command, parse_overrides
 from src.pipeline import services
 
@@ -87,8 +88,13 @@ class VectorBlueprintPayload(services.VectorBlueprintOutput):
 
 def run(args: argparse.Namespace) -> VectorBlueprintPayload:
     """Argparse transport around :func:`services.train_vector_blueprint`."""
+    # The composition root, and the only layer that may name an adapter:
+    # `the_work_does_not_know_its_adapters` forbids the service from doing this
+    # itself. `None` when no DSN is set, which is the pre-migration behaviour.
+    sink = connect.sink_from_environment()
     out = services.train_vector_blueprint(
         args.config,
+        sink=sink,
         iterations=args.iterations,
         universe_boards=args.universe_boards,
         universe_seed=args.universe_seed,

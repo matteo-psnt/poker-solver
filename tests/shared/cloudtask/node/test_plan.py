@@ -193,6 +193,11 @@ class TestDuration:
 # row here fails `test_every_wire_key_is_exercised`.
 WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "CODE_SNAPSHOT": ("snap-1", "snap-1"),
+    # A DSN-shaped value, so a key decoded into the wrong field is obvious.
+    "POKER_SOLVER_RECORD_DSN": (
+        "postgresql://u:p@h:5432/record?sslmode=require",
+        "postgresql://u:p@h:5432/record?sslmode=require",
+    ),
     "RUN_OP": ("evaluate", "evaluate"),
     "RUN_CONFIG": ("production", "production"),
     "RUN_TO": (25_000_000, 25_000_000),

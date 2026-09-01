@@ -18,6 +18,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert
 
 from src.adapters.postgres import models
@@ -78,6 +79,16 @@ class PostgresSink:
                 )
             )
         self._put(run_id, "created", body, blocking=True)
+
+    def closed(self, run_id: str, status: str, body: Mapping[str, Any]) -> None:
+        """Fold the terminal status onto the run row, synchronously."""
+        with self._engine.begin() as connection:
+            connection.execute(
+                sa_update(models.Run)
+                .where(models.Run.run_id == run_id)
+                .values(status=status, completed_at=body.get("completed_at"))
+            )
+        self._put(run_id, "status", body, blocking=True)
 
     def claim(self, run_id: str, iteration: int, uri: str) -> None:
         with self._engine.begin() as connection:

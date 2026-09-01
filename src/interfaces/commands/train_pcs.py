@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import Command, parse_overrides
 from src.pipeline import services
 
@@ -82,8 +83,13 @@ class PcsTrainingPayload(services.PcsTrainingOutput):
 
 def run(args: argparse.Namespace) -> PcsTrainingPayload:
     """Argparse transport around :func:`services.train_pcs`."""
+    # The composition root, and the only layer that may name an adapter:
+    # `the_work_does_not_know_its_adapters` forbids the service from doing this
+    # itself. `None` when no DSN is set, which is the pre-migration behaviour.
+    sink = connect.sink_from_environment()
     out = services.train_pcs(
         args.config,
+        sink=sink,
         iterations=args.iterations,
         num_workers=args.workers,
         seed=args.seed,

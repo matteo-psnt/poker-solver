@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.shared import records, run_events
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from src.pipeline.training.run_tracker.attempts import AttemptRecord
     from src.shared.config import Config
+    from src.shared.ports.record import RecordSink
 
 
 class RunTracker:
@@ -38,6 +39,7 @@ class RunTracker:
         arm: str | None = None,
         parent_run_id: str | None = None,
         kernel: str | None = None,
+        sink: RecordSink | None = None,
     ):
         """Initialize the tracker for one run.
 
@@ -47,6 +49,10 @@ class RunTracker:
         """
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
+        # DUAL WRITE, and the file half is not optional. `None` is the
+        # pre-migration behaviour and stays the default, so a task dispatched
+        # without a DSN writes exactly what it always wrote.
+        self._sink = sink
         self.metadata_file = run_events.log_path(self.run_dir)
         self._initialized = False
 
@@ -93,7 +99,7 @@ class RunTracker:
         # initialised, and a run loaded from the pre-log layout has no log at
         # all until now. Either way the fold requires this event to exist.
         if not run_events.head(events):
-            run_events.append(self.run_dir, run_events.CREATED, **self.metadata.creation_facts())
+            self._record(run_events.CREATED, **self.metadata.creation_facts())
 
         # One `attempt_started` per attempt the metadata knows about. Emitting
         # unconditionally re-opened an attempt every time a tracker was built;
@@ -129,8 +135,7 @@ class RunTracker:
             num_infosets=num_infosets,
             storage_capacity=storage_capacity,
         )
-        run_events.append(
-            self.run_dir,
+        self._record(
             run_events.PROGRESS,
             ts=datetime.now(UTC).isoformat(),
             iterations=iterations,
@@ -244,10 +249,30 @@ class RunTracker:
                     "the ladder ends up holding rungs from two different trainers."
                 )
 
+    def _record(self, event: str, **fields: Any) -> None:
+        """Append the event to the log, then offer it to the sink.
+
+        FILE FIRST, always. The share is still the source of truth through the
+        dual-write phase, so a sink that is unreachable must cost nothing --
+        `run_events.append` has already returned by the time the sink is asked.
+
+        `created` goes through `opened`, which BLOCKS and may raise, because it
+        carries the resolved config a resume reads to decide it may continue.
+        Everything else goes through `emit`, which drops rather than waits.
+        """
+        run_events.append(self.run_dir, event, **fields)
+        if self._sink is None:
+            return
+        if event == run_events.CREATED:
+            self._sink.opened(self.run_id, fields)
+        elif event == run_events.STATUS:
+            self._sink.closed(self.run_id, str(fields.get("status") or ""), fields)
+        else:
+            self._sink.emit(self.run_id, event, fields)
+
     def _emit_attempt_started(self, attempt: AttemptRecord | None = None) -> None:
         attempt = attempt or self.metadata.current_attempt
-        run_events.append(
-            self.run_dir,
+        self._record(
             run_events.ATTEMPT_STARTED,
             ts=attempt.started_at,
             index=attempt.index,
@@ -260,8 +285,7 @@ class RunTracker:
         )
 
     def _emit_attempt_ended(self, attempt: AttemptRecord) -> None:
-        run_events.append(
-            self.run_dir,
+        self._record(
             run_events.ATTEMPT_ENDED,
             ts=attempt.ended_at or datetime.now(UTC).isoformat(),
             index=attempt.index,
@@ -273,8 +297,7 @@ class RunTracker:
     def _emit_status(self, status: str) -> None:
         """Close the live attempt and record the run's terminal state."""
         self._emit_attempt_ended(self.metadata.current_attempt)
-        run_events.append(
-            self.run_dir,
+        self._record(
             run_events.STATUS,
             ts=datetime.now(UTC).isoformat(),
             status=status,

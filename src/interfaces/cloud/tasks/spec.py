@@ -22,6 +22,7 @@ old space-joined form silently split them.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -124,6 +125,11 @@ class TaskSpec:
     """
 
     code_snapshot: str
+    # Read from the OPERATOR'S environment rather than passed by each submit
+    # command, so dual-write is a property of the machine dispatching rather
+    # than something every call site has to remember. Unset means the node
+    # writes files only, which is the pre-migration behaviour.
+    record_dsn: str = field(default_factory=lambda: os.environ.get("POKER_SOLVER_RECORD_DSN", ""))
     op: str = TaskName.TRAIN
     config: str = ""
     to: int = 0
