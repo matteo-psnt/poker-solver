@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from src.shared import cache
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, progress
+from src.shared.cloudtask.node import archive, mirror, progress
 from src.shared.cloudtask.node.handlers import HANDLERS, publish_own_run
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import BadEnvironmentError, parse_environment
@@ -212,6 +212,11 @@ def main() -> int:
             log(f"FATAL dependency sync failed rc={sync}")
             code = sync
         else:
+            # The FIRST moment a database is reachable from this task at all.
+            # `_record(STARTED)` ran before the sync, deliberately -- it is the
+            # one guarantee this module exists for -- so the started record has
+            # been on the share for a while and in the database not at all.
+            mirror.publish(paths.share, task, cwd=paths.code, log=log)
             code, outcome = HANDLERS[plan.op](plan, paths, log)
     except Killed as killed:
         code = 128 + killed.signum
@@ -234,5 +239,10 @@ def main() -> int:
             publish_own_run(plan, paths, log)
         log.publish()
         _record(paths, task_log.EVENT_FINISHED, code=code, cause=_cause(code, outcome))
+        # AFTER the finished record, so the mirror carries the cause rather than
+        # the state one line before it. Best effort here as everywhere: the
+        # share already has it, and a task that survived its work must not die
+        # copying the account of it.
+        mirror.publish(paths.share, task, cwd=paths.code, log=log)
         log.close()
     return code
