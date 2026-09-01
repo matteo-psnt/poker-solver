@@ -91,7 +91,25 @@ class PostgresSink:
         self._put(run_id, "status", body, blocking=True)
 
     def claim(self, run_id: str, iteration: int, uri: str) -> None:
+        """Claim a rung, and make it THE current one.
+
+        Two statements, and the first is not optional: `is_current` is a PARTIAL
+        UNIQUE index over one row per run, so claiming a second rung while the
+        first still holds the flag violates it. `claim` is allowed to raise, so
+        that killed the run at its second checkpoint -- measured, and invisible
+        until then because a run with one rung works.
+
+        The clear must come FIRST. Inserting and then clearing would either trip
+        the same index or, if the insert lost its flag to `DO NOTHING`, leave the
+        run pointing at a stale rung -- which is worse than an error, because a
+        loader resolves it and starts from the wrong place.
+        """
         with self._engine.begin() as connection:
+            connection.execute(
+                sa_update(models.Checkpoint)
+                .where(models.Checkpoint.run_id == run_id, models.Checkpoint.is_current)
+                .values(is_current=False)
+            )
             connection.execute(
                 insert(models.Checkpoint)
                 .values(
@@ -103,7 +121,9 @@ class PostgresSink:
                 )
                 .on_conflict_do_update(
                     index_elements=["run_id", "iteration"],
-                    set_={"blob_uri": uri},
+                    # `is_current` too: re-claiming an EARLIER rung is how a
+                    # resume points the run back at where it restarts from.
+                    set_={"blob_uri": uri, "is_current": True},
                 )
             )
 

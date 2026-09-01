@@ -341,7 +341,7 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     # Per run, so a divergence names WHICH run rather than only a total. A
     # count that is right in aggregate and wrong per run is the failure this is
     # meant to catch.
-    per_run: dict[str, tuple[int, int]] = {}
+    per_run: dict[str, dict[str, int]] = {}
 
     with records_root(args) as root, Session(engine) as session:
         wanted = sorted(p for p in root.iterdir() if p.is_dir())
@@ -356,7 +356,11 @@ def run(args: argparse.Namespace) -> BackfillPayload:
                 continue
             run_row, event_rows, checkpoint_rows = built
             eval_rows = _eval_rows(run_dir, models)
-            per_run[run_dir.name] = (len(event_rows), len(eval_rows))
+            per_run[run_dir.name] = {
+                "events": len(event_rows),
+                "evals": len(eval_rows),
+                "checkpoints": len(checkpoint_rows),
+            }
             payload.share.runs += 1
             payload.share.events += len(event_rows)
             payload.share.checkpoints += len(checkpoint_rows)
@@ -380,12 +384,16 @@ def run(args: argparse.Namespace) -> BackfillPayload:
                 (models.Checkpoint, checkpoint_rows),
                 (models.Eval, eval_rows),
             ):
-                if rows:
-                    session.execute(
-                        insert(table)
-                        .values([_columns(r, table) for r in rows])
-                        .on_conflict_do_nothing()
-                    )
+                if not rows:
+                    continue
+                if table is models.Checkpoint:
+                    _import_checkpoints(session, models, run_dir.name, rows)
+                    continue
+                session.execute(
+                    insert(table)
+                    .values([_columns(r, table) for r in rows])
+                    .on_conflict_do_nothing()
+                )
             session.commit()
 
     # A separate pass: legs are keyed by TASK and live under `legs/`, a
@@ -428,7 +436,41 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     return payload
 
 
-def _divergences(engine: Any, per_run: dict[str, tuple[int, int]], models: Any) -> list[Any]:
+def _import_checkpoints(session: Any, models: Any, run_id: str, rows: list[Any]) -> None:
+    """Import one run's rungs, INCLUDING which of them is current.
+
+    Not `on_conflict_do_nothing`, which is what this replaces and what made the
+    bug: `is_current` is a partial unique index over one row per run, so a bare
+    DO NOTHING silently dropped the new current rung and left the old one
+    holding the flag. Three runs were pointing at a rung 2,000 iterations behind
+    the one the share names -- and a stale pointer resolves, so nothing failed.
+
+    Clear, then upsert, in the caller's transaction: no reader sees a run
+    without a current rung, and re-running stays a no-op.
+    """
+    from sqlalchemy import update as sa_update  # noqa: PLC0415
+    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+
+    session.execute(
+        sa_update(models.Checkpoint)
+        .where(models.Checkpoint.run_id == run_id, models.Checkpoint.is_current)
+        .values(is_current=False)
+    )
+    values = [_columns(row, models.Checkpoint) for row in rows]
+    session.execute(
+        insert(models.Checkpoint)
+        .values(values)
+        .on_conflict_do_update(
+            index_elements=["run_id", "iteration"],
+            set_={
+                "is_current": insert(models.Checkpoint).excluded.is_current,
+                "blob_uri": insert(models.Checkpoint).excluded.blob_uri,
+            },
+        )
+    )
+
+
+def _divergences(engine: Any, per_run: dict[str, dict[str, int]], models: Any) -> list[Any]:
     """Where the share and the database disagree, per run.
 
     Counts rather than checksums, deliberately: the share is the source of
@@ -436,33 +478,49 @@ def _divergences(engine: Any, per_run: dict[str, tuple[int, int]], models: Any) 
     live run -- a node writes its rows the moment they happen, while the share
     sees them at the next publish. So a database ahead is normal and a database
     BEHIND is the bug, and only the second is reported.
+
+    EVERY kind the summary prints, which it did not always do: `checkpoints`
+    was counted into the totals and left out of this, so the table showed a
+    three-row gap flagged `<- gap` while this reported zero divergences and
+    nothing said which run it was in. A number the reader is shown must be a
+    number something checks.
+
+    `legs` is the exception and stays out: a leg belongs to a TASK, its
+    `run_id` is nullable, and the ones that matter most -- a task killed before
+    it could say what it was for -- have none. Per-run is the wrong shape for
+    it, not an omission.
     """
     import sqlalchemy as sa  # noqa: PLC0415
     from sqlalchemy.orm import Session  # noqa: PLC0415
 
+    tables = {
+        "events": models.RunEvent,
+        "evals": models.Eval,
+        "checkpoints": models.Checkpoint,
+    }
     with Session(engine) as session:
-        events = {
-            run: int(n)
-            for run, n in session.execute(
-                sa.select(models.RunEvent.run_id, sa.func.count()).group_by(models.RunEvent.run_id)
-            )
-        }
-        evals = {
-            run: int(n)
-            for run, n in session.execute(
-                sa.select(models.Eval.run_id, sa.func.count()).group_by(models.Eval.run_id)
-            )
+        counted = {
+            kind: {
+                run: int(n)
+                for run, n in session.execute(
+                    sa.select(table.run_id, sa.func.count()).group_by(table.run_id)
+                )
+            }
+            for kind, table in tables.items()
         }
 
     found = []
-    for run, (n_events, n_evals) in sorted(per_run.items()):
-        for kind, on_share, in_database in (
-            ("events", n_events, events.get(run, 0)),
-            ("evals", n_evals, evals.get(run, 0)),
-        ):
-            if in_database < on_share:
+    for run, on_share in sorted(per_run.items()):
+        for kind in tables:
+            in_database = counted[kind].get(run, 0)
+            if in_database < on_share.get(kind, 0):
                 found.append(
-                    Divergence(run=run, kind=kind, on_share=on_share, in_database=in_database)
+                    Divergence(
+                        run=run,
+                        kind=kind,
+                        on_share=on_share.get(kind, 0),
+                        in_database=in_database,
+                    )
                 )
     return found
 
