@@ -44,8 +44,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# float32 halves the footprint of the two hot arrays at a measured relative error
-# of 5.95e-8, comfortably inside f32 epsilon (see the m0002 downcast measurement).
+# float32 halves the footprint of the two hot arrays. The 5.95e-8 that justified
+# it is a DOWNCAST error and does not bound the one that matters: these arrays are
+# accumulated IN PLACE under a weight that grows as t^gamma, so an increment
+# eventually falls under the running sum's ULP and the `+=` is a no-op. MEASURED
+# at T=30M with lognormal reach: 35-44% of adds vanish, for 4-6% error on the
+# average strategy. It grows with T -- reprice before a run much past that.
 REGRET_DTYPE = np.float32
 STRATEGY_DTYPE = np.float32
 UTILITY_DTYPE = np.float64

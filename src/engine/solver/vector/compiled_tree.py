@@ -296,6 +296,17 @@ def _verify(compiled: CompiledTree) -> None:
     if not (parents[node_edges] < compiled.depth[children]).all():
         raise ValueError("Level order is not topological: an edge does not increase depth.")
 
+    if compiled.is_dag:
+        # `VectorCFR._deposit` ASSIGNS a child's range; a second parent would
+        # overwrite the first's contribution instead of summing it, and the
+        # pass would still run. Measured all-ones at 40-400 bb, but the enum
+        # is config-driven and nothing else would notice a config that broke it.
+        raise ValueError(
+            f"{int((compiled.parent_count > 1).sum())} nodes are reachable by more than one "
+            "edge, so this is a DAG. The vector forward pass assigns child ranges and would "
+            "silently drop every contribution but the last; it must accumulate first."
+        )
+
 
 __all__: Sequence[str] = (
     "EDGE_TO_NODE",
