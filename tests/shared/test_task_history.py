@@ -606,3 +606,46 @@ class TestOneMalformedDocumentCannotTakeDownEveryReader:
         progress = task_history.read_tasks(tmp_path)[0].progress
         assert progress is not None
         assert progress.unit == ""
+
+
+class TestOnlyAskBatchWhatBatchCanAnswer:
+    """Batch describes a task's CURRENT attempt and no other, which is why the
+    join hands `_cause` an empty batch record for every earlier one. So a
+    superseded attempt is non-terminal by construction and asking about it can
+    only ever return the answer for a different attempt.
+
+    Measured on the real log: 1,326 non-terminal rows, 1,290 of them superseded,
+    36 questions Batch could actually answer. Asking about all of them cost
+    7.8s on every console poll.
+    """
+
+    def _share(self, tmp_path, attempts):
+        directory = task_log.tasks_dir(tmp_path)
+        directory.mkdir(parents=True, exist_ok=True)
+        for attempt, cause in attempts:
+            (directory / f"task-a.{attempt}.start.json").write_text(
+                json.dumps({"task_id": "task-a", "attempt": attempt, "job_id": "job-1"})
+            )
+            if cause is not None:
+                (directory / f"task-a.{attempt}.exit.json").write_text(
+                    json.dumps({"task_id": "task-a", "attempt": attempt, "cause": cause})
+                )
+        return tmp_path
+
+    def test_a_superseded_attempt_is_not_asked_about(self, tmp_path):
+        """Attempt 1 died without stamping an end and attempt 2 finished. The
+        first is unresolved forever and no question can change that."""
+        share = self._share(tmp_path, [(1, None), (2, "completed")])
+        assert [row.attempt for row in task_history.unresolved_tasks(share)] == []
+
+    def test_the_latest_attempt_is_still_asked_about(self, tmp_path):
+        share = self._share(tmp_path, [(1, "failed"), (2, None)])
+        assert [row.attempt for row in task_history.unresolved_tasks(share)] == [2]
+
+    def test_a_task_on_its_first_attempt_is_asked_about(self, tmp_path):
+        share = self._share(tmp_path, [(1, None)])
+        assert [row.attempt for row in task_history.unresolved_tasks(share)] == [1]
+
+    def test_a_finished_task_is_asked_about_at_no_attempt(self, tmp_path):
+        share = self._share(tmp_path, [(1, None), (2, "completed"), (3, "completed")])
+        assert task_history.unresolved_tasks(share) == []
