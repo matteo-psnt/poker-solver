@@ -95,6 +95,11 @@ def render(payload: RunInfoPayload) -> None:
     dirty = " (dirty)" if payload.git_dirty else ""
     abstraction = (payload.card_abstraction_hash or "none")[:16]
     print(f"  git {commit}{dirty}   abstraction {abstraction}   status {payload.status}")
+    for group, knobs in payload.trainer_knobs.items():
+        # What `--config` plus `--set` actually produced. Two arms of one
+        # experiment share every other line printed here, so without this the
+        # only record of what they differ in is the arm LABEL.
+        print(f"  {group:<7} " + "  ".join(f"{k}={v}" for k, v in knobs.items()))
     print(
         f"  {payload.iterations:,} iterations over {payload.training_tasks} training task(s), "
         f"{payload.runtime_seconds:.0f}s compute"

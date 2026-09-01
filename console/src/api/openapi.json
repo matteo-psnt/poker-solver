@@ -3190,6 +3190,11 @@
             "title": "Total Progress Rows",
             "type": "integer"
           },
+          "trainer_knobs": {
+            "additionalProperties": true,
+            "title": "Trainer Knobs",
+            "type": "object"
+          },
           "training_tasks": {
             "anyOf": [
               {
@@ -3214,6 +3219,7 @@
           "card_abstraction_hash",
           "iterations",
           "runtime_seconds",
+          "trainer_knobs",
           "progress",
           "coverage_flat_from",
           "curve",
