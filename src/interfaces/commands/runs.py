@@ -12,13 +12,15 @@ same rule the rest of the command layer follows: one implementation per question
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from src.adapters.postgres import connect, queries
 from src.interfaces.commands._base import Command, records_root
 from src.pipeline import services
 from src.pipeline.services.runs import RunSummary
+from src.shared.gitinfo import commits_ahead_of
 
 if TYPE_CHECKING:
     import argparse
@@ -43,17 +45,75 @@ class RunsPayload(BaseModel):
 
     op: Literal["runs"] = "runs"
     runs: list[services.RunSummary] = []
+    # WHICH STORE ANSWERED. A silent fallback would let a reader mistake a
+    # stale answer for a fresh one, and during dual write the two can honestly
+    # differ -- the database is ahead for a live run, behind for one whose task
+    # predates the sink. Saying so costs one field.
+    source: Literal["database", "share"] = "share"
 
 
 def run(args: argparse.Namespace) -> RunsPayload:
-    """Summarise every published run, newest first."""
-    with records_root(args) as root:
-        summaries = services.describe_runs(root)
+    """Summarise every published run, newest first.
+
+    From the database when one is configured, and from the share otherwise.
+    The DSN is the same switch that turns on dual write, so a machine that
+    writes rows reads them, and one that does not behaves exactly as before.
+    """
+    engine = connect.engine_from_environment()
+    if engine is not None:
+        summaries = _from_database(engine)
+        source: Literal["database", "share"] = "database"
+    else:
+        with records_root(args) as root:
+            summaries = services.describe_runs(root)
+        source = "share"
     if args.loadable_only:
         summaries = [summary for summary in summaries if summary.loadable]
     if args.limit > 0:
         summaries = summaries[: args.limit]
-    return RunsPayload(runs=summaries)
+    return RunsPayload(runs=summaries, source=source)
+
+
+def _from_database(engine: Any) -> list[services.RunSummary]:
+    """Rows into the model the surfaces already render.
+
+    Built HERE rather than in the adapter: `RunSummary` lives in `pipeline`,
+    and `an_adapter_does_not_do_the_work` forbids the adapter from importing
+    it. The composition root is the only layer that may hold both.
+
+    `commits_ago` stays a read-time computation against the local checkout,
+    exactly as the share path computes it -- it is a fact about THIS working
+    copy, not about the run, so storing it would be storing someone else's
+    answer.
+    """
+    rows = queries.describe_runs(engine)
+    # Memoised per CALL, not globally: `commits_ahead_of` shells out to git, and
+    # 303 runs share only 72 distinct commits -- 231 of those subprocesses were
+    # asking a question already answered. Not a module-level cache, because HEAD
+    # moves under a long-lived server and the answer is about THIS checkout now.
+    ahead: dict[str | None, int | None] = {}
+    summaries = []
+    for row in rows:
+        if row.git_commit not in ahead:
+            ahead[row.git_commit] = commits_ahead_of(row.git_commit)
+        loadable = bool(row.has_checkpoint)
+        summaries.append(
+            services.RunSummary(
+                name=row.run_id,
+                commits_ago=ahead[row.git_commit],
+                git_dirty=row.git_dirty,
+                has_checkpoint=loadable,
+                loadable=loadable,
+                blocker=None if loadable else "no checkpoint",
+                iterations=row.iterations,
+                num_infosets=row.num_infosets,
+                config_name=row.config_name,
+                status=row.status,
+                experiment_id=row.experiment_id,
+                arm=row.arm,
+            )
+        )
+    return summaries
 
 
 def render(payload: RunsPayload) -> None:

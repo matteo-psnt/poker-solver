@@ -2060,6 +2060,12 @@ export interface components {
              * @default []
              */
             runs: components["schemas"]["RunSummary"][];
+            /**
+             * Source
+             * @default share
+             * @enum {string}
+             */
+            source: "database" | "share";
         };
         /**
          * RunsView

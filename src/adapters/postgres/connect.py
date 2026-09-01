@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.shared.ports.record import RecordSink
@@ -17,6 +17,30 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DSN_ENV = "POKER_SOLVER_RECORD_DSN"
+
+
+def engine_from_environment() -> Any | None:
+    """An engine when a DSN is set, `None` when it is not.
+
+    Shared by the sink and the readers so there is one answer to "is there a
+    database", and one place that knows how to build a connection to it.
+    """
+    dsn = os.environ.get(DSN_ENV, "").strip()
+    if not dsn:
+        return None
+
+    import sqlalchemy as sa  # noqa: PLC0415 -- only when a DSN says to
+
+    return sa.create_engine(
+        dsn.replace("postgresql://", "postgresql+psycopg://", 1),
+        # One connection, recycled well inside Azure's idle timeout. A trainer
+        # holds this open for hours between bursts of events, and a stale
+        # connection surfaces as a lost batch rather than an error anyone sees.
+        pool_size=1,
+        max_overflow=1,
+        pool_pre_ping=True,
+        pool_recycle=280,
+    )
 
 
 def sink_from_environment() -> RecordSink | None:
@@ -31,23 +55,11 @@ def sink_from_environment() -> RecordSink | None:
     here: it means someone intended dual-write and it is not happening, which
     they need to be told at dispatch rather than discover in a query later.
     """
-    dsn = os.environ.get(DSN_ENV, "").strip()
-    if not dsn:
+    engine = engine_from_environment()
+    if engine is None:
         return None
-
-    import sqlalchemy as sa  # noqa: PLC0415 -- only when a DSN says to
 
     from src.adapters.postgres.sink import PostgresSink  # noqa: PLC0415
 
-    engine = sa.create_engine(
-        dsn.replace("postgresql://", "postgresql+psycopg://", 1),
-        # One connection, recycled well inside Azure's idle timeout. A trainer
-        # holds this open for hours between bursts of events, and a stale
-        # connection surfaces as a lost batch rather than an error anyone sees.
-        pool_size=1,
-        max_overflow=1,
-        pool_pre_ping=True,
-        pool_recycle=280,
-    )
     log.info("record sink attached")
     return PostgresSink(engine)
