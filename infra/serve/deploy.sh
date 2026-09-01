@@ -411,12 +411,22 @@ RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
-# $BUDGET_MS caps the per-decision budget. It is a REAL knob, not a detail:
-# the resolver spends the whole budget, and MEASURED 09-10 its stack-off rate
-# rises with it -- 32.5% of one spot at 200 ms against 41.0% at 900 -- while
-# the +528 mbb that justifies the resolver at all was measured near 300 ms.
-# Unset leaves the seat's own sizing (900 ms under `MAX_BUDGET_MS`).
-SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}$SEAT_RUNGS
+# $BUDGET_MS caps the per-decision budget. Unset leaves the seat's own sizing
+# (900 ms under `MAX_BUDGET_MS`), which is what is fielded.
+#
+# It is NOT a stack-off lever, though one reading said so: a single spot jammed
+# 32.5% at 200 ms against 41.0% at 900. Over a full duel the sign is the other
+# way -- 6.11% of 1,800 decisions at 300 ms against 4.78% of 1,779 at 900 --
+# and both readings are ~1.8 sigma, i.e. neither is a result. One node's rate
+# is not a policy's rate.
+#
+# $RESOLVER_OFF_TREE runs the resolver only once the hand has left our tree.
+# Its measured +528 mbb/hand is an OFF-TREE gain; on tree it is worth
+# -203.6 +/- 133.1 mbb/hand (1.5 sigma, nothing) while DOUBLING the stack-off
+# rate, 5.25% against 2.37% over ~5,500 decisions. Doubling variance for a
+# statistically-zero edge loses in an ELIMINATION format, where a stack-off
+# that loses ends the match and there is no next hand to earn it back.
+SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
 EOF
 # The DSN carries a password, and this file gained one the moment the seat began
 # reading run metadata from the record. Same mode as `/etc/blueprint.env`.
