@@ -11,12 +11,28 @@ import it.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
+
+
+@contextlib.contextmanager
+def _read(engine: Any) -> Iterator[Any]:
+    """A connection for ONE read, outside a transaction.
+
+    SQLAlchemy opens a transaction on first execute and rolls it back on close,
+    so a plain `engine.connect()` spends three round trips on a statement that
+    needs one. Against Sweden that is 554 ms to answer `SELECT 1` where the
+    round trip is 175 ms; every read here is a single statement that reads
+    committed rows and holds no invariant across two of them.
+    """
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        yield connection
+
 
 # PAGE FIRST, THEN ENRICH. Measured at 10x the current record: a lateral over
 # every run and then LIMIT is 52 ms; restricting to the page first and enriching
@@ -52,5 +68,5 @@ def describe_runs(engine: Any, *, limit: int = 1000) -> Sequence[Any]:
     `limit` is not a nicety: unbounded, this is the one query here whose cost
     grows with history rather than with the answer.
     """
-    with engine.connect() as connection:
+    with _read(engine) as connection:
         return connection.execute(_RUNS, {"limit": limit}).all()

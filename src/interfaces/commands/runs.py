@@ -12,6 +12,7 @@ same rule the rest of the command layer follows: one implementation per question
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
@@ -74,6 +75,33 @@ def run(args: argparse.Namespace) -> RunsPayload:
     return RunsPayload(runs=summaries, source=source)
 
 
+def _distances(commits: set[str | None]) -> dict[str | None, int | None]:
+    """How far HEAD is ahead of each commit, resolved concurrently.
+
+    `commits_ahead_of` spawns a git process per commit at ~24 ms, and 303 runs
+    share only 72 distinct commits -- so the first win is asking once per
+    COMMIT rather than once per run, and the second is not waiting for each
+    answer before asking the next. Serial, those 72 cost 1.8 s and were the
+    largest single cost in this listing, larger than the query.
+
+    NOT a position lookup into one `git rev-list HEAD`, which is the obvious
+    batch and is wrong: the count is a set difference, and with merge commits a
+    commit's index in that list is not the number of commits reachable from
+    HEAD but not from it. Same computation, concurrently.
+
+    Per CALL rather than a module cache, because HEAD moves under a long-lived
+    server and this is a fact about the checkout now.
+    """
+    known = {commit for commit in commits if commit}
+    if not known:
+        return dict.fromkeys(commits)
+    with ThreadPoolExecutor(max_workers=min(16, len(known))) as pool:
+        answers = list(pool.map(commits_ahead_of, known))
+    resolved: dict[str | None, int | None] = dict(zip(known, answers, strict=True))
+    resolved[None] = None
+    return resolved
+
+
 def _from_database(engine: Any) -> list[services.RunSummary]:
     """Rows into the model the surfaces already render.
 
@@ -87,20 +115,14 @@ def _from_database(engine: Any) -> list[services.RunSummary]:
     answer.
     """
     rows = queries.describe_runs(engine)
-    # Memoised per CALL, not globally: `commits_ahead_of` shells out to git, and
-    # 303 runs share only 72 distinct commits -- 231 of those subprocesses were
-    # asking a question already answered. Not a module-level cache, because HEAD
-    # moves under a long-lived server and the answer is about THIS checkout now.
-    ahead: dict[str | None, int | None] = {}
+    ahead = _distances({row.git_commit for row in rows})
     summaries = []
     for row in rows:
-        if row.git_commit not in ahead:
-            ahead[row.git_commit] = commits_ahead_of(row.git_commit)
         loadable = bool(row.has_checkpoint)
         summaries.append(
             services.RunSummary(
                 name=row.run_id,
-                commits_ago=ahead[row.git_commit],
+                commits_ago=ahead.get(row.git_commit),
                 git_dirty=row.git_dirty,
                 has_checkpoint=loadable,
                 loadable=loadable,
