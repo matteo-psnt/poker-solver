@@ -145,8 +145,19 @@ print(head)
 PY
     )
     echo "==> staging $run rung $zarr"
-    cp -ru "$SHARE/archive/$run/$zarr" "$dest/"
-    cp -u "$SHARE/archive/$run/.complete-$zarr" "$dest/" 2>/dev/null || true
+    if [ -d "$SHARE/archive/$run/$zarr" ]; then
+        cp -ru "$SHARE/archive/$run/$zarr" "$dest/"
+        cp -u "$SHARE/archive/$run/.complete-$zarr" "$dest/" 2>/dev/null || true
+    elif [ -d "$dest/$zarr" ] && [ -e "$dest/.complete-$zarr" ]; then
+        # The share PRUNES checkpoints and its manifest outlives the bytes, so a
+        # rung can be advertised and gone. What is already staged here is the
+        # same data: a redeploy of the CODE must not be hostage to the share
+        # still holding a checkpoint this box already has.
+        echo "    (pruned from the share; keeping the complete copy already staged)"
+    else
+        echo "Rung $zarr of $run is on neither the share nor this box." >&2
+        return 1
+    fi
     chmod -R u+w "$dest" 2>/dev/null || true
 }
 
