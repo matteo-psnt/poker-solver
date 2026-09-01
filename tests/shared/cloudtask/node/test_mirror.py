@@ -7,9 +7,9 @@ minutes because a mirror could not be killed.
 
 MEASURED on a node: 20.5s of training finished at 17:31:32 and the task
 published at 17:38:29. Not a hang -- STACKED TIMEOUTS. The first `uv run` after
-a fresh `uv sync` takes over a minute, the watcher published every 15s, and
-`stop()` joins with a 120s grace before sampling once more. So the cadence is
-decided here rather than by the caller.
+a fresh `uv sync` takes over a minute and the watcher was mirroring every 15s.
+The CADENCE now belongs to the watcher's coarse tick, which exists for exactly
+this; `test_progress.py` holds that end.
 """
 
 from __future__ import annotations
@@ -33,13 +33,6 @@ class _Fake:
         return self._code
 
 
-@pytest.fixture(autouse=True)
-def _unthrottled(monkeypatch):
-    """The throttle is per PROCESS, and a test process is many tasks."""
-    monkeypatch.setattr(mirror, "_last_run", 0.0)
-    monkeypatch.setattr(mirror, "MIN_INTERVAL_SECONDS", 0)
-
-
 @pytest.fixture
 def launched(monkeypatch):
     """Records how the subprocess was launched, without launching one."""
@@ -59,24 +52,6 @@ def test_it_asks_for_this_task_and_the_legs_directory(tmp_path, launched):
     assert argv[:4] == ["uv", "run", "poker-solver", "mirror-legs"]
     assert "task-a" in argv
     assert str(task_log.tasks_dir(tmp_path)) in argv
-
-
-class TestTheCadenceIsDecidedHere:
-    """20.5s of training, and the task published seven minutes later."""
-
-    def test_a_second_call_straight_away_is_skipped(self, tmp_path, launched, monkeypatch):
-        monkeypatch.setattr(mirror, "MIN_INTERVAL_SECONDS", 120)
-        mirror.publish(tmp_path, "task-a", cwd=tmp_path)
-        mirror.publish(tmp_path, "task-a", cwd=tmp_path)
-        assert len(launched) == 1, "the 15s progress cadence must not become the mirror's"
-
-    def test_the_exit_path_is_never_throttled_away(self, tmp_path, launched, monkeypatch):
-        """The record has just reached its terminal state and there is no later
-        tick to carry it."""
-        monkeypatch.setattr(mirror, "MIN_INTERVAL_SECONDS", 120)
-        mirror.publish(tmp_path, "task-a", cwd=tmp_path)
-        mirror.publish(tmp_path, "task-a", cwd=tmp_path, force=True)
-        assert len(launched) == 2
 
 
 class TestATimeoutCannotLeaveTheTreeRunning:

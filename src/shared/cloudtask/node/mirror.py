@@ -7,15 +7,16 @@ after that sync -- and `shared` may not import an adapter in any case. Crossing
 into a process that HAS the driver is not a workaround for those rules; it is
 the only way to satisfy them, and it is how the wrapper already runs the task.
 
-NEVER FATAL, and THROTTLED. The share holds the record and this is the copy, so
-a task must not die making it -- and must not spend meaningful wall clock on it
-either, which is the half that bit first: see :data:`MIN_INTERVAL_SECONDS`.
+NEVER FATAL. The share holds the record and this is the copy: a task must not
+die making it. The CADENCE is not decided here -- the watcher's coarse tick
+already exists for work that belongs on the slow path, and mirroring on the 15s
+progress cadence instead put three and a half minutes on the end of a task whose
+training took twenty seconds.
 """
 
 from __future__ import annotations
 
 import subprocess
-import time
 from typing import TYPE_CHECKING
 
 from src.shared.cloudtask import task_log
@@ -30,37 +31,15 @@ if TYPE_CHECKING:
 # while every later one is quick. A 60s ceiling timed that first call out.
 TIMEOUT_SECONDS = 240
 
-# The watcher publishes progress every 15s, and mirroring on each of them is
-# what turned a 20.5s training run into a task that finished seven minutes
-# later: the cold calls each burned the full ceiling and stacked up on the
-# watcher thread, which `stop()` then joins with a 120s grace before sampling
-# once more. A leg row is worth having within a couple of minutes and is worth
-# nothing to the fifteen-second cadence, so the CADENCE IS DECIDED HERE rather
-# than by whoever calls it.
-MIN_INTERVAL_SECONDS = 120
-
-_last_run = 0.0
-
 
 def publish(
-    share: Path,
-    task_id: str,
-    *,
-    cwd: Path,
-    log: Callable[[str], None] | None = None,
-    force: bool = False,
+    share: Path, task_id: str, *, cwd: Path, log: Callable[[str], None] | None = None
 ) -> None:
-    """Mirror this task's leg documents, best effort and at most every 120s.
+    """Mirror this task's leg documents, best effort.
 
-    `force` is for the EXIT path, where the throttle would drop the one call
-    that matters: the record has just reached its terminal state and there is no
-    later tick to carry it.
+    Reads the task's CURRENT records rather than a delta, so a call that fails
+    is repaired by the next one instead of losing a document forever.
     """
-    global _last_run
-    now = time.monotonic()
-    if not force and now - _last_run < MIN_INTERVAL_SECONDS:
-        return
-    _last_run = now
     argv = [
         "uv",
         "run",

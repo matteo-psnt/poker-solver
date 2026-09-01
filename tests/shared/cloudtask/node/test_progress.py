@@ -252,3 +252,44 @@ class TestProgressReadsThisTasksRun:
         self._manifest(paths, "run-a", 150_000_000)
 
         assert progress.units_done(paths) == 10_000_000
+
+
+class TestMirroringRidesTheCoarseTick:
+    """The database copy belongs on the slow cadence, and the watcher already
+    has one. Mirroring from `publish` put a subprocess on the 15s progress tick
+    and three and a half minutes on the end of a task whose training took twenty
+    seconds -- and needed a module-global throttle to hold it back, which is a
+    cadence invented next to one that already existed.
+    """
+
+    @staticmethod
+    def _plan() -> node_plan.TaskPlan:
+        return node_plan.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
+
+    def test_the_progress_tick_does_not_mirror(self, paths, monkeypatch):
+        """A bar that moves every fifteen seconds is the point; a leg row every
+        fifteen seconds is not."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "t-1")
+        called: list[str] = []
+        monkeypatch.setattr(progress.mirror, "publish", lambda *a, **k: called.append("x"))
+        progress.publish(paths, self._plan(), {"iteration": 250})
+        assert called == []
+
+    def test_the_coarse_tick_mirrors(self, paths, log, monkeypatch):
+        called: list[str] = []
+        monkeypatch.setattr(progress.mirror, "publish", lambda *a, **k: called.append("x"))
+        watcher = progress.ProgressWatcher(paths, log, plan=self._plan())
+        watcher._coarse()
+        assert called == ["x"]
+
+    def test_the_ladder_watcher_still_mirrors(self, paths, log, monkeypatch):
+        """It OVERRIDES `_coarse`, and an override that forgot `super()` is a
+        training task that mirrors nothing -- training being the long-running
+        kind, where a frozen row matters most."""
+        called: list[str] = []
+        monkeypatch.setattr(progress.mirror, "publish", lambda *a, **k: called.append("x"))
+        run_dir = paths.runs / "run-a"
+        run_dir.mkdir(parents=True)
+        watcher = progress.LadderWatcher(paths, log, run_dir=run_dir, plan=self._plan())
+        watcher._coarse()
+        assert called == ["x"]

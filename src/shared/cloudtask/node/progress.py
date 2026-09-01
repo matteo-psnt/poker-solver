@@ -163,7 +163,21 @@ class ProgressWatcher:
             self._publish_log()
 
     def _coarse(self) -> None:
-        """The slow tick. Progress alone has nothing to do on it."""
+        """The slow tick. Mirroring the task's records into the database belongs
+        here and not on the progress cadence: a leg row is worth having within a
+        couple of minutes and worth nothing every fifteen seconds, and a
+        subprocess on the fine tick put three and a half minutes on the end of a
+        task whose training took twenty seconds.
+
+        On the WATCHER THREAD, while the work runs as a subprocess, so the
+        seconds it costs are not seconds the task is not training.
+        """
+        mirror.publish(
+            self._paths.share,
+            task_log.current_task_id("local"),
+            cwd=self._paths.code,
+            log=self._log,
+        )
 
 
 class LadderWatcher(ProgressWatcher):
@@ -188,6 +202,9 @@ class LadderWatcher(ProgressWatcher):
     _seen = ""
 
     def _coarse(self) -> None:
+        # Training's watcher, so it does the base tick's work too -- an override
+        # that forgot this is a training task that mirrors nothing.
+        super()._coarse()
         state = archive.ladder_state(self._run_dir)
         if state and state != self._seen:
             self._log(f"retained ladder changed -> {state}")
@@ -275,16 +292,11 @@ def publish(paths: NodePaths, plan: TaskPlan, state: Mapping[str, object]) -> No
     with contextlib.suppress(Exception):
         progress = kinds.kind(plan.op).sample(plan, state)
         if progress is not None:
-            task_id = task_log.current_task_id("local")
             task_log.write_progress_record(
-                paths.share, task_id=task_id, progress=_windowed(progress)
+                paths.share,
+                task_id=task_log.current_task_id("local"),
+                progress=_windowed(progress),
             )
-            # The share FIRST, then the copy. This runs on the WATCHER THREAD
-            # while the work runs as a subprocess, so the seconds it costs are
-            # not seconds the task is not training -- and a `progress` row that
-            # does not move is a bar that freezes, which is exactly what kept
-            # `tasks` reading the share.
-            mirror.publish(paths.share, task_id, cwd=paths.code, log=None)
 
 
 def _published_state(paths: NodePaths, name: str) -> dict[str, object]:
