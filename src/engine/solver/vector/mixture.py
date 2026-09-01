@@ -187,23 +187,23 @@ class BoardMixtureCFR:
 
         for group in reversed(self.boards[0].groups):
             for chunk in reversed(self.boards[0].chunks(group)):
-                nodes = group.node_ids[chunk]
+                walk = group.walk_ids[chunk]  # `value` is walk-space; storage is not
                 children = []
                 for board in self.boards:
                     targets, is_terminal = board.child_targets(group, chunk)
                     children.append(board.gather_children(targets, is_terminal, br_player))
 
                 if group.actor == br_player and unconstrained:
-                    self._per_hand_max(group, children, br_player, nodes)
+                    self._per_hand_max(group, children, br_player, walk)
                 elif group.actor == br_player:
                     chosen = self._joint_argmax(group, children)
                     for board, child, pick in zip(self.boards, children, chosen, strict=True):
-                        board.value[br_player, nodes] = np.take_along_axis(
+                        board.value[br_player, walk] = np.take_along_axis(
                             child, pick[:, :, None], axis=2
                         )[:, :, 0]
                 else:
                     for board, child in zip(self.boards, children, strict=True):
-                        board.value[br_player, nodes] = child.sum(axis=-1)
+                        board.value[br_player, walk] = child.sum(axis=-1)
 
         # float64 regardless of the kernel's dtype: this is a handful of numbers,
         # and rounding them to float32 makes the decomposition disagree with the
@@ -236,7 +236,7 @@ class BoardMixtureCFR:
             groups.setdefault(tuple(sorted(board[:visible])), []).append(index)
         return list(groups.values())
 
-    def _per_hand_max(self, group, children: list[np.ndarray], br_player: int, nodes) -> None:
+    def _per_hand_max(self, group, children: list[np.ndarray], br_player: int, walk) -> None:
         """Maximise per hand, jointly over boards sharing this street's prefix.
 
         Hands are summed on a global two-card axis rather than each board's own,
@@ -248,7 +248,7 @@ class BoardMixtureCFR:
         for members in self._visible_partition(group.street):
             if len(members) == 1:
                 only = members[0]
-                self.boards[only].value[br_player, nodes] = children[only].max(axis=-1)
+                self.boards[only].value[br_player, walk] = children[only].max(axis=-1)
                 continue
 
             totals = np.zeros((children[0].shape[0], GLOBAL_HANDS, group.num_actions), dtype=DTYPE)
@@ -260,7 +260,7 @@ class BoardMixtureCFR:
             best = totals.argmax(axis=-1)
             for index in members:
                 pick = best[:, self._global_hand_id[index]]
-                self.boards[index].value[br_player, nodes] = np.take_along_axis(
+                self.boards[index].value[br_player, walk] = np.take_along_axis(
                     children[index], pick[:, :, None], axis=2
                 )[:, :, 0]
 

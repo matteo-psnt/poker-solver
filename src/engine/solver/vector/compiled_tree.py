@@ -79,6 +79,13 @@ class CompiledTree:
         terminal_street: Street the hand ended on. Showdowns before the river
             still need a full board, which is why this is recorded.
         depth: Longest path from the root to each node, in decision nodes.
+        walk_index: Node id -> its position in ``level_nodes``. The transient
+            per-iteration arrays (reach, value) are indexed in THIS space, where
+            a level is contiguous and a two-level window is a slice; storage
+            rows stay in node-id space, so no checkpoint is affected.
+        walk_target: ``edge_target`` with node children translated into walk
+            space. Terminal edges keep their terminal id, exactly as
+            ``edge_target`` does -- ``edge_kind`` still says which is which.
         level_nodes: Node ids sorted by depth, then by id.
         level_offset: Level ``d`` occupies ``level_nodes[level_offset[d] :
             level_offset[d + 1]]``.
@@ -95,6 +102,8 @@ class CompiledTree:
     terminal_value: np.ndarray
     terminal_street: np.ndarray
     depth: np.ndarray
+    walk_index: np.ndarray
+    walk_target: np.ndarray
     level_nodes: np.ndarray
     level_offset: np.ndarray
     parent_count: np.ndarray
@@ -176,6 +185,11 @@ class _Compiler:
         self._walk(self._settle_board(root), depth=0)
 
         level_nodes, level_offset = _build_levels(self.depth)
+        walk_index = np.empty_like(level_nodes)
+        walk_index[level_nodes] = np.arange(level_nodes.shape[0], dtype=np.int64)
+        walk_target = self.edge_target.copy()
+        inner = self.edge_kind != EDGE_TO_TERMINAL
+        walk_target[inner] = walk_index[self.edge_target[inner]]
         return CompiledTree(
             tree=self.tree,
             edge_offset=self.edge_offset,
@@ -185,6 +199,8 @@ class _Compiler:
             terminal_value=np.array(self.terminal_value, dtype=np.float64),
             terminal_street=np.array(self.terminal_street, dtype=np.int8),
             depth=self.depth,
+            walk_index=walk_index,
+            walk_target=walk_target,
             level_nodes=level_nodes,
             level_offset=level_offset,
             parent_count=self.parent_count,

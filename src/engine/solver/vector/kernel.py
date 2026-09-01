@@ -85,6 +85,11 @@ class NodeGroup:
 
     Per node: ``node_ids``, ``slot_base`` (``tree.slot_base``) and ``edge_base``
     (``edge_offset``). ``slot_stride`` is one scalar — a street shares it.
+
+    ``node_ids`` indexes STORAGE (regrets, strategy_sum, the CFR-BR trunk);
+    ``walk_ids`` indexes the per-iteration reach/value arrays, which live in
+    level order. They are different spaces and mixing them is silent, so the
+    two names are kept apart everywhere rather than derived at the use site.
     """
 
     level: int
@@ -92,6 +97,7 @@ class NodeGroup:
     street: Street
     actor: int  # 0 when the button acts at these nodes, else 1
     node_ids: np.ndarray
+    walk_ids: np.ndarray
     slot_base: np.ndarray
     slot_stride: int
     edge_base: np.ndarray
@@ -110,10 +116,14 @@ def slot_index(compiled: CompiledTree, group: NodeGroup, chunk: slice) -> np.nda
 def child_targets(
     compiled: CompiledTree, group: NodeGroup, chunk: slice
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Per-action child ids and a terminal mask, shaped ``(n, A)``."""
+    """Per-action child ids and a terminal mask, shaped ``(n, A)``.
+
+    Node children come back in WALK space, terminals as terminal ids -- the
+    space reach/value are indexed in, which is every caller's use for them.
+    """
     base = group.edge_base[chunk]
     edges = base[:, None] + np.arange(group.num_actions, dtype=np.int64)[None, :]
-    return compiled.edge_target[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
+    return compiled.walk_target[edges], compiled.edge_kind[edges] == EDGE_TO_TERMINAL
 
 
 def regret_match(block: np.ndarray, uniform: np.floating) -> np.ndarray:
@@ -171,6 +181,7 @@ def build_groups(compiled: CompiledTree) -> list[NodeGroup]:
                 street=street,
                 actor=actor,
                 node_ids=node_ids,
+                walk_ids=compiled.walk_index[node_ids],
                 slot_base=tree.slot_base[node_ids],
                 slot_stride=int(tree.slot_stride[node_ids[0]]),
                 edge_base=compiled.edge_offset[node_ids],
@@ -326,7 +337,7 @@ class VectorCFR:
             actor, other = group.actor, 1 - group.actor
             buckets = self.context.buckets_for(group.street)
             for chunk in self.chunks(group):
-                nodes = group.node_ids[chunk]
+                walk = group.walk_ids[chunk]
                 position = len(self.strategy_cache)
                 if self.opponent is not None and actor == self.opponent.player:
                     bucket_strategy, per_hand = self.opponent.block(group, chunk, position)
@@ -336,7 +347,7 @@ class VectorCFR:
                 self.strategy_cache.append((bucket_strategy, per_hand))
                 targets, is_terminal = self.child_targets(group, chunk)
 
-                own_reach = self.reach[actor, nodes]
+                own_reach = self.reach[actor, walk]
                 if per_hand:
                     actor_reach = np.zeros((*own_reach.shape, group.num_actions), dtype=DTYPE)
                     np.put_along_axis(
@@ -349,7 +360,7 @@ class VectorCFR:
                     actor_reach = own_reach[:, :, None] * bucket_strategy[:, buckets, :]
                     if not use_average:
                         self._accumulate_strategy_sum(group, chunk, bucket_strategy)
-                other_reach = self.reach[other, nodes]
+                other_reach = self.reach[other, walk]
 
                 for action in range(group.num_actions):
                     target = targets[:, action]
@@ -456,7 +467,7 @@ class VectorCFR:
             buckets = self.context.buckets_for(group.street)
 
             for chunk in reversed(self.chunks(group)):
-                nodes = group.node_ids[chunk]
+                walk = group.walk_ids[chunk]
                 block, per_hand = next(cached)
                 targets, is_terminal = self.child_targets(group, chunk)
 
@@ -469,8 +480,8 @@ class VectorCFR:
                     )[:, :, 0]
                 else:
                     actor_value = (block[:, buckets, :] * actor_children).sum(axis=-1)
-                self.value[actor, nodes] = actor_value
-                self.value[other, nodes] = other_children.sum(axis=-1)
+                self.value[actor, walk] = actor_value
+                self.value[other, walk] = other_children.sum(axis=-1)
 
                 self._scatter_to_buckets(group, chunk, actor_children, actor_value)
 
@@ -574,8 +585,8 @@ class VectorCFR:
         if group.actor not in self.update_players:
             return
         segments = self.segments[group.street]
-        nodes = group.node_ids[chunk]
-        reach = self.reach[group.actor, nodes][:, segments.hand_order]
+        walk = group.walk_ids[chunk]
+        reach = self.reach[group.actor, walk][:, segments.hand_order]
         collapsed = np.add.reduceat(reach, segments.segment_start, axis=1)
 
         num_buckets = self.compiled.tree.num_buckets(group.street)
@@ -641,18 +652,18 @@ class VectorCFR:
 
         for group in reversed(self.groups):
             for chunk in reversed(self.chunks(group)):
-                nodes = group.node_ids[chunk]
+                walk = group.walk_ids[chunk]
                 targets, is_terminal = self.child_targets(group, chunk)
                 children = self.gather_children(targets, is_terminal, br_player)
 
                 if group.actor == br_player:
-                    self.value[br_player, nodes] = (
+                    self.value[br_player, walk] = (
                         children.max(axis=-1) if unconstrained else self._maximise(group, children)
                     )
                 else:
                     # The actor's own probabilities already rode down in the
                     # reach vector, so the responder's value sums over actions.
-                    self.value[br_player, nodes] = children.sum(axis=-1)
+                    self.value[br_player, walk] = children.sum(axis=-1)
 
         return self.value[br_player, 0]
 
