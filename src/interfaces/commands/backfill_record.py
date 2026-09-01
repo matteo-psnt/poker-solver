@@ -69,12 +69,24 @@ class Counts(BaseModel):
     legs: int = 0
 
 
+class Divergence(BaseModel):
+    """One run the two stores disagree about, and by how much."""
+
+    run: str
+    kind: str
+    on_share: int
+    in_database: int
+
+
 class BackfillPayload(BaseModel):
     op: Literal["backfill-record"] = "backfill-record"
     applied: bool = False
+    verified: bool = False
     share: Counts = Field(default_factory=Counts)
     database: Counts = Field(default_factory=Counts)
     skipped: list[str] = Field(default_factory=list)
+    # Empty is the answer this command exists to produce during dual write.
+    divergences: list[Divergence] = Field(default_factory=list)
 
 
 def _digest(record: dict[str, Any]) -> str:
@@ -338,6 +350,11 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     engine = sa.create_engine(dsn.replace("postgresql://", "postgresql+psycopg://", 1))
     payload = BackfillPayload(applied=bool(args.apply))
 
+    # Per run, so a divergence names WHICH run rather than only a total. A
+    # count that is right in aggregate and wrong per run is the failure this is
+    # meant to catch.
+    per_run: dict[str, tuple[int, int]] = {}
+
     with records_root(args) as root, Session(engine) as session:
         wanted = sorted(p for p in root.iterdir() if p.is_dir())
         if args.runs:
@@ -351,6 +368,7 @@ def run(args: argparse.Namespace) -> BackfillPayload:
                 continue
             run_row, event_rows, checkpoint_rows = built
             eval_rows = _eval_rows(run_dir, models)
+            per_run[run_dir.name] = (len(event_rows), len(eval_rows))
             payload.share.runs += 1
             payload.share.events += len(event_rows)
             payload.share.checkpoints += len(checkpoint_rows)
@@ -406,6 +424,10 @@ def run(args: argparse.Namespace) -> BackfillPayload:
                 )
             session.commit()
 
+    if args.verify:
+        payload.verified = True
+        payload.divergences = _divergences(engine, per_run, models)
+
     with Session(engine) as session:
         payload.database = Counts(
             runs=session.scalar(sa.select(sa.func.count()).select_from(models.Run)) or 0,
@@ -416,6 +438,45 @@ def run(args: argparse.Namespace) -> BackfillPayload:
             legs=session.scalar(sa.select(sa.func.count()).select_from(models.Leg)) or 0,
         )
     return payload
+
+
+def _divergences(engine: Any, per_run: dict[str, tuple[int, int]], models: Any) -> list[Any]:
+    """Where the share and the database disagree, per run.
+
+    Counts rather than checksums, deliberately: the share is the source of
+    truth through dual write and the database is allowed to hold MORE for a
+    live run -- a node writes its rows the moment they happen, while the share
+    sees them at the next publish. So a database ahead is normal and a database
+    BEHIND is the bug, and only the second is reported.
+    """
+    import sqlalchemy as sa  # noqa: PLC0415
+    from sqlalchemy.orm import Session  # noqa: PLC0415
+
+    with Session(engine) as session:
+        events = {
+            run: int(n)
+            for run, n in session.execute(
+                sa.select(models.RunEvent.run_id, sa.func.count()).group_by(models.RunEvent.run_id)
+            )
+        }
+        evals = {
+            run: int(n)
+            for run, n in session.execute(
+                sa.select(models.Eval.run_id, sa.func.count()).group_by(models.Eval.run_id)
+            )
+        }
+
+    found = []
+    for run, (n_events, n_evals) in sorted(per_run.items()):
+        for kind, on_share, in_database in (
+            ("events", n_events, events.get(run, 0)),
+            ("evals", n_evals, evals.get(run, 0)),
+        ):
+            if in_database < on_share:
+                found.append(
+                    Divergence(run=run, kind=kind, on_share=on_share, in_database=in_database)
+                )
+    return found
 
 
 def _columns(row: Any, table: Any) -> dict[str, Any]:
@@ -445,6 +506,15 @@ def render(payload: BackfillPayload) -> None:
         database = getattr(payload.database, field)
         flag = "" if database >= share else "   <- gap"
         print(f"  {field:<12}{share:>10,}{database:>12,}{flag}")
+    if payload.verified:
+        if payload.divergences:
+            print(f"\nDIVERGENT ({len(payload.divergences)}) -- the database is BEHIND the share:")
+            for d in payload.divergences[:20]:
+                print(
+                    f"  {d.run[:52]:<54} {d.kind:<8} share {d.on_share:>5}  db {d.in_database:>5}"
+                )
+        else:
+            print("\nverified: every run agrees, or the database is ahead (a live run)")
     if payload.skipped:
         print(f"\nunreadable, skipped ({len(payload.skipped)}):")
         for name in payload.skipped[:10]:
