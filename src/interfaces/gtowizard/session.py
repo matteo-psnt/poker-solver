@@ -51,9 +51,12 @@ class Server(Protocol):
 logger = logging.getLogger(__name__)
 
 # Their client documents 20 as the ceiling and suggests fewer so one stuck hand
-# does not stall the run.
+# does not stall the run. MEASURED against their live engine: 2,000 hands at 5
+# lost 851 to 503s that outlived 8 jittered retries, while 60 at 3 lost none.
+# Their engine, not ours -- the failures are on `POST /hands`, before any card
+# is dealt, so a lost hand costs throughput and biases nothing.
 MAX_CONCURRENT = 20
-DEFAULT_CONCURRENT = 5
+DEFAULT_CONCURRENT = 3
 
 # A heads-up hand cannot need this many of OUR decisions; a loop that reaches it
 # is a protocol misread, and one that never terminates would burn the run.
