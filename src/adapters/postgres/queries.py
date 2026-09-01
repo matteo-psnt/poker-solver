@@ -22,13 +22,18 @@ if TYPE_CHECKING:
 
 @contextlib.contextmanager
 def _read(engine: Any) -> Iterator[Any]:
-    """A connection for ONE read, outside a transaction.
+    """A connection for ONE STATEMENT, outside a transaction.
 
     SQLAlchemy opens a transaction on first execute and rolls it back on close,
     so a plain `engine.connect()` spends three round trips on a statement that
     needs one. Against Sweden that is 554 ms to answer `SELECT 1` where the
-    round trip is 175 ms; every read here is a single statement that reads
-    committed rows and holds no invariant across two of them.
+    round trip is 175 ms.
+
+    The one statement is the CONDITION, not a coincidence: under AUTOCOMMIT two
+    statements see two snapshots, so a reader that asked for evals and then for
+    the rung ladder could pair an eval against a ladder that moved between the
+    round trips. A read that genuinely needs two gets a transaction and pays for
+    it -- it does not get a waiver here.
     """
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         yield connection

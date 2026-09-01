@@ -12,6 +12,29 @@ from typing import Any
 import pytest
 
 from src.adapters.postgres import connect, queries
+from src.interfaces.web import views
+
+
+def _widest_screen(monkeypatch) -> int:
+    """How many parts the console's widest view fans out over.
+
+    Measured by letting each view build its parts against a `compose` that
+    records them instead of invoking them -- so a panel added to a screen
+    widens this by existing, rather than by someone remembering to.
+    """
+    seen: list[int] = []
+
+    def _record(_op, parts, join=None):
+        seen.append(len(parts))
+        return {"parts": {part.key: {} for part in parts}}
+
+    monkeypatch.setattr(views, "compose", _record)
+    monkeypatch.setattr(views, "_summarised", lambda part: part)
+    monkeypatch.setattr(views, "_live_and_recent", lambda part: part)
+    views.now()
+    views.runs()
+    views.run("run-a")
+    return max(seen)
 
 
 class TestOneEnginePerProcess:
@@ -32,6 +55,20 @@ class TestOneEnginePerProcess:
         monkeypatch.setenv(connect.DSN_ENV, "postgresql://u:p@h:5432/db")
         assert connect.engine_from_environment(pre_ping=True) is not (
             connect.engine_from_environment(pre_ping=False)
+        )
+
+    def test_the_reader_pool_is_as_wide_as_the_widest_screen(self, monkeypatch):
+        """A view fans out at `max_workers=len(parts)`. A pool narrower than
+        that turns the fan-out into a queue at one round trip each -- 8
+        concurrent reads measured at 303 ms against 278 ms for one, and at
+        `pool_size=1` they would have cost 8 x 175 ms and still rendered.
+        """
+        monkeypatch.setenv(connect.DSN_ENV, "postgresql://u:p@h:5432/db")
+        engine = connect.engine_from_environment()
+        assert engine is not None
+        widest = _widest_screen(monkeypatch)
+        assert engine.pool.size() >= widest, (
+            f"a {widest}-panel screen serialises through a pool of {engine.pool.size()}"
         )
 
     def test_no_dsn_is_no_engine(self, monkeypatch):
