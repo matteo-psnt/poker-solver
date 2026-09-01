@@ -203,6 +203,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "curve",
                 "Within-run exploitability vs iteration, from the retained checkpoint ladder.",
             ),
+            CommandRef(
+                "arms",
+                "Compare an experiment's arms, grouped by the instrument each was measured with.",
+            ),
             CommandRef("cost", "Billed spend from Azure, and node time derived from the task log."),
             CommandRef("progress", "Per-checkpoint coverage, visits and throughput for a run."),
             CommandRef("runs", "Every published run, newest first."),

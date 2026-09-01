@@ -44,6 +44,7 @@ from src.interfaces.cloud.store import workspace
 from src.interfaces.commands import (
     Command,
     activity,
+    arms,
     autoscale_check,
     cancel,
     compact_legs,
@@ -340,6 +341,15 @@ def create_app() -> FastAPI:
     @app.get("/api/runs/{run_id}/curve", response_model=contract.Curve, responses=ERRORS)
     def _curve(run_id: str) -> JSONResponse:
         return answer(cache, curve.COMMAND, run=run_id)
+
+    @app.get(
+        "/api/experiments/{experiment_id}/arms", response_model=contract.Arms, responses=ERRORS
+    )
+    def _arms(experiment_id: str, control: str = "") -> JSONResponse:
+        # `control` is a query STRING with an empty default, not `str | None`:
+        # omitting it must mean the command's own default, which is the
+        # omit-means-default rule every other endpoint here follows.
+        return answer(cache, arms.COMMAND, experiment=experiment_id, control=control or None)
 
     @app.get("/api/cost", response_model=contract.Cost, responses=ERRORS)
     def _cost(hours: float = 0.0) -> JSONResponse:

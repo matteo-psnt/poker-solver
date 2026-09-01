@@ -103,6 +103,170 @@
         "title": "ApiError",
         "type": "object"
       },
+      "ArmPoint": {
+        "description": "One arm's score at one checkpoint, inside one tier.",
+        "properties": {
+          "arm": {
+            "title": "Arm",
+            "type": "string"
+          },
+          "exploitability_mbb": {
+            "title": "Exploitability Mbb",
+            "type": "number"
+          },
+          "iteration": {
+            "title": "Iteration",
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "std_error_mbb": {
+            "title": "Std Error Mbb",
+            "type": "number"
+          },
+          "vs_control_mbb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs Control Mbb"
+          },
+          "vs_control_stderr_mbb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs Control Stderr Mbb"
+          }
+        },
+        "required": [
+          "arm",
+          "iteration",
+          "exploitability_mbb",
+          "std_error_mbb",
+          "run_id"
+        ],
+        "title": "ArmPoint",
+        "type": "object"
+      },
+      "ArmTier": {
+        "description": "Every arm scored with ONE instrument, and their differences.\n\nA tier is the unit of comparison, so it is also the unit of rendering. Two\narms scored at different board budgets are two numbers about different\ngames; they appear in separate tiers and are never subtracted.",
+        "properties": {
+          "arms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Arms",
+            "type": "array"
+          },
+          "control": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Control"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/ArmPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "unmatched_iterations": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Unmatched Iterations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tier",
+          "control",
+          "points",
+          "arms",
+          "unmatched_iterations"
+        ],
+        "title": "ArmTier",
+        "type": "object"
+      },
+      "ArmsOutput": {
+        "description": "What `arms` answers: one experiment's arms, grouped by instrument.",
+        "properties": {
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/ArmTier"
+            },
+            "title": "Tiers",
+            "type": "array"
+          },
+          "unplaceable_records": {
+            "default": 0,
+            "title": "Unplaceable Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "tiers"
+        ],
+        "title": "ArmsOutput",
+        "type": "object"
+      },
+      "ArmsPayload": {
+        "description": "What `arms` answers. The console can read this unchanged.",
+        "properties": {
+          "ledger": {
+            "title": "Ledger",
+            "type": "string"
+          },
+          "op": {
+            "const": "arms",
+            "default": "arms",
+            "title": "Op",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ArmsOutput"
+          }
+        },
+        "required": [
+          "ledger",
+          "result"
+        ],
+        "title": "ArmsPayload",
+        "type": "object"
+      },
       "AutoscalePayload": {
         "description": "EVERY pool's formula. They are separate formulas on separate pools, so\nchecking one and reporting \"no error\" answers about half the account.",
         "properties": {
@@ -5242,6 +5406,65 @@
           }
         },
         "summary": " Evals"
+      }
+    },
+    "/api/experiments/{experiment_id}/arms": {
+      "get": {
+        "operationId": "_arms_api_experiments__experiment_id__arms_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "control",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Control",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArmsPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Arms"
       }
     },
     "/api/jobs": {

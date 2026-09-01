@@ -45,6 +45,7 @@ from src.interfaces.cloud.tasks.batch import BatchTask, Job, ResizeError
 from src.interfaces.cloud.tasks.dispatch import Dispatched
 from src.interfaces.commands.activity import ActivityPayload as Activity
 from src.interfaces.commands.activity import CommandActivity, Failure
+from src.interfaces.commands.arms import ArmsPayload as Arms
 from src.interfaces.commands.autoscale_check import AutoscalePayload as Autoscale
 from src.interfaces.commands.cancel import CancelledPayload as Cancelled
 from src.interfaces.commands.compact_legs import CompactedPayload as Compacted
@@ -79,6 +80,7 @@ from src.shared.task_history import TaskProgress, TaskRow
 # typed, and that list is meant to shrink to nothing.
 __all__ = [
     "Activity",
+    "Arms",
     "Autoscale",
     "BatchTask",
     "Billed",

@@ -69,6 +69,23 @@ def is_live(job: Job) -> bool:
     return any(task.phase in task_states.IN_FLIGHT for task in job.tasks)
 
 
+def select(jobs: list[Job], *, show_all: bool, limit: int) -> JobsPayload:
+    """Order the jobs chronologically, then keep the NEWEST ``limit`` of them.
+
+    The sort is the load-bearing half. Batch returns jobs in its own order,
+    which is not chronological -- measured 09-01, the list opened at 08-31 and
+    closed at 08-26 -- so `[-limit:]` over it kept the OLDEST 20 and hid the 52
+    newest, burying today's job behind August 4th's. Ids are
+    ``poker-YYYYMMDD[-pool]``, fixed-width and so lexicographically
+    chronological.
+    """
+    jobs = sorted(jobs, key=lambda job: job.job)
+    shown = jobs if show_all else [job for job in jobs if is_live(job)]
+    if limit > 0:
+        shown = shown[-limit:]
+    return JobsPayload(jobs=shown, total_jobs=len(jobs), hidden_jobs=len(jobs) - len(shown))
+
+
 def run(args: argparse.Namespace) -> JobsPayload:
     """List jobs and their tasks, newest last.
 
@@ -85,10 +102,7 @@ def run(args: argparse.Namespace) -> JobsPayload:
         want=None if args.all else is_active,
         in_flight_only=not args.all,
     )
-    shown = jobs if args.all else [job for job in jobs if is_live(job)]
-    if args.limit > 0:
-        shown = shown[-args.limit :]
-    return JobsPayload(jobs=shown, total_jobs=len(jobs), hidden_jobs=len(jobs) - len(shown))
+    return select(jobs, show_all=args.all, limit=args.limit)
 
 
 def render(payload: JobsPayload) -> None:
