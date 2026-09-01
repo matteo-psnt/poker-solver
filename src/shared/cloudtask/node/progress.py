@@ -23,7 +23,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from src.shared.cloudtask import kinds, task_log
-from src.shared.cloudtask.node import archive, mirror
+from src.shared.cloudtask.node import archive, legmirror
 from src.shared.cloudtask.node.plan import TaskPlan, parse_environment
 from src.shared.cloudtask.node.process import GRACE_SECONDS
 
@@ -172,10 +172,10 @@ class ProgressWatcher:
         On the WATCHER THREAD, while the work runs as a subprocess, so the
         seconds it costs are not seconds the task is not training.
         """
-        mirror.publish(
+        legmirror.publish(
             self._paths.share,
             task_log.current_task_id("local"),
-            cwd=self._paths.code,
+            dsn=self._plan.record_dsn if self._plan else "",
             log=self._log,
         )
 

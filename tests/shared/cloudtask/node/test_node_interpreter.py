@@ -85,7 +85,20 @@ GUARDED_SOURCES = _closure(ENTRY_POINT)
 
 NODE_PYTHON = "3.13"
 
-THIRD_PARTY = ("numpy", "pydantic", "zarr", "yaml", "xxhash", "tqdm", "rich", "azure")
+THIRD_PARTY = (
+    "numpy",
+    "pydantic",
+    "zarr",
+    "yaml",
+    "xxhash",
+    "tqdm",
+    "rich",
+    "azure",
+    # Installed BESIDE the node's interpreter by the pool's start task, unlike
+    # the rest of these -- so importing it is legal, but only from inside a
+    # function that catches the failure. See `legmirror`.
+    "psycopg",
+)
 
 
 def _code(source: pathlib.Path) -> str:
@@ -123,12 +136,43 @@ def test_the_guarded_set_is_discovered_and_not_empty():
     } <= found, f"the node closure lost members; found {sorted(found)}"
 
 
+def _module_level_imports(source: pathlib.Path) -> set[str]:
+    """Top-level package names imported when this module is LOADED.
+
+    Module scope only, which is the rule the node actually needs: an import that
+    runs at load time and is missing kills the task at bootstrap, before it can
+    write the record that would explain it. One inside a function runs later, on
+    a path that can catch it.
+
+    Parsed rather than scanned for substrings. The scan this replaces looked for
+    `import numpy` and would have missed `from numpy import array` entirely.
+    """
+    names: set[str] = set()
+    for node in ast.parse(source.read_text()).body:
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    return names
+
+
 @pytest.mark.parametrize("source", GUARDED_SOURCES, ids=lambda p: p.name)
-def test_no_third_party_import(source):
+def test_no_third_party_import_at_module_level(source):
     """A task dying during dependency install must still leave a record."""
+    offending = _module_level_imports(source) & set(THIRD_PARTY)
+    assert not offending, f"{source.name} imports {sorted(offending)} at module level"
+
+
+def test_a_deferred_third_party_import_is_caught_where_it_happens():
+    """`psycopg` is the one the start task installs, so the node may use it --
+    but only where a node that somehow lacks it mirrors nothing instead of dying
+    at bootstrap. The guard above permits the import; this is what makes
+    permitting it safe."""
+    source = REPO_ROOT / "src" / "shared" / "cloudtask" / "node" / "legmirror.py"
     text = source.read_text()
-    for name in THIRD_PARTY:
-        assert f"import {name}" not in text, f"{source.name} must not import {name}"
+    assert "psycopg" not in _module_level_imports(source)
+    assert "import psycopg" in text, "the module this protects no longer imports it"
+    assert "except Exception" in text, "the deferred import must be caught by its caller"
 
 
 def test_the_interpreter_is_installed_by_the_pool_not_the_image():
@@ -143,6 +187,16 @@ def test_the_interpreter_is_installed_by_the_pool_not_the_image():
     """
     main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
     assert f"uv python install {NODE_PYTHON}" in main_tf
+
+
+def test_the_pool_installs_the_wrappers_one_dependency():
+    """The wrapper mirrors a task's records into the database itself, and it
+    runs before `uv sync` -- so the driver has to arrive with the INTERPRETER,
+    not with the project. Terraform is the only thing that can put it there, and
+    this is the one place the two halves are pinned against each other."""
+    main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
+    assert "psycopg[binary]" in main_tf
+    assert f"--python /usr/local/bin/python{NODE_PYTHON}" in main_tf
 
 
 def test_the_entry_point_adds_the_repo_to_the_path_before_importing():

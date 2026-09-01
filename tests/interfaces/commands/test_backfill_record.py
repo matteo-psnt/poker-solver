@@ -14,7 +14,7 @@ import pytest
 
 from src.adapters.postgres import legs
 from src.interfaces.commands import backfill_record
-from src.shared import task_history
+from src.shared.cloudtask import task_log
 
 
 class _Leg:
@@ -56,7 +56,7 @@ class TestBothNameShapesSurvive:
     def test_a_task_scoped_leg_is_kept_under_the_sentinel(self, monkeypatch, tmp_path, leg):
         rows = _rows(monkeypatch, {f"task-a.{leg}.json": {"ts": "2026-01-01"}}, tmp_path)
         assert [(r.task_id, r.attempt, r.leg) for r in rows] == [
-            ("task-a", task_history.TASK_SCOPED, leg)
+            ("task-a", task_log.TASK_SCOPED, leg)
         ]
 
     def test_the_sentinel_does_not_collide_with_a_real_first_attempt(self, monkeypatch, tmp_path):
@@ -71,7 +71,7 @@ class TestBothNameShapesSurvive:
             tmp_path,
         )
         assert len(rows) == 2
-        assert {r.attempt for r in rows} == {0, task_history.TASK_SCOPED}
+        assert {r.attempt for r in rows} == {0, task_log.TASK_SCOPED}
 
     def test_a_task_id_containing_dots_still_parses(self, monkeypatch, tmp_path):
         rows = _rows(monkeypatch, {"a.b.c.3.start.json": {"ts": "2026-01-01"}}, tmp_path)
