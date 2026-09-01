@@ -572,30 +572,25 @@ def sdk_state_payload(state: Any) -> dict[str, Any]:
 # `queue_ttl_seconds: 60` -- so being queued is a thing you keep doing, not a
 # thing you did.
 #
-# MEASURED 09-01 against the live endpoint: a join while ALREADY queued
-# REFRESHES the entry -- `waiting_seconds` 33 -> 2, HTTP 200, no error. So the
-# entry never has to lapse. Joining only on `idle` meant waiting for expiry and
-# then noticing it a poll later: 63 s between joins against a 60 s TTL, leaving
-# us OUT of the queue ~24% of the time.
+# ⚠️ REFRESHING THE ENTRY EARLY WAS TRIED AND MEASURED WORSE. Do not re-derive
+# it. A join while already queued DOES refresh (`waiting_seconds` 33 -> 2, HTTP
+# 200), so the idea is sound in principle, but three arms measured over 40
+# status samples each, live on 09-01:
 #
-# ⚠️ DO NOT derive this from `queue_ttl_seconds`. It advertises 60 s and the
-# entry does not live that long: MEASURED 09-01 by polling status every ~9 s,
-# consecutive entries lapsed after 46, 45, 35 and 12 seconds. The lifetime is
-# not merely shorter than advertised, it is ERRATIC, so any fraction of their
-# number is fitting to a constant that does not exist -- 0.6 of it (36 s) sat
-# inside the expiry window and the seat still went idle three times in two
-# minutes.
+#     join-on-idle, 30 s poll   (this)  70% queued
+#     refresh at 25 s, 20 s poll        60%
+#     refresh at 15 s,  7 s poll        60%
 #
-# A fixed, conservative age instead: refresh once an entry is 25 s old, polling
-# every 20 s, so a refresh lands by ~45 s.
+# 70 vs 60 is 10 +/- 10 points and NOT significant, so this is not "the original
+# is better" -- it is "the extra joins and the extra complexity bought nothing
+# twice". The ceiling is the entry lifetime itself, which is ERRATIC: measured
+# lapses at 46, 45, 35 and 12 s against an advertised `queue_ttl_seconds: 60`.
+# Nothing polled at a rate their limiter tolerates survives a 12 s entry.
 #
-# ⚠️ DO NOT poll harder than this to close the remaining gap. A 7 s poll was
-# tried and measured WORSE -- 60% queued against the ~76% of the join-on-idle
-# original -- because four times the status traffic drew silent error responses
-# (see `raise_for_status` below). Their limiter, not the entry lifetime, is what
-# bounds queue presence, so the equilibrium is found by asking LESS often.
-_QUEUE_REFRESH_AFTER_S = 25.0
-_QUEUE_POLL_S = 20.0
+# And queue presence is probably not what bounds match volume anyway -- 100
+# matches arrived in six hours while unqueued a good fraction of the time, then
+# a 13-hour drought arrived with the seat perfectly queued.
+_QUEUE_POLL_S = 30.0
 
 # A 429 on `join` is not the queue being down, and must not be paid for at the
 # poll period: measured 09-01, a third of joins were limited and each one bought
@@ -670,11 +665,7 @@ async def _keep_queued(
                     reply.raise_for_status()
                     status = reply.json()
                     state = str(status.get("status", "unknown"))
-                    waiting = float(status.get("waiting_seconds") or 0.0)
-                    # Enter when out, refresh before the entry lapses. Waiting
-                    # for `idle` is what left the seat unqueued between expiry
-                    # and the next poll.
-                    if state == "idle" or waiting >= _QUEUE_REFRESH_AFTER_S:
+                    if state == "idle":
                         reply = await http.post("/api/external-api/matchmaking/join", json={})
                         reply.raise_for_status()
                         state = "queued"
