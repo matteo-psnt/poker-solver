@@ -55,3 +55,31 @@ class TestAmbiguousMessage:
         matches = [f"run-x-{index}" for index in range(total)]
         message = run_names.ambiguous_message("x", matches)
         assert f"+{total - 6} more" in message
+
+
+class TestUnknownMessage:
+    def test_a_typo_gets_the_id_it_meant(self):
+        """Ranked by similarity, because the useful reply to a mistyped id is the
+        id that was meant -- alphabetical order puts that nowhere in particular."""
+        published = [f"run-train-production-to30M-control-s{n}" for n in (101, 103, 107)]
+        message = run_names.unknown_message("run-train-production-to30M-control-s105", published)
+        assert "run-train-production-to30M-control-s101" in message
+        assert "Closest" in message
+
+    def test_a_long_listing_is_summarised_not_dumped(self):
+        """Measured 09-01: a fragment of a run that was still TRAINING printed all
+        303 published ids in one paragraph. The ambiguous path had a limit; this
+        one did not."""
+        published = [f"run-{index:04d}-abcdef" for index in range(303)]
+        message = run_names.unknown_message("run-pcs-to2k-dcfr", published)
+        assert message.count("run-") <= 8
+        assert "303 published" in message
+
+    def test_nothing_similar_falls_back_to_the_newest(self):
+        published = [f"run-{index:04d}-abcdef" for index in range(303)]
+        message = run_names.unknown_message("zzzzzzzzzz", published)
+        assert "Newest" in message
+        assert "run-0302-abcdef" in message
+
+    def test_an_empty_share_says_so_rather_than_listing_nothing(self):
+        assert "neither is anything else" in run_names.unknown_message("run-a", [])
