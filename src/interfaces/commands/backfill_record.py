@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field
 from src.interfaces.commands._base import Command, records_root
 from src.interfaces.errors import CommandError
 from src.shared import run_events
+from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
     import argparse
@@ -34,6 +36,9 @@ DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 # The namespace for the deterministic event ids below. Any fixed uuid does; what
 # matters is that it never changes, or every event re-imports as a new row.
 _EVENT_NS = uuid.UUID("6f1a9c2e-1f4a-4a1e-9f7d-0b2c3d4e5f60")
+
+# `.complete-static-<iteration>.zarr`, the same shape `prune-checkpoints` matches.
+_RUNG = re.compile(r"^static-(\d+)\.zarr$")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -150,38 +155,42 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
             )
         )
 
-    checkpoint_rows = []
+    # From the MARKERS, not the manifest. `prune-checkpoints` deletes a
+    # snapshot and its marker without rewriting the manifest that advertises it
+    # -- that disagreement is what `verify_published_rungs` exists to absorb --
+    # so the manifest still names 769 rungs this session deleted. The marker is
+    # the share's own claim that a rung is there; the manifest is a stale index.
+    # `_published_rungs` in prune-checkpoints reads exactly these, for exactly
+    # this reason.
+    manifest: dict[str, Any] = {}
     manifest_path = run_dir / "STATIC_CHECKPOINT.json"
     if manifest_path.is_file():
         try:
             manifest = json.loads(manifest_path.read_text())
         except (OSError, json.JSONDecodeError):
             manifest = {}
-        current = manifest.get("iteration")
-        for entry in [*manifest.get("retained", []), manifest]:
-            iteration = entry.get("iteration")
-            name = entry.get("zarr")
-            if iteration is None or not name:
-                continue
-            checkpoint_rows.append(
-                models.Checkpoint(
-                    run_id=run_dir.name,
-                    iteration=int(iteration),
-                    # Where it WILL live. Nothing has moved to Blob yet, so this
-                    # is the address the migration will write to, not a promise
-                    # that bytes are there -- `is_current` and the fingerprint
-                    # are what a loader checks.
-                    blob_uri=f"rungs/{run_dir.name}/{iteration}",
-                    fingerprint=manifest.get("fingerprint") or "",
-                    abstraction_id=manifest.get("abstraction_id"),
-                    is_current=(iteration == current),
-                )
+
+    current = manifest.get("iteration")
+    checkpoint_rows = []
+    for marker in sorted(run_dir.glob(f"{archive.MARKER_PREFIX}static-*.zarr")):
+        match = _RUNG.match(marker.name[len(archive.MARKER_PREFIX) :])
+        if not match:
+            continue
+        iteration = int(match.group(1))
+        checkpoint_rows.append(
+            models.Checkpoint(
+                run_id=run_dir.name,
+                iteration=iteration,
+                # Where it WILL live. Nothing has moved to Blob yet, so this is
+                # the address the migration writes to, not a claim bytes are
+                # there -- the fingerprint is what a loader actually checks.
+                blob_uri=f"rungs/{run_dir.name}/{iteration}",
+                fingerprint=manifest.get("fingerprint") or "",
+                abstraction_id=manifest.get("abstraction_id"),
+                is_current=(iteration == current),
             )
-    # The manifest lists the current rung twice when it is also retained.
-    unique: dict[int, Any] = {}
-    for row in checkpoint_rows:
-        unique[row.iteration] = row if row.is_current else unique.get(row.iteration, row)
-    return run, event_rows, list(unique.values())
+        )
+    return run, event_rows, checkpoint_rows
 
 
 def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
