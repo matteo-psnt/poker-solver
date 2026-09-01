@@ -21,7 +21,7 @@ GAME = {
     "game_name": "HUNL 200BB",
     "game_format": "heads-up",
     "starting_stack": 20000,
-    "blinds": [50, BB],
+    "blinds": [BB, 50],  # THEIR order: big first
     "stack_reset_per_hand": True,
 }
 

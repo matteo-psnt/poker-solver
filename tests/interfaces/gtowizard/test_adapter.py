@@ -35,7 +35,7 @@ GAME = {
     "game_name": "test",
     "game_format": "heads-up",
     "starting_stack": STACK,
-    "blinds": [SB, BB],
+    "blinds": [BB, SB],  # THEIR order: big first
     "stack_reset_per_hand": True,
 }
 
@@ -98,12 +98,12 @@ class TestTableScale:
     def test_a_ragged_blind_ratio_is_refused_not_approximated(self, blueprint) -> None:
         # 150/250 is not a whole multiple of 50/100, so every bet size would sit
         # between two of our tree's rungs.
-        odd = {**GAME, "blinds": [150, 250]}
+        odd = {**GAME, "blinds": [250, 150]}
         with pytest.raises(AdapterError, match="whole"):
             table_scale(frame(game=odd).game, blueprint)
 
     def test_blinds_that_scale_unevenly_are_refused(self, blueprint) -> None:
-        uneven = {**GAME, "blinds": [50, 200]}
+        uneven = {**GAME, "blinds": [200, 50]}
         with pytest.raises(AdapterError, match="unevenly"):
             table_scale(frame(game=uneven).game, blueprint)
 
@@ -192,7 +192,7 @@ THEIRS = {
     "game_name": "HUNL 200BB",
     "game_format": "heads-up",
     "starting_stack": 20_000,
-    "blinds": [50, 100],
+    "blinds": [100, 50],
     "stack_reset_per_hand": True,
 }
 

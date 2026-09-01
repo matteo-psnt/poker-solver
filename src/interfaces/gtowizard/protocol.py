@@ -93,7 +93,13 @@ class Game:
         blinds = _require(payload, "blinds")
         if len(blinds) != 2:
             raise ProtocolError(f"Expected two blinds, got {blinds!r}.")
-        small, big = (int(blind) for blind in blinds)
+        # BIG FIRST. Measured against their live server, which sends
+        # `[100.0, 50.0]` for HUNL 200BB -- not the `[small, big]` this read at
+        # first. Reading it backwards halves `TableScale.factor`, so every wager
+        # goes out at half its size, and doubles every score, because
+        # `Tally` divides by the big blind. Neither raises. The guard below is
+        # what caught it, and it stays: a reversal must fail, never approximate.
+        big, small = (int(blind) for blind in blinds)
         if big < small:
             raise ProtocolError(f"big blind {big} is below small blind {small}.")
         return cls(
@@ -166,8 +172,17 @@ class Turn:
         players = tuple(Player.parse(entry) for entry in _require(payload, "players"))
         if len(players) != 2:
             raise ProtocolError(f"This blueprint plays heads-up; the table seats {len(players)}.")
-        if sum(player.is_hero for player in players) != 1:
-            raise ProtocolError("Exactly one seat should hold hole cards; the frame shows another.")
+        # Only while the hand is LIVE. A finished hand reveals BOTH holdings --
+        # measured on a fold, not just a showdown -- so requiring exactly one
+        # card-holder rejected every terminal frame, which is the one frame
+        # carrying `winnings` and `aivat_score`.
+        over = bool(_require(payload, "is_hand_over"))
+        holders = sum(player.is_hero for player in players)
+        if not over and holders != 1:
+            raise ProtocolError(
+                f"A live frame should show exactly one holding, not {holders}: "
+                "without it there is no way to tell which seat is ours."
+            )
         board = parse_cards(str(payload.get("board_cards") or ""))
         seen = [*board, *players[0].hole_cards, *players[1].hole_cards]
         if len({card.mask for card in seen}) != len(seen):
@@ -178,7 +193,7 @@ class Turn:
             common_pot=int(_require(payload, "common_pot")),
             total_pot=int(_require(payload, "total_pot")),
             board=board,
-            is_hand_over=bool(_require(payload, "is_hand_over")),
+            is_hand_over=over,
             players=players,
             legal_actions=tuple(str(action) for action in payload.get("legal_actions", ())),
             raise_min=int(raise_range.get("min", 0)),
@@ -193,8 +208,18 @@ class Turn:
 
     @property
     def hero_seat(self) -> int:
-        """Our index into ``players`` -- the seat holding cards we can see."""
-        return next(index for index, player in enumerate(self.players) if player.is_hero)
+        """Our index into ``players`` -- the seat holding cards we can see.
+
+        Live frames only. A finished hand reveals both holdings, and nothing
+        asks whose turn it is once there are no turns left.
+        """
+        seats = [index for index, player in enumerate(self.players) if player.is_hero]
+        if len(seats) != 1:
+            raise ProtocolError(
+                f"{len(seats)} visible holdings, so no seat is identifiably ours. "
+                "A finished hand reveals both; ask before it ends."
+            )
+        return seats[0]
 
     def allows(self, action: str) -> bool:
         """Whether the server will accept this base action now.
@@ -226,10 +251,10 @@ class Turn:
     def button_seat(self) -> int:
         """The seat on the button, derived from WHOSE TURN IT IS.
 
-        Their frame names a ``position`` per player, but we have never seen
-        their vocabulary -- no key-free endpoint returns one, and guessing
-        between BTN/BU/SB/D would be a silent mis-seat rather than an error.
-        This needs no vocabulary at all.
+        Their vocabulary is ``SB``/``BB`` -- measured, once the key went live.
+        The derivation stays anyway, because it needs no vocabulary at all and
+        is verified against live frames from both seats; ``position`` is used to
+        CONTRADICT it, so a protocol change fails loudly instead of mis-seating.
 
         Heads-up, seats strictly alternate within a betting round: every action
         passes the turn until the round closes. The button acts first preflop
@@ -242,7 +267,15 @@ class Turn:
         """
         acted = len(self.rounds[-1])
         hero_is_button = (acted % 2 == 0) if self.street == "preflop" else (acted % 2 == 1)
-        return self.hero_seat if hero_is_button else 1 - self.hero_seat
+        seat = self.hero_seat if hero_is_button else 1 - self.hero_seat
+        named = {index for index, p in enumerate(self.players) if p.position.upper() == "SB"}
+        if named and seat not in named:
+            raise ProtocolError(
+                f"Seat {seat} is on the button by action parity, but the frame names "
+                f"seat(s) {sorted(named)} as SB. Heads-up the small blind IS the button, "
+                "so the protocol has changed and every wager would be mis-seated."
+            )
+        return seat
 
     def street_index(self) -> int:
         """Streets completed, counted from the breaks rather than from ``street``.
