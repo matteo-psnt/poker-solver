@@ -17,7 +17,9 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -29,7 +31,6 @@ from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
     import argparse
-    from pathlib import Path
 
 DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
@@ -65,6 +66,7 @@ class Counts(BaseModel):
     events: int = 0
     checkpoints: int = 0
     evals: int = 0
+    legs: int = 0
 
 
 class BackfillPayload(BaseModel):
@@ -247,6 +249,77 @@ def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
     return rows
 
 
+# `progress` and `observed` are written per TASK, not per attempt, so their
+# filenames carry no attempt number. They are not attempt-scoped facts: the join
+# attaches them to the LATEST attempt. Stored under this sentinel so the primary
+# key still holds and the difference stays visible, rather than being flattened
+# onto attempt 0 where it would collide with a real first attempt.
+TASK_SCOPED = -1
+
+
+def _leg_instant(document: dict[str, Any]) -> Any:
+    """When a leg happened, from whichever field its writer used.
+
+    Not one field, because the writers are different programs. The node stamps
+    `ts`; `write_observed_record` stamps `observed_at`, because it is the READER
+    saying when IT looked, not the node saying when something happened. Falling
+    back to Batch's own times last keeps a record that has neither from being
+    dropped for want of a clock.
+    """
+    for field in ("ts", "observed_at", "end_time", "start_time"):
+        value = document.get(field)
+        if value:
+            return value
+    return None
+
+
+def _leg_rows(legs_dir: Path, models: Any) -> list[Any]:
+    """Every leg document, through `read_documents`.
+
+    NOT a glob. `compact-legs` bundles sealed records into one file, so a glob
+    over `*.json` sees the bundle and misses everything inside it --
+    `read_documents` reads both shapes, and the writer uses it too.
+
+    TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
+    documents -- a third of the record, including every one of the 1,823
+    `observed` legs, which are the only account of a death the node did not
+    survive:
+
+        <task>.<attempt>.start.json      per ATTEMPT -- a retry reuses the id
+        <task>.<attempt>.exit.json
+        <task>.progress.json             per TASK
+        <task>.observed.json             per TASK, written by the READER
+    """
+    from src.shared.cloudtask import task_log  # noqa: PLC0415
+
+    rows = []
+    seen: set[tuple[str, int, str]] = set()
+    for name, document in task_log.read_documents(legs_dir).items():
+        stem = name[: -len(".json")] if name.endswith(".json") else name
+        parts = stem.rsplit(".", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
+        elif len(parts) >= 2:
+            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
+        else:
+            continue
+        key = (task_id, attempt, leg)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            models.Leg(
+                task_id=task_id,
+                attempt=attempt,
+                leg=leg,
+                run_id=document.get("run_id") or None,
+                at=_leg_instant(document),
+                body=document,
+            )
+        )
+    return rows
+
+
 def run(args: argparse.Namespace) -> BackfillPayload:
     """Read the published record and mirror it into Postgres."""
     dsn = os.environ.get(DSN_ENV)
@@ -309,6 +382,30 @@ def run(args: argparse.Namespace) -> BackfillPayload:
                     )
             session.commit()
 
+    # A separate pass: legs are keyed by TASK and live under `legs/`, a
+    # different top-level directory from the run record's `archive/`.
+    from src.interfaces.cloud.config import CloudConfig  # noqa: PLC0415
+    from src.interfaces.cloud.store import share  # noqa: PLC0415
+    from src.interfaces.commands.tasks import download_tasks  # noqa: PLC0415
+    from src.shared.cloudtask import task_log  # noqa: PLC0415
+
+    config = CloudConfig.load()
+    with tempfile.TemporaryDirectory() as tmp:
+        local = Path(tmp)
+        download_tasks(share.share_client(config), config.share_name, local)
+        leg_rows = _leg_rows(task_log.tasks_dir(local), models)
+    payload.share.legs = len(leg_rows)
+    if args.apply and leg_rows:
+        with Session(engine) as session:
+            for start in range(0, len(leg_rows), 500):
+                chunk = leg_rows[start : start + 500]
+                session.execute(
+                    insert(models.Leg)
+                    .values([_columns(r, models.Leg) for r in chunk])
+                    .on_conflict_do_nothing()
+                )
+            session.commit()
+
     with Session(engine) as session:
         payload.database = Counts(
             runs=session.scalar(sa.select(sa.func.count()).select_from(models.Run)) or 0,
@@ -316,6 +413,7 @@ def run(args: argparse.Namespace) -> BackfillPayload:
             checkpoints=session.scalar(sa.select(sa.func.count()).select_from(models.Checkpoint))
             or 0,
             evals=session.scalar(sa.select(sa.func.count()).select_from(models.Eval)) or 0,
+            legs=session.scalar(sa.select(sa.func.count()).select_from(models.Leg)) or 0,
         )
     return payload
 
@@ -342,7 +440,7 @@ def _columns(row: Any, table: Any) -> dict[str, Any]:
 
 def render(payload: BackfillPayload) -> None:
     print(f"{'':<14}{'share':>10}{'database':>12}")
-    for field in ("runs", "events", "checkpoints", "evals"):
+    for field in ("runs", "events", "checkpoints", "evals", "legs"):
         share = getattr(payload.share, field)
         database = getattr(payload.database, field)
         flag = "" if database >= share else "   <- gap"
