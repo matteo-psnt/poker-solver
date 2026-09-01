@@ -67,3 +67,29 @@ class RecordSink(Protocol):
         Returns rather than raises, so the caller can SAY SO in the run log
         instead of reporting a clean finish over a lossy one.
         """
+
+
+class EvalSink(Protocol):
+    """One evaluation's result, as the scoring service produces it.
+
+    Its own protocol rather than a method on `RecordSink`, because it has a
+    different producer and a different life: an eval is one row written once by
+    a service that has no run to open, close or flush.
+
+    BEST EFFORT, and unlike `opened` it must not raise. The document is already
+    on the share by the time this is called, and the share is the source of
+    truth -- so a failure here costs a row the importer can rebuild, while
+    raising would throw away hours of finished evaluation over a transport
+    fault. `record_evaluation` already refuses to fail an eval it records; this
+    holds the same line one layer down.
+    """
+
+    def scored(self, eval_id: str, document: Mapping[str, Any], tier_digest: str) -> None:
+        """Store one evaluation.
+
+        `tier_digest` is computed by the CALLER, from
+        `pipeline.evaluation.ledger.tiers` -- the one implementation of which
+        knobs make two evals comparable. A sink cannot derive it: `adapters` may
+        not import `pipeline`, and a second derivation would pair rows that must
+        not be compared.
+        """

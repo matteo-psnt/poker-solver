@@ -241,6 +241,19 @@ def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def tier_digest(record: dict[str, Any]) -> str:
+    """:func:`tier_key`, hashed, for storing beside a row.
+
+    Here rather than at either call site because there are two -- the importer
+    and the live writer -- and a tier computed two ways is two answers to which
+    evals may be compared. A five-column version of this pairing reported
+    -100.0 mbb where the truth was -60.0.
+    """
+    return hashlib.sha256(
+        json.dumps(list(tier_key(record)), sort_keys=True, default=str).encode()
+    ).hexdigest()[:32]
+
+
 def tier_label(record: dict[str, Any]) -> str:
     """Human-readable one-line description of a row's tier.
 

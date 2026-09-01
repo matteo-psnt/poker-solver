@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
     resolve_run_dir,
@@ -286,6 +287,10 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
     run_dir = resolve_run_dir(args.run, args.runs_dir)
     return services.evaluate_and_record(
         run_dir,
+        # The composition root, same as the trainers': `pipeline` holds a port
+        # and this decides what implements it. No DSN is no sink, which is the
+        # rollout and the rollback both.
+        sink=connect.eval_sink_from_environment(),
         method=args.method,
         lbr=LBRConfig(
             num_hands=args.hands,
