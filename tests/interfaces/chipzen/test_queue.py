@@ -221,7 +221,7 @@ class TestEntryRefresh:
 
     def test_an_aging_entry_is_refreshed(self, chipzen) -> None:
         chipzen.status = "queued"
-        chipzen.waiting = 45.0  # past 60% of a 60 s TTL
+        chipzen.waiting = 20.0  # older than _QUEUE_REFRESH_AFTER_S
         _run(playing=0, passes=1)
         assert chipzen.joins == 1
         assert chipzen.waiting == 0.0
@@ -250,4 +250,6 @@ class TestEntryRefresh:
 
         chipzen.handle = _age  # type: ignore[method-assign]
         _run(playing=0, passes=10)
-        assert max(aged) < chipzen.ttl, f"entry reached {max(aged)}s of a {chipzen.ttl}s TTL"
+        # 35 s is the shortest entry lifetime measured live; their advertised
+        # 60 s ttl is NOT a safe bound and must not be asserted against.
+        assert max(aged) < 35.0, f"entry reached {max(aged)}s; live entries died at 12-46s"
