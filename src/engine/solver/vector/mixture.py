@@ -187,30 +187,33 @@ class BoardMixtureCFR:
 
         for group in reversed(self.boards[0].groups):
             for chunk in reversed(self.boards[0].chunks(group)):
-                walk = group.walk_ids[chunk]  # `value` is walk-space; storage is not
+                here, below = group.level & 1, (group.level + 1) & 1
+                slots = group.slot_ids[chunk]  # the frontier ring, not storage
                 children = []
                 for board in self.boards:
                     targets, is_terminal = board.child_targets(group, chunk)
-                    children.append(board.gather_children(targets, is_terminal, br_player))
+                    children.append(board.gather_children(targets, is_terminal, br_player, below))
 
                 if group.actor == br_player and unconstrained:
-                    self._per_hand_max(group, children, br_player, walk)
+                    self._per_hand_max(group, children, br_player, here, slots)
                 elif group.actor == br_player:
                     chosen = self._joint_argmax(group, children)
                     for board, child, pick in zip(self.boards, children, chosen, strict=True):
-                        board.value[br_player, walk] = np.take_along_axis(
+                        board.value[here][br_player, slots] = np.take_along_axis(
                             child, pick[:, :, None], axis=2
                         )[:, :, 0]
                 else:
                     for board, child in zip(self.boards, children, strict=True):
-                        board.value[br_player, walk] = child.sum(axis=-1)
+                        board.value[here][br_player, slots] = child.sum(axis=-1)
 
         # float64 regardless of the kernel's dtype: this is a handful of numbers,
         # and rounding them to float32 makes the decomposition disagree with the
         # aggregate in the 8th figure -- enough to look like a real discrepancy
         # to anyone checking that the parts sum to the whole.
         contributions = np.array(
-            [float(board.value[br_player, 0].sum()) for board in self.boards], dtype=np.float64
+            # The root: level 0, so buffer 0, slot 0.
+            [float(board.value[0][br_player, 0].sum()) for board in self.boards],
+            dtype=np.float64,
         )
         if per_board:
             return contributions
@@ -236,7 +239,9 @@ class BoardMixtureCFR:
             groups.setdefault(tuple(sorted(board[:visible])), []).append(index)
         return list(groups.values())
 
-    def _per_hand_max(self, group, children: list[np.ndarray], br_player: int, walk) -> None:
+    def _per_hand_max(
+        self, group, children: list[np.ndarray], br_player: int, here: int, slots
+    ) -> None:
         """Maximise per hand, jointly over boards sharing this street's prefix.
 
         Hands are summed on a global two-card axis rather than each board's own,
@@ -248,7 +253,7 @@ class BoardMixtureCFR:
         for members in self._visible_partition(group.street):
             if len(members) == 1:
                 only = members[0]
-                self.boards[only].value[br_player, walk] = children[only].max(axis=-1)
+                self.boards[only].value[here][br_player, slots] = children[only].max(axis=-1)
                 continue
 
             totals = np.zeros((children[0].shape[0], GLOBAL_HANDS, group.num_actions), dtype=DTYPE)
@@ -260,7 +265,7 @@ class BoardMixtureCFR:
             best = totals.argmax(axis=-1)
             for index in members:
                 pick = best[:, self._global_hand_id[index]]
-                self.boards[index].value[br_player, walk] = np.take_along_axis(
+                self.boards[index].value[here][br_player, slots] = np.take_along_axis(
                     children[index], pick[:, :, None], axis=2
                 )[:, :, 0]
 

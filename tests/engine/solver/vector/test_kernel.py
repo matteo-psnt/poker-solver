@@ -130,8 +130,10 @@ class TestZeroSum:
         initial = np.ones(context.num_hands, dtype=np.float32)
         for _ in range(4):
             solver.iterate(initial)
-            button = float(solver.value[0, 0].sum())
-            other = float(solver.value[1, 0].sum())
+            # `value` is a two-level frontier ring: the root is level 0, so
+            # buffer 0, slot 0.
+            button = float(solver.value[0][0, 0].sum())
+            other = float(solver.value[0][1, 0].sum())
             assert abs(button + other) <= 1e-4 * max(abs(button), 1.0)
 
 

@@ -86,6 +86,14 @@ class CompiledTree:
         walk_target: ``edge_target`` with node children translated into walk
             space. Terminal edges keep their terminal id, exactly as
             ``edge_target`` does -- ``edge_kind`` still says which is which.
+        level_slot: NODE ID -> its offset within its own level, keyed like
+            ``walk_index`` rather than by walk position. With a two-slot ring
+            holding level ``k`` at ``k & 1``, this is the index into that
+            buffer. Keying it the other way translates twice and reads a
+            plausible, wrong slot.
+        slot_target: ``walk_target`` reduced to the child's ``level_slot``.
+            Every node child is exactly one level down (checked at build), so
+            the ring parity is the parent's level plus one and needs no lookup.
         level_nodes: Node ids sorted by depth, then by id.
         level_offset: Level ``d`` occupies ``level_nodes[level_offset[d] :
             level_offset[d + 1]]``.
@@ -104,6 +112,8 @@ class CompiledTree:
     depth: np.ndarray
     walk_index: np.ndarray
     walk_target: np.ndarray
+    level_slot: np.ndarray
+    slot_target: np.ndarray
     level_nodes: np.ndarray
     level_offset: np.ndarray
     parent_count: np.ndarray
@@ -190,6 +200,19 @@ class _Compiler:
         walk_target = self.edge_target.copy()
         inner = self.edge_kind != EDGE_TO_TERMINAL
         walk_target[inner] = walk_index[self.edge_target[inner]]
+        level_slot = walk_index - level_offset[self.depth]
+        # A node child sits one level below its parent -- asserted, because the
+        # ring's parity arithmetic is only sound if it holds.
+        count = self.depth.shape[0]
+        source = np.repeat(np.arange(count, dtype=np.int64), np.diff(self.edge_offset))
+        child_depth = self.depth[self.edge_target[inner]]
+        if not np.array_equal(child_depth, self.depth[source[inner]] + 1):
+            raise ValueError(
+                "A node edge crosses more than one level; the two-level frontier "
+                "ring would evict a value that is still to be read."
+            )
+        slot_target = walk_target.copy()
+        slot_target[inner] = walk_index[self.edge_target[inner]] - level_offset[child_depth]
         return CompiledTree(
             tree=self.tree,
             edge_offset=self.edge_offset,
@@ -201,6 +224,8 @@ class _Compiler:
             depth=self.depth,
             walk_index=walk_index,
             walk_target=walk_target,
+            level_slot=level_slot,
+            slot_target=slot_target,
             level_nodes=level_nodes,
             level_offset=level_offset,
             parent_count=self.parent_count,
