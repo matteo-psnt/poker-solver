@@ -23,10 +23,15 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-# Generous against a cold connection, short against a hang. A first connect from
-# a node costs a TLS handshake and SCRAM auth; a wedged one must not outlive the
-# 120s between progress ticks, or two of these would overlap.
-TIMEOUT_SECONDS = 60
+# MEASURED on a node: the first `uv run` after a fresh `uv sync` takes over a
+# minute -- the project install plus a cold import off an empty page cache --
+# while every later one is quick. 60s timed that first call out.
+#
+# Generous is safe here because nothing waits on it. Both call sites are off the
+# work's critical path, and they are SERIALISED rather than concurrent: the
+# watcher publishes from one thread, so a slow mirror delays the next tick
+# instead of overlapping with it.
+TIMEOUT_SECONDS = 240
 
 
 def publish(

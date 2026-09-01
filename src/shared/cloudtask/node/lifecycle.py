@@ -212,11 +212,14 @@ def main() -> int:
             log(f"FATAL dependency sync failed rc={sync}")
             code = sync
         else:
-            # The FIRST moment a database is reachable from this task at all.
-            # `_record(STARTED)` ran before the sync, deliberately -- it is the
-            # one guarantee this module exists for -- so the started record has
-            # been on the share for a while and in the database not at all.
-            mirror.publish(paths.share, task, cwd=paths.code, log=log)
+            # NO mirror here, though this is the first moment a database is
+            # reachable. MEASURED on a node: the first `uv run` after a fresh
+            # sync takes over a minute -- it pays the project install and a cold
+            # import off an empty page cache -- and this call site is on the
+            # critical path, so it delayed training by 60s and then timed out
+            # anyway. The watcher publishes progress within seconds of the
+            # handler starting and mirrors from ITS thread, which picks the
+            # started record up at no cost to the work.
             code, outcome = HANDLERS[plan.op](plan, paths, log)
     except Killed as killed:
         code = 128 + killed.signum
