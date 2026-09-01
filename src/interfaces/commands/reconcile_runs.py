@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command, records_root
-from src.shared import run_events, task_history
+from src.shared import records, run_events, task_history
 
 if TYPE_CHECKING:
     import argparse
@@ -199,7 +200,13 @@ def run(args: argparse.Namespace) -> ReconcilePlan:
         # writer that would race us is the trainer, and this runs exactly on the
         # runs whose trainer is gone.
         event = {
+            # Stamped like every other event, because a hand-built one is not a
+            # different KIND of record. Ten written without `ts` were the only
+            # events in 3,480 missing one, and they broke the import that read
+            # them -- the schema was right and the writer was not.
+            records.SCHEMA_VERSION_KEY: run_events.ARTIFACT.version,
             run_events.EVENT_KEY: run_events.STATUS,
+            "ts": datetime.now(UTC).isoformat(),
             "status": closure.status,
             # This is an INFERENCE, and the record says so rather than passing
             # it off as a first-hand report. A reader that cannot tell the two

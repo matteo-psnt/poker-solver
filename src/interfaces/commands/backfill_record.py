@@ -194,15 +194,36 @@ def _rows_for_run(run_dir: Path, models: Any) -> tuple[Any, list[Any], list[Any]
 
 
 def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
-    """Every eval document under one run, as rows."""
+    """Every eval document under one run, filtered EXACTLY as the ledger filters.
+
+    Three exclusions, all copied from `ledger/queries.py` rather than invented,
+    because each one is a measured failure:
+
+    * `eval-*` and `record-*` are the two pre-substrate shapes. They still sit
+      beside the documents that replaced them and a legacy record points at the
+      OLD filename, so reading both enters one evaluation twice -- measured at
+      63 rows becoming 110.
+    * a document with no `run_id` cannot be attached to anything.
+    * a document with no knobs or no timestamp CANNOT BE TIERED. It hashes into
+      a tier of `(method, None, ...)`, sorts to year 1 AD, and since tiers rank
+      by coverage a pile of them becomes the default curve. The document stays
+      on disk; only the index withholds it.
+
+    The last one is also why `recorded_at` is NOT NULL and this does not paper
+    over it: an untimestamped eval has no place in a comparison index.
+    """
     rows = []
     evals = run_dir / "evals"
     if not evals.is_dir():
         return rows
     for path in sorted(evals.glob("*.json")):
+        if path.name.startswith(("eval-", "record-")):
+            continue
         try:
             doc = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
+            continue
+        if not doc.get("run_id") or not doc.get("knobs") or not doc.get("timestamp"):
             continue
         results = doc.get("results") or {}
         knobs = doc.get("knobs") or {}
@@ -300,12 +321,23 @@ def run(args: argparse.Namespace) -> BackfillPayload:
 
 
 def _columns(row: Any, table: Any) -> dict[str, Any]:
-    """A model instance as a plain dict of set columns, for the insert."""
-    return {
-        column.name: getattr(row, column.name)
-        for column in table.__table__.columns
-        if getattr(row, column.name, None) is not None
-    }
+    """A model instance as a plain dict, with EVERY column present.
+
+    Uniform on purpose: a multi-row `insert().values([...])` requires the same
+    keys in every dict, and omitting the Nones made rows disagree about which
+    columns they carried -- which SQLAlchemy reports as "explicitly rendered as
+    a boundparameter", several layers from the cause.
+
+    Columns whose value is None AND that carry a server default are dropped, so
+    the default still applies; a nullable column keeps its explicit None.
+    """
+    values = {}
+    for column in table.__table__.columns:
+        value = getattr(row, column.name, None)
+        if value is None and column.server_default is not None:
+            continue
+        values[column.name] = value
+    return values
 
 
 def render(payload: BackfillPayload) -> None:
