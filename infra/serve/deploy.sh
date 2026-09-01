@@ -405,12 +405,6 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # takes the manifest head, the seat fields the rung a NUMBER was measured at.
 # That is why both are staged above. Empty when $AT is unset, which the unit
 # expands to no arguments.
-sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
-RUN=$RUN_ID
-RUNS_DIR=$WORK/data/runs
-CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
-POKER_SOLVER_RECORD_DSN=$RECORD_DSN
-POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
 # $BUDGET_MS caps the per-decision budget. Unset leaves the seat's own sizing
 # (900 ms under `MAX_BUDGET_MS`), which is what is fielded.
 #
@@ -426,6 +420,16 @@ POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
 # rate, 5.25% against 2.37% over ~5,500 decisions. Doubling variance for a
 # statistically-zero edge loses in an ELIMINATION format, where a stack-off
 # that loses ends the match and there is no next hand to earn it back.
+#
+# These notes stay ABOVE the heredoc on purpose. It is unquoted -- $RUN_ID
+# and $RECORD_DSN must expand -- so everything inside it is shell input:
+# backticks were SUBSTITUTED on the box and $BUDGET_MS expanded to nothing.
+sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
+RUN=$RUN_ID
+RUNS_DIR=$WORK/data/runs
+CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
+POKER_SOLVER_RECORD_DSN=$RECORD_DSN
+POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
 SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
 EOF
 # The DSN carries a password, and this file gained one the moment the seat began
