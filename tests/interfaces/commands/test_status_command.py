@@ -17,7 +17,6 @@ import argparse
 from typing import Any
 
 from azure.core.exceptions import ClientAuthenticationError
-from pydantic import BaseModel
 
 from src.interfaces.cli import headless
 from src.interfaces.commands import status, tasks
@@ -33,15 +32,19 @@ def _command(name: str, run: Any) -> Command:
     return Command(name=name, add_arguments=add_arguments, run=run, render=lambda _p: None)
 
 
-class _Answer(BaseModel):
-    """A stub panel's payload. A model, because every real handler returns one."""
-
-    op: str
-    limit: int
+# The REAL payload each panel answers with. A made-up stub model is what this
+# replaced, and `StatusPanel` is now typed to these three -- so a stub would be
+# testing a screen that cannot exist, which is how this file's one production
+# crash got through.
+PANEL_PAYLOADS: dict[str, status.PanelPayload] = {
+    "pool": PAYLOADS["pool-status"],
+    "jobs": PAYLOADS["jobs"],
+    "tasks": PAYLOADS["tasks"],
+}
 
 
 def _ok(name: str) -> Command:
-    return _command(name, lambda args: _Answer(op=name, limit=args.limit))
+    return _command(name, lambda _args: PANEL_PAYLOADS[name])
 
 
 def _raising(name: str, error: BaseException) -> Command:
@@ -75,18 +78,31 @@ class TestOnePanelCannotTakeOutTheOthers:
 
         assert set(payload.panels) == {"pool", "jobs", "tasks"}
         assert payload.panels["jobs"].payload is None
-        assert (payload.panels["pool"].payload or {})["op"] == "pool"
-        assert (payload.panels["tasks"].payload or {})["op"] == "tasks"
+        assert payload.panels["pool"].payload == PANEL_PAYLOADS["pool"]
+        assert payload.panels["tasks"].payload == PANEL_PAYLOADS["tasks"]
 
 
 class TestGatherComposesRatherThanReads:
     def test_panel_arguments_reach_the_commands(self, monkeypatch):
-        monkeypatch.setattr(status, "PANELS", (("jobs", _ok("jobs")), ("tasks", _ok("tasks"))))
-        payload = status.gather(limit=3)
-        assert (payload.panels["jobs"].payload or {})["limit"] == 3
-        # `tasks` is limited too: it defaults to the whole history on purpose, and
-        # a glanceable screen cannot carry it.
-        assert (payload.panels["tasks"].payload or {})["limit"] == 3
+        """Asserted where the argument LANDS, not read back out of a payload.
+
+        `tasks` is limited too: it defaults to the whole history on purpose, and
+        a glanceable screen cannot carry it.
+        """
+        seen: dict[str, int] = {}
+
+        def _records(name: str) -> Command:
+            def _run(args):
+                seen[name] = args.limit
+                return PANEL_PAYLOADS[name]
+
+            return _command(name, _run)
+
+        monkeypatch.setattr(
+            status, "PANELS", (("jobs", _records("jobs")), ("tasks", _records("tasks")))
+        )
+        status.gather(limit=3)
+        assert seen == {"jobs": 3, "tasks": 3}
 
     def test_tasks_can_be_skipped(self, monkeypatch):
         """It is the slowest panel by a wide margin (measured: 23s vs 0.9s)."""
@@ -112,7 +128,7 @@ class TestWatch:
         """`render` carries the loop, so 'does it terminate' is a real question."""
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
         payload = status.run(self._args(0))
-        monkeypatch.setattr(status, "_render_panel", lambda name, p: print(p["op"]))
+        monkeypatch.setattr(status, "_render_panel", lambda p: print(p.op))
         status.render(payload)
         assert "pool" in capsys.readouterr().out
 
@@ -124,7 +140,7 @@ class TestWatch:
         A `timeout`-based probe never catches this: SIGTERM is not SIGINT.
         """
         monkeypatch.setattr(status, "PANELS", (("pool", _ok("pool")),))
-        monkeypatch.setattr(status, "_render_panel", lambda _name, _p: None)
+        monkeypatch.setattr(status, "_render_panel", lambda _p: None)
 
         def _interrupt(_seconds):
             raise KeyboardInterrupt

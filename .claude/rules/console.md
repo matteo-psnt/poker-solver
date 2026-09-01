@@ -39,6 +39,9 @@ The console reimplements nothing.
   `TasksSummary`, which has no `rows` field, so TypeScript cannot offer one. One
   model describing both the full log and the stub meant `parts.tasks.payload.rows`
   was `[]` on a trimmed part and correct about nothing.
+- **A part carries the command's MODEL, not a dump of it.** `jsonio` serialises
+  at the edge, so a join reads attributes and `ty` checks the shape; dumping in
+  the fan-out cost 36 ms of a 50 ms compose to build rows the join discarded.
 - **`response_model` is for OpenAPI only.** FastAPI skips validation for a
   handler returning a `Response`, and every endpoint returns `PayloadResponse`
   to keep `jsonio.dumps`. Enforcement is `test_contract.py`.
@@ -48,7 +51,8 @@ The console reimplements nothing.
   second grain `test_endpoint_arguments.py` guards: a missing one reads to the
   user as an unbuilt feature, not a missing field.
 - **Guard flags (`--force`, `--delete`) are opt-in, never pre-checked.**
-- **Writes use `TtlCache(0.0)`.** A dispatch must not be memoised.
+- **Writes go through `web.app.uncached`**, which memoises nothing. A dispatch
+  must not be made to look idempotent.
 - **Two shapes of endpoint, and both go through a command.** One per command is
   the grain for an ad-hoc question; `/api/view/{now,runs,run/{id},experiment/{id}}`
   fan several out concurrently via `src/interfaces/commands/_compose.py` and
