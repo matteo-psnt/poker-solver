@@ -206,7 +206,7 @@ def evaluate_and_record(
             # returned, so a database that is unreachable costs this eval
             # nothing. The digest is derived HERE because `tiers` owns the rule
             # and a sink may not import it.
-            sink.scored(result_path.stem, document, tiers.tier_digest(document))
+            sink.scored(result_path.stem, run_dir.name, document, tiers.tier_digest(document))
     except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload

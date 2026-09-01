@@ -31,6 +31,7 @@ from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Iterator
 
 DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
@@ -252,8 +253,11 @@ def _eval_rows(run_dir: Path, models: Any) -> list[Any]:
         # The same builder the LIVE writer uses, so an eval that arrived
         # through the sink and the same eval re-imported here are one row --
         # which is exactly what `--verify` compares.
-        values = eval_rows.eval_values(path.stem, doc, tiers.tier_digest(doc))
-        rows.append(models.Eval(**{**values, "run_id": run_dir.name}))
+        rows.append(
+            models.Eval(
+                **eval_rows.eval_values(path.stem, run_dir.name, doc, tiers.tier_digest(doc))
+            )
+        )
     return rows
 
 
@@ -342,6 +346,10 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     # count that is right in aggregate and wrong per run is the failure this is
     # meant to catch.
     per_run: dict[str, dict[str, int]] = {}
+    pending_runs: list[Any] = []
+    pending_events: list[Any] = []
+    pending_evals: list[Any] = []
+    pending_rungs: list[Any] = []
 
     with records_root(args) as root, Session(engine) as session:
         wanted = sorted(p for p in root.iterdir() if p.is_dir())
@@ -368,32 +376,38 @@ def run(args: argparse.Namespace) -> BackfillPayload:
             if not args.apply:
                 continue
 
-            # Upsert the run, insert-or-ignore everything else. Re-running must
-            # be a no-op rather than a duplicate, which is what makes importing
-            # before pruning safe.
-            session.execute(
-                insert(models.Run)
-                .values(_columns(run_row, models.Run))
-                .on_conflict_do_update(
-                    index_elements=["run_id"],
-                    set_={k: v for k, v in _columns(run_row, models.Run).items() if k != "run_id"},
-                )
-            )
-            for table, rows in (
-                (models.RunEvent, event_rows),
-                (models.Checkpoint, checkpoint_rows),
-                (models.Eval, eval_rows),
-            ):
-                if not rows:
-                    continue
-                if table is models.Checkpoint:
-                    _import_checkpoints(session, models, run_dir.name, rows)
-                    continue
+            # ACCUMULATED, not written here. Writing per run cost four round
+            # trips x 303 runs, and at 175ms each that is most of an eight-minute
+            # import spent on latency -- the same round-trip rule the readers
+            # follow, which applies no less to a writer. Re-running must stay a
+            # no-op rather than a duplicate, which is what makes importing before
+            # pruning safe, so every statement below is an upsert or an ignore.
+            pending_runs.append(run_row)
+            pending_events.extend(event_rows)
+            pending_evals.extend(eval_rows)
+            pending_rungs.extend(checkpoint_rows)
+
+    if args.apply:
+        with Session(engine) as session:
+            for run_row in pending_runs:
+                values = _columns(run_row, models.Run)
                 session.execute(
-                    insert(table)
-                    .values([_columns(r, table) for r in rows])
-                    .on_conflict_do_nothing()
+                    insert(models.Run)
+                    .values(values)
+                    .on_conflict_do_update(
+                        index_elements=["run_id"],
+                        set_={k: v for k, v in values.items() if k != "run_id"},
+                    )
                 )
+            for table, rows in ((models.RunEvent, pending_events), (models.Eval, pending_evals)):
+                for chunk in _chunked(rows):
+                    session.execute(
+                        insert(table)
+                        .values([_columns(r, table) for r in chunk])
+                        .on_conflict_do_nothing()
+                    )
+            if pending_rungs:
+                _import_checkpoints(session, models, pending_rungs)
             session.commit()
 
     # A separate pass: legs are keyed by TASK and live under `legs/`, a
@@ -411,8 +425,7 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     payload.share.legs = len(leg_rows)
     if args.apply and leg_rows:
         with Session(engine) as session:
-            for start in range(0, len(leg_rows), 500):
-                chunk = leg_rows[start : start + 500]
+            for chunk in _chunked(leg_rows):
                 session.execute(
                     insert(models.Leg)
                     .values([_columns(r, models.Leg) for r in chunk])
@@ -436,8 +449,20 @@ def run(args: argparse.Namespace) -> BackfillPayload:
     return payload
 
 
-def _import_checkpoints(session: Any, models: Any, run_id: str, rows: list[Any]) -> None:
-    """Import one run's rungs, INCLUDING which of them is current.
+# Bounded so one statement cannot carry the whole record: an eval's payload
+# reaches 161 KiB and a multi-row insert holds every value in memory and in one
+# message. Big enough that the round trips stop mattering, small enough that the
+# statement does not.
+CHUNK = 500
+
+
+def _chunked(rows: list[Any]) -> Iterator[list[Any]]:
+    for start in range(0, len(rows), CHUNK):
+        yield rows[start : start + CHUNK]
+
+
+def _import_checkpoints(session: Any, models: Any, rows: list[Any]) -> None:
+    """Every run's rungs, INCLUDING which of them is current, in TWO statements.
 
     Not `on_conflict_do_nothing`, which is what this replaces and what made the
     bug: `is_current` is a partial unique index over one row per run, so a bare
@@ -445,21 +470,26 @@ def _import_checkpoints(session: Any, models: Any, run_id: str, rows: list[Any])
     holding the flag. Three runs were pointing at a rung 2,000 iterations behind
     the one the share names -- and a stale pointer resolves, so nothing failed.
 
-    Clear, then upsert, in the caller's transaction: no reader sees a run
-    without a current rung, and re-running stays a no-op.
+    Clear, then upsert. The order matters: inserting first trips the same index.
+    Across ALL runs at once rather than per run, because the per-run form is two
+    round trips inside a 303-run loop -- 606 of them, 106s from here, and the
+    same rule applies to a writer as to a reader.
+
+    Scoped to the runs being imported: `WHERE is_current` alone would clear the
+    pointer of every run in the record, including ones this import never saw.
     """
     from sqlalchemy import update as sa_update  # noqa: PLC0415
     from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
 
+    touched = {row.run_id for row in rows}
     session.execute(
         sa_update(models.Checkpoint)
-        .where(models.Checkpoint.run_id == run_id, models.Checkpoint.is_current)
+        .where(models.Checkpoint.run_id.in_(touched), models.Checkpoint.is_current)
         .values(is_current=False)
     )
-    values = [_columns(row, models.Checkpoint) for row in rows]
     session.execute(
         insert(models.Checkpoint)
-        .values(values)
+        .values([_columns(row, models.Checkpoint) for row in rows])
         .on_conflict_do_update(
             index_elements=["run_id", "iteration"],
             set_={
