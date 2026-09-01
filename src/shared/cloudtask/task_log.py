@@ -124,6 +124,28 @@ def read_documents(directory: Path) -> dict[str, dict[str, Any]]:
     return found
 
 
+def read_task_documents(directory: Path, task_id: str) -> dict[str, dict[str, Any]]:
+    """One task's leg documents, by filename.
+
+    Scoped by NAME rather than filtering what :func:`read_documents` returns,
+    and the difference is the whole point: that reads and parses every file in
+    the directory, which is 13,600 of them on the share. A node mirroring its
+    own two records paid ~100s for that, on every call.
+
+    Bundles are not consulted, which is correct rather than a shortcut: a bundle
+    holds records `compact-legs` has SEALED, and a task asking about itself is
+    by definition not sealed yet.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for path in sorted(directory.glob(f"{task_id}.*.json")):
+        if path.name.endswith(BUNDLE_SUFFIX):
+            continue
+        document = _load(path)
+        if document:
+            found[path.name] = document
+    return found
+
+
 def _load(path: Path) -> dict[str, Any] | None:
     """Skipped, never fatal: a half-written file is the expected residue of a
     task killed mid-write, and must not take down the listing that explains it."""
