@@ -46,16 +46,19 @@ def run(args: argparse.Namespace) -> ArmsPayload:
         ledger_path = ledger_for(root)
         records = eval_ledger.read_records(ledger_path)
         result = experiment_arms(records, args.experiment, control=args.control)
+    if not result.tiers and result.tiers_without_control:
+        # Distinct from "nothing scored": the experiment HAS rows, none of them
+        # in a tier holding this control. Naming the arms is the fix.
+        every = experiment_arms(records, args.experiment)
+        raise CommandError(
+            f"No tier of {args.experiment!r} holds an arm named {args.control!r}. "
+            f"Arms: {', '.join(sorted({a for t in every.tiers for a in t.arms}))}."
+        )
     if not result.tiers:
         known = sorted({str(r["experiment_id"]) for r in records if r.get("experiment_id")})
         raise CommandError(
             f"No scored evaluations tagged experiment={args.experiment!r}. "
             f"Recorded experiments: {', '.join(known) or 'none'}."
-        )
-    if args.control and all(tier.control is None for tier in result.tiers):
-        raise CommandError(
-            f"No arm named {args.control!r} in this experiment. "
-            f"Arms: {', '.join(sorted({a for t in result.tiers for a in t.arms}))}."
         )
     return ArmsPayload(ledger=str(ledger_path), result=result)
 
@@ -83,6 +86,11 @@ def render(payload: ArmsPayload) -> None:
         if tier.unmatched_iterations:
             rungs = ", ".join(f"{i:,}" for i in tier.unmatched_iterations[:6])
             print(f"  not every arm is scored at: {rungs} — those rows compare unequal training")
+    if result.tiers_without_control:
+        print(
+            f"\n  {result.tiers_without_control} other tier(s) hold no row for this control "
+            "and cannot answer the comparison — drop --control to see them."
+        )
     if result.unplaceable_records:
         print(
             f"\n  {result.unplaceable_records} row(s) carry no checkpoint iteration "

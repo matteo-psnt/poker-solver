@@ -230,6 +230,11 @@
             "title": "Tiers",
             "type": "array"
           },
+          "tiers_without_control": {
+            "default": 0,
+            "title": "Tiers Without Control",
+            "type": "integer"
+          },
           "unplaceable_records": {
             "default": 0,
             "title": "Unplaceable Records",
