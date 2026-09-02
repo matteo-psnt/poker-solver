@@ -47,6 +47,7 @@ import logging
 import math
 import resource
 import time
+from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,6 +82,12 @@ logger = logging.getLogger(__name__)
 # The solve is pinned by ITERATIONS; this only stops the wall-clock budget from
 # cutting it short on a slow box.
 _RESOLVER_NO_CLOCK_MS = 10_000_000
+
+# ~41 KB a row (NUM_COMBOS x actions, float64), so this caps the resolver cache
+# near 170 MB per worker. Measured hit rate is modest -- 6,624 lookups over
+# 5,392 distinct (context, board) pairs -- so a small cache keeps the locality
+# and gives up almost nothing.
+_RESOLVER_CACHE_ENTRIES = 4_096
 
 
 def _state_seed(context_key: tuple, board: tuple[Card, ...]) -> int:
@@ -470,7 +477,7 @@ class PublicTreeBestResponse:
         # Keyed by (context, BOARD): a resolver row is a subgame solve at the
         # real state, so unlike the blueprint's per-bucket table it cannot be
         # shared across the boards that sit under one betting context.
-        self._resolver_cache: dict[tuple, np.ndarray] = {}
+        self._resolver_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
         self._resolver = (
             HUResolver(
                 blueprint=blueprint,
@@ -1040,6 +1047,8 @@ class PublicTreeBestResponse:
         """
         board_key = (context_key, state.board)
         cached = self._resolver_cache.get(board_key)
+        if cached is not None:
+            self._resolver_cache.move_to_end(board_key)
         if cached is None:
             opp_reach, own_reach = reaches
             actor = state.current_player
@@ -1071,6 +1080,15 @@ class PublicTreeBestResponse:
             else:
                 cached = matrix
             self._resolver_cache[board_key] = cached
+            # BOUNDED. Keyed by (context, BOARD) it grows with the walk instead
+            # of saturating like the blueprint's per-context table, and the
+            # fork-join's RAM guard cannot see it -- it budgets the blueprint's
+            # caches ("+0.00 GB caches for 8 boards") and then hands out workers.
+            # Unbounded, deployed arms died after 4-6 h while short ones passed.
+            # Eviction only costs a recompute: the row is a deterministic
+            # function of the key, so the number does not move.
+            if len(self._resolver_cache) > _RESOLVER_CACHE_ENTRIES:
+                self._resolver_cache.popitem(last=False)
         bucket_vec = self._bucket_vector(state.board, state.street)
         sigma = np.where((bucket_vec >= 0)[:, None], cached, 0.0)
         # The resolver always answers, so nothing is a uniform FALLBACK row here.
