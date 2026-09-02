@@ -27,6 +27,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
@@ -265,7 +266,13 @@ class _ProgressReporter:
 
 
 def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
-    """Record the mid-flight row, but never at the cost of the task.
+    """Append the mid-flight row to the log and NOTHING ELSE.
+
+    The fallback for a caller with no tracker -- tests, and anything driving the
+    trainer directly. A run that has one passes `on_checkpoint` instead, because
+    this reaches the file only: it was the one event the record sink never saw,
+    which left `progress` reading checkpoint events out of a database that had
+    none for any run since the last import.
 
     `records.append_log` propagates on purpose, so its callers can choose. Here
     the choice is clear: this runs immediately AFTER `save_checkpoint` succeeded,
@@ -338,6 +345,7 @@ def train_static_parallel(
     worker: Callable[..., None] = _worker_entry,
     worker_args: tuple[Any, ...] = (),
     before_checkpoint: Callable[[StaticArrayStorage], None] | None = None,
+    on_checkpoint: Callable[..., None] | None = None,
     extra_arrays: Mapping[str, int] | None = None,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
@@ -492,8 +500,12 @@ def train_static_parallel(
                 # After save_checkpoint, so a row never describes state the
                 # arrays did not reach.
                 task_elapsed = time.time() - started
-                _append_checkpoint_event(
-                    checkpoint_dir,
+                # The tracker's when a run has one, so the event reaches the
+                # sink as well as the log; the file-only append otherwise.
+                record_checkpoint = on_checkpoint or partial(
+                    _append_checkpoint_event, checkpoint_dir
+                )
+                record_checkpoint(
                     ts=datetime.now(UTC).isoformat(),
                     iteration=done,
                     # Scoped to the LEG: a resumed task restarts its clock while
