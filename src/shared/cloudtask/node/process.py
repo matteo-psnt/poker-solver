@@ -179,6 +179,7 @@ def run_guarded(
                 process.pid, profile_dir, os.environ.get("AZ_BATCH_TASK_ID", "local"), log
             )
     timed_out = False
+    started = time.monotonic()
     try:
         try:
             process.wait(timeout=timeout)
@@ -194,7 +195,19 @@ def run_guarded(
     finally:
         if profiler is not None:
             profiler.set()
+        # The two halves of a task's tail, which had no line between them: the
+        # child exiting, and this pipe reaching EOF. A quick_test reporting 20s
+        # of training has its handler return 375s later, every time and long
+        # before any of the record work, and the split says which half owns it.
+        # `uv run` spawns python which spawns workers, and a grandchild that
+        # still holds stdout keeps the pump reading after the child is gone.
+        exited = time.monotonic() - started
         pump.join(timeout=GRACE_SECONDS)
+        log(
+            f"child exited after {exited:.1f}s; output pump joined after "
+            f"{time.monotonic() - started:.1f}s"
+            + (" (STILL ATTACHED -- a grandchild holds stdout)" if pump.is_alive() else "")
+        )
         if sink:
             sink.close()
 
