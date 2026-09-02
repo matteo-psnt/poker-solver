@@ -420,8 +420,12 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # takes the manifest head, the seat fields the rung a NUMBER was measured at.
 # That is why both are staged above. Empty when $AT is unset, which the unit
 # expands to no arguments.
-# $BUDGET_MS caps the per-decision budget. Unset leaves the seat's own sizing
-# (900 ms under `MAX_BUDGET_MS`), which is what is fielded.
+# $BUDGET_MS caps the per-decision budget. Unset leaves the seat's own sizing,
+# which is what is fielded: `budget_for` is clock/2 - 800 ms capped at
+# `MAX_BUDGET_MS`=900, so the TIGHT 2,000 ms clock the seat assumes when the
+# frame states none yields 200 ms, and 900 needs a stated clock of 3,400 ms or
+# more. 200 ms is not the cap -- it is the common case, and it sits near the
+# ~300 ms at which the resolver's 528 mbb/hand was actually measured.
 #
 # It is NOT a stack-off lever, though one reading said so: a single spot jammed
 # 32.5% at 200 ms against 41.0% at 900. Over a full duel the sign is the other
