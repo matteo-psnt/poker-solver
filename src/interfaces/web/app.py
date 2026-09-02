@@ -1,9 +1,9 @@
 """The console's HTTP layer: commands, and composed views of commands.
 
 **No new read path.** Every endpoint body reaches a ``Command.invoke`` and a
-memo -- through :func:`answer` for one command, :func:`view` for a screen that
-is several at once, or :func:`uncached` for a write that must not be memoised. That is the whole design, and it is the
-property the previous browser UI lacked: `fbcf9a8` carried
+memo -- through :func:`answer` for one command, :func:`view` for a screen that is
+several at once, or :func:`uncached` for a write that must not be memoised. That
+is the whole design, and it is the property the previous browser UI lacked: `fbcf9a8` carried
 `api/chart_service.py`, `api/play_service.py` and `chart/data.py` -- a second way
 to ask questions the CLI already answered, which drifted from it and then
 rotted. `tests/interfaces/web/` fails if anything here grows one.
