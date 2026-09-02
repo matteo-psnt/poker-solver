@@ -48,6 +48,21 @@ STATUS = "status"
 EVENT_KEY = "event"
 
 
+def rung_uri(run_id: str, iteration: int) -> str:
+    """Where a rung lives, as the record names it.
+
+    LOGICAL today. Snapshots are zarr directories on the share, so this is the
+    name a rung is claimed under rather than an object that has been committed
+    -- which is what it becomes when they move to blob storage, and why the
+    claim is worth recording under the eventual name now.
+
+    Here because two writers produce it -- the trainer as it checkpoints and
+    `backfill-record` as it imports -- and a name spelled two ways is two rungs
+    where the record should hold one.
+    """
+    return f"rungs/{run_id}/{iteration}"
+
+
 def log_path(run_dir: str | os.PathLike[str]) -> Path:
     return Path(run_dir) / RUN_LOG_FILENAME
 

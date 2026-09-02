@@ -107,3 +107,20 @@ class TestTheRowIsBuiltONCE:
         happen to match, which they do on all 2,139 rows today."""
         document = {**DOCUMENT, "run_id": "some-other-run"}
         assert evals.eval_values("e-1", "run-a", document, "d")["run_id"] == "run-a"
+
+
+def test_the_document_the_sink_receives_is_the_one_the_share_holds():
+    """`write_snapshot` stamps on the way out and returns nothing, so the
+    UNSTAMPED dict was what every caller got -- and the sink stored it, leaving
+    37 evals whose database row had no `schema_version` while the file it
+    mirrors did. One eval, two answers, and only a full-content comparison
+    finds it: the counts agreed at 2,238 both ways.
+    """
+    from src.shared import records
+
+    stamped = records.stamp(dict(DOCUMENT), records.REGISTRY["evals/*.json"])
+    assert stamped["schema_version"] == records.REGISTRY["evals/*.json"].version
+    # What `record_evaluation` now returns, and therefore what is stored.
+    assert evals.eval_values("e-1", "run-a", stamped, "d")["payload"]["schema_version"] == (
+        records.REGISTRY["evals/*.json"].version
+    )

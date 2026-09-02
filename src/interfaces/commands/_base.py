@@ -236,6 +236,24 @@ def resolve_run_id(run: str, engine: Any) -> str:
     raise CommandError(f"Run not found: '{run}' is not a published run id or a fragment of one.")
 
 
+def eval_index_rows(engine: Any, run_id: str | None = None) -> list[dict[str, Any]]:
+    """Every evaluation as the INDEX ROW, not the whole document.
+
+    `evals.payload` holds the document; the share's ledger holds what
+    `ledger_row` derives from it -- everything except the bulk results, plus a
+    four-field summary of those. Handing a reader the document instead looks
+    right and is not: `results` then carries every knob and sample, and 2,224 of
+    2,238 rows compared unequal against the share.
+
+    Here rather than in each command, because two of them read this and a rule
+    in two places is the shape this migration keeps getting wrong.
+    """
+    from src.adapters.postgres import queries  # noqa: PLC0415 -- see `resolve_run_id`
+    from src.pipeline.evaluation import ledger as eval_ledger  # noqa: PLC0415
+
+    return [eval_ledger.ledger_row(document) for document in queries.eval_records(engine, run_id)]
+
+
 def parse_overrides(pairs: list[str]) -> dict[str, Any]:
     """Parse ``--set key__path=value`` into the config loader's override kwargs.
 

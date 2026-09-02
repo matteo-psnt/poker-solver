@@ -265,6 +265,16 @@ class RunTracker:
         """
         try:
             self._record(run_events.CHECKPOINT, **fields)
+            iteration = fields.get("iteration")
+            if self._sink is not None and isinstance(iteration, int):
+                # The rung EXISTS by the time this runs -- `save_checkpoint`
+                # returned -- so claiming it here is a statement of fact, and it
+                # is the only live writer `checkpoints` has. Without it a
+                # running run reads `has_checkpoint = false` and its ladder is
+                # whatever the last import saw.
+                self._sink.claim(
+                    self.run_id, iteration, run_events.rung_uri(self.run_id, iteration)
+                )
         except Exception:  # noqa: BLE001 -- telemetry must not fail a written rung
             logging.getLogger(__name__).warning(
                 "Could not record the checkpoint event; training continues."
