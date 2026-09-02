@@ -7,6 +7,7 @@ reading lives. What is left here is the half that runs on a node.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -107,3 +108,37 @@ class TestNodeSideConstraints:
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stdout
         assert (task_log.tasks_dir(tmp_path) / "t.1.start.json").exists()
+
+
+class TestOneTasksDocumentsAreReadWithoutTheDirectory:
+    """`read_documents` parses every file in the directory. Two callers did that
+    to answer a question about ONE task, and the second -- `_next_attempt`,
+    reached from every progress sample -- cost every task on the pool FIVE
+    MINUTES: the watcher thread and the final sample raced for the memo, so both
+    paid it, 120s of join giving up plus 213s of the second read.
+    """
+
+    def test_it_counts_an_attempt_sealed_into_a_bundle(self, tmp_path):
+        """Load-bearing, not tidy: if compaction swept an earlier attempt's
+        start record into a bundle and this counted only loose files, a retry
+        would reuse an attempt number and overwrite the record of the failure
+        that caused it."""
+        (tmp_path / "sealed.bundle.json").write_text(
+            json.dumps({"records": {"task-a.1.start.json": {"task_id": "task-a"}}})
+        )
+        (tmp_path / "task-a.2.start.json").write_text(json.dumps({"task_id": "task-a"}))
+        assert task_log._next_attempt(tmp_path, "task-a") == 3
+
+    def test_a_loose_file_wins_over_the_same_name_in_a_bundle(self, tmp_path):
+        (tmp_path / "sealed.bundle.json").write_text(
+            json.dumps({"records": {"task-a.1.start.json": {"task_id": "task-a", "v": "old"}}})
+        )
+        (tmp_path / "task-a.1.start.json").write_text(json.dumps({"task_id": "task-a", "v": "new"}))
+        found = task_log.read_task_documents(tmp_path, "task-a")
+        assert found["task-a.1.start.json"]["v"] == "new"
+
+    def test_another_tasks_files_are_not_read(self, tmp_path):
+        for i in range(20):
+            (tmp_path / f"other-{i}.1.start.json").write_text(json.dumps({"task_id": f"o{i}"}))
+        (tmp_path / "task-a.1.start.json").write_text(json.dumps({"task_id": "task-a"}))
+        assert set(task_log.read_task_documents(tmp_path, "task-a")) == {"task-a.1.start.json"}
