@@ -54,7 +54,17 @@ resource "azurerm_postgresql_flexible_server" "record" {
   # so this is not a number anyone should have to watch.
   auto_grow_enabled = true
 
-  backup_retention_days        = 14
+  # THE RECOVERY WINDOW, and about to be the only one. While the share still
+  # holds the record, losing this server costs a four-minute `backfill-record`;
+  # once publishing stops, point-in-time restore is the whole story. 35 days is
+  # the Flexible Server maximum and updatable in place, unlike the flag below.
+  backup_retention_days = 35
+
+  # Locally redundant, MATCHING THE SHARE, which is `Standard_LRS` -- so
+  # retiring the JSON copy does not quietly downgrade region protection; there
+  # has never been any. Turning this on FORCES REPLACEMENT of the server, so the
+  # cheap moment to change your mind is while the share can still rebuild the
+  # database in four minutes. After that it is a dump and restore.
   geo_redundant_backup_enabled = false
 
   public_network_access_enabled = true
