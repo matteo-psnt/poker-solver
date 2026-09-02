@@ -189,14 +189,34 @@ def test_the_interpreter_is_installed_by_the_pool_not_the_image():
     assert f"uv python install {NODE_PYTHON}" in main_tf
 
 
-def test_the_pool_installs_the_wrappers_one_dependency():
+def test_the_pool_installs_the_wrappers_one_dependency_where_it_will_be_found():
     """The wrapper mirrors a task's records into the database itself, and it
-    runs before `uv sync` -- so the driver has to arrive with the INTERPRETER,
-    not with the project. Terraform is the only thing that can put it there, and
-    this is the one place the two halves are pinned against each other."""
+    runs before `uv sync` -- so the driver arrives with the INTERPRETER, not the
+    project. Two halves that must agree: Terraform installs it, `spec.py` puts
+    that directory on the wrapper's path, and neither can see the other.
+
+    `--target` and not `--system`: uv REFUSES to install into the interpreter it
+    manages ("externally managed ... should not be modified"), which failed the
+    start task and left a node START_TASK_FAILED.
+    """
+    from src.interfaces.cloud.tasks.spec import NODE_DEPS_DIR, TASK_COMMAND_TEMPLATE
+
     main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
-    assert "psycopg[binary]" in main_tf
-    assert f"--python /usr/local/bin/python{NODE_PYTHON}" in main_tf
+    install = next(line for line in main_tf.splitlines() if "psycopg[binary]" in line)
+    assert f"--target {NODE_DEPS_DIR}" in install, "installed somewhere the wrapper does not look"
+    assert "--system" not in install, "uv refuses to modify the interpreter it manages"
+    assert f"PYTHONPATH={NODE_DEPS_DIR}" in TASK_COMMAND_TEMPLATE
+
+
+def test_the_dependency_install_cannot_brick_a_node():
+    """A start task that FAILS bricks the node, and this file has lost nodes to
+    that -- including one to this very line. The one thing here whose absence
+    costs nothing that matters must not be the thing that takes a node down:
+    `legmirror` catches the missing driver and the task trains exactly as
+    before, which is what an unset DSN already does."""
+    main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
+    install = main_tf[main_tf.index("psycopg[binary]") :][:200]
+    assert "|| echo" in install, "an unguarded install in a `set -e` start task bricks the node"
 
 
 def test_the_entry_point_adds_the_repo_to_the_path_before_importing():

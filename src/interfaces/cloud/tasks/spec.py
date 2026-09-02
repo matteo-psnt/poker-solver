@@ -45,6 +45,10 @@ DEFAULT_CHECKPOINT_EVERY = 5_000_000
 NODE_PYTHON = "3.13"
 NODE_PYTHON_BIN = f"/usr/local/bin/python{NODE_PYTHON}"
 
+# Where the start task installs the wrapper's own dependency -- NOT into the
+# interpreter, which uv manages and refuses to let anything modify.
+NODE_DEPS_DIR = "/opt/node-deps"
+
 TASK_ID_LIMIT = 64
 
 _UNSAFE_TASK_CHARS = re.compile(r"[^A-Za-z0-9_-]")
@@ -58,7 +62,13 @@ TASK_COMMAND_TEMPLATE = (
     #
     # `-u` because the wrapper's own lines are what explain a task, and a
     # buffered stdout would hold them until the process being diagnosed is gone.
-    f"CODE_DIR=$CODE_DIR {NODE_PYTHON_BIN} -u $CODE_DIR/infra/run_task.py"
+    # PYTHONPATH is where the START TASK put the wrapper's one dependency. It
+    # cannot arrive with the code -- the wrapper runs before `uv sync`, so the
+    # project's venv does not exist yet -- and it cannot go INTO the interpreter,
+    # which uv manages and refuses to modify. See `infra/main.tf`; the two are
+    # pinned together by `test_node_interpreter.py`.
+    f"CODE_DIR=$CODE_DIR PYTHONPATH={NODE_DEPS_DIR} "
+    f"{NODE_PYTHON_BIN} -u $CODE_DIR/infra/run_task.py"
 )
 
 

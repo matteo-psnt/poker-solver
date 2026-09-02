@@ -136,17 +136,26 @@ locals {
     export UV_PYTHON_BIN_DIR=/usr/local/bin
     /usr/local/bin/uv python install 3.13
 
-    # The ONE dependency the wrapper itself needs, installed beside the
-    # interpreter rather than arriving with the code. The wrapper records a
-    # task's start and exit and mirrors both into the record database, and it
-    # runs before `uv sync` -- so the venv that holds the project's own driver
-    # does not exist yet and never will for this process. A wheel, no build.
+    # The ONE dependency the WRAPPER itself needs. It records a task's start and
+    # exit and mirrors both into the record database, and it runs before
+    # `uv sync` -- so the venv holding the project's own driver does not exist
+    # yet and never will for this process.
     #
-    # `legmirror` imports it LAZILY and catches ImportError, so a node that
-    # somehow lacks it mirrors nothing rather than dying at bootstrap with no
-    # record of why. That is what makes installing it here safe.
-    /usr/local/bin/uv pip install --system --python /usr/local/bin/python3.13 \
-      --quiet "psycopg[binary]"
+    # `--target`, NOT `--system`: uv refuses to install into the interpreter it
+    # manages ("externally managed ... should not be modified"), which failed
+    # the start task and left the node START_TASK_FAILED. A directory the
+    # wrapper puts on its own path touches that interpreter not at all. Pinned
+    # against `spec.py`, which sets PYTHONPATH, by `test_node_interpreter.py`.
+    #
+    # `|| echo`, like the ptrace knob above and for the same reason: a start
+    # task that fails BRICKS THE NODE, and this is the one thing here whose
+    # absence costs nothing that matters. `legmirror` catches the missing driver
+    # and the task trains exactly as before, which is what an unset DSN already
+    # does. Bricking a node to protect a copy of a record the share already
+    # holds is the wrong way round.
+    /usr/local/bin/uv pip install --target /opt/node-deps --quiet "psycopg[binary]" \
+      || echo "WARN could not install psycopg; legs will not mirror"
+    chmod -R a+rX /opt/node-deps 2>/dev/null || true
     chmod -R a+rX /opt/uv-python
     SHARE="$AZ_BATCH_NODE_MOUNTS_DIR/shared"
     mkdir -p /mnt/work/data/combo_abstraction /mnt/work/data/runs
