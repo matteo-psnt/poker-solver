@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
@@ -51,6 +52,10 @@ QUEUE_DEPTH = 10_000
 # 40,118 rows/s against 10,468 for single inserts -- but the reason to batch is
 # not speed, it is holding one connection briefly instead of constantly.
 BATCH = 200
+
+# Fine enough that a flush is not itself a source of delay, coarse enough
+# that waiting costs nothing measurable.
+_DRAIN_POLL_SECONDS = 0.02
 
 _SENTINEL = object()
 
@@ -133,14 +138,28 @@ class PostgresSink:
         self._put(run_id, event, body, blocking=False)
 
     def flush(self, timeout: float) -> bool:
-        """Drain, and report whether anything was lost along the way."""
-        deadline = timeout
-        try:
-            self._queue.join()
-        except Exception:  # noqa: BLE001 -- flush reports, it does not fail a run
-            log.warning("record sink did not drain within %.1fs", deadline)
+        """Drain within `timeout`, and report whether anything was lost.
+
+        POLLED, not `Queue.join()`, which takes no timeout and waits forever.
+        The version this replaces passed its `timeout` to a log message and
+        nowhere else, so the ceiling every caller thought it had did not exist
+        and a sink that could not reach the database would have hung the run at
+        exit -- after the work had succeeded, which is the worst place to hang.
+
+        Returning False for "still queued" as well as "dropped" is the honest
+        reading: both mean the database is behind the share.
+        """
+        deadline = time.monotonic() + timeout
+        # `unfinished_tasks` counts what is queued AND what the writer is
+        # mid-batch on, which `qsize` does not -- and it is the number
+        # `task_done` decrements, so this is the same condition `join` waits on.
+        while self._queue.unfinished_tasks and time.monotonic() < deadline:
+            time.sleep(_DRAIN_POLL_SECONDS)
+        pending = self._queue.unfinished_tasks
+        if pending:
+            log.warning("record sink did not drain within %.1fs; %d queued", timeout, pending)
         with self._lock:
-            return self._dropped == 0
+            return self._dropped == 0 and not pending
 
     def close(self, timeout: float = 5.0) -> bool:
         drained = self.flush(timeout)
