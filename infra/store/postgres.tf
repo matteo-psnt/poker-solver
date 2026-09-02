@@ -66,10 +66,18 @@ resource "azurerm_postgresql_flexible_server" "record" {
   tags = local.tags
 
   lifecycle {
-    # DELIBERATELY ABSENT while this is being brought up: `prevent_destroy`.
-    # Recreating the server is a normal move until it holds the only copy of
-    # anything. Turn it on in the same commit that stops publishing JSON to the
-    # share -- that is the moment this becomes irreplaceable.
+    # ON since every reader answers from here: `runs`, `progress`, `tasks`,
+    # `ledger` and `curve`. It is not yet the ONLY copy -- the share still holds
+    # the record and `backfill-record` still rebuilds this from it -- so losing
+    # the server would cost an import rather than the experiment. But an import
+    # is four minutes and a `terraform destroy` that reached this would be an
+    # accident nobody meant, which is what this exists to stop.
+    #
+    # The stronger reason arrives with the commit that stops publishing JSON:
+    # at that moment this becomes irreplaceable, and turning it on then would
+    # be turning it on one step too late.
+    prevent_destroy = true
+
     ignore_changes = [zone]
   }
 }
