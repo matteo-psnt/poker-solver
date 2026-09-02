@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from src.adapters.postgres import connect, observations, queries
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import share, workspace
 from src.interfaces.cloud.tasks import batch
@@ -124,6 +125,10 @@ def run(args: argparse.Namespace) -> TasksPayload:
     if args.tasks_dir:
         return _result(task_history.read_tasks(Path(args.tasks_dir)), None, args.limit)
 
+    engine = connect.engine_from_environment()
+    if engine is not None:
+        return _from_database(engine, args)
+
     config = CloudConfig.load()
     service = share.share_client(config)
     with _task_records(service, config.share_name) as local:
@@ -148,6 +153,104 @@ def run(args: argparse.Namespace) -> TasksPayload:
             reconciled = len(explained)
 
         return _result(task_history.read_tasks(local), reconciled, args.limit)
+
+
+def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
+    """The same join, over rows instead of files.
+
+    Materialising `legs/` to answer this costs 88.5s cold -- every CLI call and
+    the console's first screen -- for 13,900 documents whose history is
+    immutable. The join is `task_history.join_documents` either way; what
+    changes is where the documents came from.
+
+    Reconciliation still asks BATCH, which is the half no store can make
+    cheaper. What the database makes cheap is knowing WHICH tasks to ask about
+    and which answers are new, neither of which needs the tree any more.
+    """
+    rows = task_history.join_documents(task_log.documents_from_rows(queries.leg_rows(engine)))
+    open_tasks = _still_open(rows)
+    if args.skip_reconcile or not open_tasks:
+        return _result(rows, None, args.limit)
+
+    config = CloudConfig.load()
+    fresh = _new_observations(
+        _ask_batch(config, open_tasks), open_tasks, queries.observed_legs(engine)
+    )
+    if fresh:
+        # The share FIRST and the database second, deliberately: the share is
+        # the source of truth, and a record that reached only the database is
+        # one `--verify` reports as a divergence in the direction that means a
+        # bug.
+        _publish_observed(share.share_client(config), config.share_name, fresh)
+        observations.record_observations(engine, fresh)
+    return _result(rows, len(fresh), args.limit)
+
+
+def _still_open(rows: list[TaskRow]) -> list[TaskRow]:
+    """The rows Batch could still explain -- the share's `unresolved_tasks`
+    rule, applied to rows that are already in hand.
+
+    Non-terminal AND the latest attempt: Batch describes only a task's current
+    attempt, so an earlier one is unresolved by construction and asking about it
+    returns the answer for a different attempt. 1,326 non-terminal rows, of
+    which 1,290 were superseded.
+    """
+    latest: dict[str, int] = {}
+    for row in rows:
+        latest[row.task_id] = max(latest.get(row.task_id, 0), row.attempt)
+    return [
+        row
+        for row in rows
+        if row.cause not in task_history.TERMINAL_CAUSES and row.attempt == latest[row.task_id]
+    ]
+
+
+def _new_observations(
+    seen: list[dict[str, Any]],
+    open_tasks: list[TaskRow],
+    stored: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Batch's answers that say something the record does not already say.
+
+    `says_the_same` rather than a byte comparison, and the reason is measured:
+    `observed_at` is stamped on every read, so two observations of one finished
+    task differ in a field that means nothing. Re-publishing those cost 14.1s
+    per poll restating what the share already said.
+    """
+    open_ids = {row.task_id for row in open_tasks}
+    fresh: dict[str, dict[str, Any]] = {}
+    for task in seen:
+        task_id = task.get("task")
+        if not task_id or task_id not in open_ids:
+            continue
+        document = task_history.observed_record(
+            task_id=task_id,
+            job_id=task.get("job", ""),
+            state=task.get("state") or "",
+            result=task.get("result"),
+            exit_code=task.get("exit_code"),
+            failure=task.get("failure"),
+            start_time=task.get("start_time"),
+            end_time=task.get("end_time"),
+            node_id=task.get("node") or "",
+        )
+        if not task_history.says_the_same(stored.get(task_id), document):
+            fresh[task_id] = document
+    return fresh
+
+
+def _publish_observed(service: Any, share_name: str, fresh: dict[str, dict[str, Any]]) -> None:
+    """Write the observer records to the share.
+
+    Through `write_observed_document` rather than a `json.dumps` here: the
+    record is STAMPED like every other one, and an unstamped document would be
+    rejected by the reader's schema check long after whoever wrote it had gone.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        local = Path(tmp)
+        for document in fresh.values():
+            task_history.write_observed_document(local, document)
+        _upload_observed(service, share_name, local, list(fresh))
 
 
 def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str, Any]]:

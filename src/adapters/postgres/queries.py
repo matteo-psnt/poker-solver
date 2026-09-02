@@ -113,3 +113,31 @@ def checkpoint_series(engine: Any, run_id: str) -> list[dict[str, Any]]:
     """
     with _read(engine) as connection:
         return [row[0] for row in connection.execute(_CHECKPOINTS, {"run_id": run_id})]
+
+
+# No ORDER BY: the join keys off REBUILT FILENAMES and sorts them itself, which
+# is what decides ties between two records claiming one slot. Ordering here
+# would be a second, silently different, opinion about that.
+_LEGS = sa.text("SELECT task_id, attempt, leg, body FROM legs")
+
+
+def leg_rows(engine: Any) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Every leg document, as `(task_id, attempt, leg, body)`.
+
+    Whole rather than paged: the join needs every row to answer about any one of
+    them -- `kinds.etas` estimates from the whole population, and which attempt
+    of a task is latest is only knowable by seeing all of them.
+    """
+    with _read(engine) as connection:
+        return [(row[0], row[1], row[2], row[3]) for row in connection.execute(_LEGS)]
+
+
+def observed_legs(engine: Any) -> dict[str, dict[str, Any]]:
+    """The stored Batch observation for each task, by task id."""
+    with _read(engine) as connection:
+        return {
+            row[0]: row[1]
+            for row in connection.execute(
+                sa.text("SELECT task_id, body FROM legs WHERE leg = 'observed'")
+            )
+        }
