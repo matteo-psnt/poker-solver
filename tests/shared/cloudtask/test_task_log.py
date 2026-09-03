@@ -48,15 +48,19 @@ class TestOneFilePerEventPerAttempt:
         assert (directory / f"task-1.1{task_log.EXIT_SUFFIX}").exists()
         assert (directory / f"task-1.2{task_log.START_SUFFIX}").exists()
 
-    def test_progress_is_overwritten_rather_than_accumulated(self, tmp_path):
-        """Current state, not history: one file per tick per task would grow the
-        thing that makes every read of this directory slow -- the file COUNT."""
+    def test_progress_writes_no_file_at_all(self, tmp_path):
+        """It used to overwrite one file per task, to keep the thing that makes
+        every read of this directory slow -- the file COUNT -- from growing. It
+        now writes none: the sample goes to the database, where it is read from,
+        and a share directory of 14,000 files is not on a running task's path."""
+        directory = task_log.tasks_dir(tmp_path)
+        directory.mkdir(parents=True, exist_ok=True)
         for done in (1, 2, 3):
-            task_log.write_progress_record(
+            record = task_log.progress_record(
                 tmp_path, task_id="t", progress=Progress(done=done, total=10, unit="rungs")
             )
-        directory = task_log.tasks_dir(tmp_path)
-        assert len(list(directory.glob(f"*{task_log.PROGRESS_SUFFIX}"))) == 1
+            assert record["progress"]["done"] == done
+        assert list(directory.glob(f"*{task_log.PROGRESS_SUFFIX}")) == []
 
 
 class TestAttemptNumbering:

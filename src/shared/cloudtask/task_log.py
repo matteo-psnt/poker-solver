@@ -343,37 +343,33 @@ def write_node_record(
     return record
 
 
-def write_progress_record(
+def progress_record(
     share: str | os.PathLike[str],
     *,
     task_id: str,
     progress: kinds.Progress,
 ) -> dict[str, Any]:
-    """How far along a RUNNING task is. Overwritten, unlike start and exit.
+    """How far along a RUNNING task is, as a record. NOT WRITTEN TO THE SHARE.
 
-    Current state, not history: only the latest matters, and keeping every
-    sample would put one file per tick per task on a share where file COUNT is
-    what makes every read slow.
+    The first record to stop being published. It is read from the database, it
+    is replaced every fifteen seconds, and a sample superseded that fast is the
+    one whose loss costs least -- while writing it into a share directory of
+    14,000 files was the most expensive thing a running task did.
 
-    Torn writes are expected and tolerated rather than prevented -- SMB has no
-    atomic rename, and this is refreshed every couple of minutes anyway, so a
-    reader that cannot parse one sample simply shows the task with no bar.
-    Never worth failing a task over: see the caller, which swallows everything.
+    `share` is still taken because the ATTEMPT this belongs to is read from the
+    start records beside it, and those keep their file.
+
+    Torn writes used to be the hazard here -- SMB has no atomic rename -- and
+    are now someone else's: the row is one statement.
     """
-    directory = tasks_dir(share)
-    directory.mkdir(parents=True, exist_ok=True)
-    record = {
+    return {
         "task_id": task_id,
-        "attempt": _this_attempt(directory, task_id),
+        # From the START records beside it, which keep their file. No directory
+        # is created here any more: this writes nothing.
+        "attempt": _this_attempt(tasks_dir(share), task_id),
         "progress": progress.as_record(),
         "ts": utcnow(),
     }
-    records.write_snapshot(
-        directory / f"{task_id}{PROGRESS_SUFFIX}",
-        record,
-        records.REGISTRY[f"legs/*{PROGRESS_SUFFIX}"],
-    )
-    return record
 
 
 # The attempt number cannot change inside one process -- a Batch retry is a NEW
