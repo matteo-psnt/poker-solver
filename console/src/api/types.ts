@@ -81,7 +81,6 @@ export type Autoscale = S["AutoscalePayload"];
  * specific halves were invisible in the schema.
  */
 export type Dispatched = S["SubmitPayload"] | S["ScorePayload"] | S["PrecomputeDispatchPayload"];
-export type DispatchedVector = S["SubmitVectorPayload"];
 export type PushedCode = S["PushedCodePayload"];
 export type PushedData = S["PushedDataPayload"];
 export type Compacted = S["CompactedPayload"];

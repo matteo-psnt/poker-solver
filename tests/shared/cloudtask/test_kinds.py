@@ -95,36 +95,24 @@ class TestAPriorIsRefusedByTheKernelsThatCannotApplyIt:
         }
         return _spec(**(base | over))
 
-    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS, TaskName.TRAIN_VECTOR])
+    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS])
     @pytest.mark.parametrize("prior", PRIORS)
     def test_a_prior_is_refused_rather_than_dropped(self, op, prior):
         spec = self._spec_for(op, **prior)
         with pytest.raises(BadTaskError, match="only the scalar trainer"):
             kinds.kind(op).validate(spec)
 
-    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS, TaskName.TRAIN_VECTOR])
+    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS])
     def test_a_plain_arm_still_passes(self, op):
         kinds.kind(op).validate(self._spec_for(op))
 
 
-class TestTheGameIsAlwaysStated:
-    def test_board_free_states_universe_seed_zero(self):
-        """Seed 0 is a seed. Guarded on truthiness it vanished from the argv and
-        the trainer's own default (7) silently solved a different game."""
-        argv = kinds.kind(TaskName.TRAIN_VECTOR).commands(
-            _plan(universe_boards=32, universe_seed=0)
-        )[0]
-        assert "--universe-seed" in argv
-        assert argv[argv.index("--universe-seed") + 1] == "0"
-
-
 class TestEveryKindRungsAtItsOwnScale:
-    def test_the_vector_kernels_do_not_inherit_the_scalar_rung(self):
+    def test_pcs_does_not_inherit_the_scalar_rung(self):
         """5M rungs on a run of hundreds is ONE chunk: nothing to resume from and
         no ladder to score, against a quality curve that is U-shaped."""
         scalar = kinds.kind(TaskName.TRAIN).default_checkpoint_every
-        for op in (TaskName.TRAIN_PCS, TaskName.TRAIN_VECTOR):
-            assert kinds.kind(op).default_checkpoint_every < scalar
+        assert kinds.kind(TaskName.TRAIN_PCS).default_checkpoint_every < scalar
 
 
 class TestPrecomputeUsesTheWorkerCountItWasGiven:
@@ -164,16 +152,20 @@ class TestLookup:
 
         The name is synthetic ON PURPOSE. This test twice named a real op --
         `vector-sweep`, then `train-vector` -- and twice broke when that op came
-        back as a live kind. Every op string this project has ever defined is
-        live again today, so there is no retired one to point at, and pinning
-        the property to whichever is currently dead only schedules the next
+        back as a live kind. Both are retired again now (a THIRD turn of the
+        same wheel), which is exactly why the synthetic name stays: pinning the
+        property to whichever op is currently dead only schedules the next
         failure. What is being tested is the SHAPE: unknown reads as ``None``
         and degrades to its bare op, while a live one still resolves.
         """
         assert kinds.kind_of(RETIRED_OP) is None
         assert kinds.describe({"op": RETIRED_OP}) == RETIRED_OP
-        assert kinds.kind_of("vector-sweep") is not None
-        assert kinds.kind_of("train-vector") is not None
+        assert kinds.kind_of("train-pcs") is not None
+        # The real history the log still holds, and must not raise on.
+        assert kinds.kind_of("vector-sweep") is None
+        assert kinds.describe({"op": "vector-sweep"}) == "vector-sweep"
+        assert kinds.kind_of("train-vector") is None
+        assert kinds.describe({"op": "train-vector"}) == "train-vector"
 
     def test_a_wire_string_and_its_enum_member_are_the_same_key(self):
         assert kinds.kind("train") is kinds.kind(TaskName.TRAIN)
@@ -288,7 +280,7 @@ class TestProgress:
         """The manifest is a rung behind by construction. It is the FLOOR --
         for the window before the trainer's writer starts, and for a task whose
         wrapper predates it -- never the answer when a live count exists."""
-        for name in (TaskName.TRAIN, TaskName.TRAIN_VECTOR, TaskName.TRAIN_PCS):
+        for name in (TaskName.TRAIN, TaskName.TRAIN_PCS):
             kind = kinds.kind(name)
             live = kind.sample(_plan(to=1000), {"iteration": 200, "done": 450, "total": 1000})
             assert live == Progress(450, 1000, "iterations"), name

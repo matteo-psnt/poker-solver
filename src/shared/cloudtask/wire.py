@@ -211,9 +211,6 @@ KEYS: tuple[Key, ...] = (
     # hash worth recording.
     Key("RUN_GIT_DIRTY", "git_dirty", "git_dirty"),
     Key("RUN_GIT_BRANCH", "git_branch", "git_branch"),
-    Key("RUN_UNIVERSE_BOARDS", "universe_boards", "universe_boards", _number, _int),
-    Key("RUN_UNIVERSE_SEED", "universe_seed", "universe_seed", _number, _int),
-    Key("RUN_DTYPE", "dtype", "dtype"),
     Key("RUN_WARM_START_FROM", "warm_start_from", "warm_start_from"),
     Key("RUN_WARM_START_WEIGHT", "warm_start_weight", "warm_start_weight", _number, _int),
     Key("RUN_WARM_START_AT", "warm_start_at", "warm_start_at", _number, _int),

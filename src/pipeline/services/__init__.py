@@ -54,10 +54,6 @@ from src.pipeline.services.scoring import (
     record_blueprint_match,
 )
 from src.pipeline.services.static_training import StaticTrainingOutput, train_static
-from src.pipeline.services.vector_blueprint import (
-    VectorBlueprintOutput,
-    train_vector_blueprint,
-)
 from src.pipeline.services.warm_start import DEFAULT_EFFECTIVE_ITERATIONS, PRIOR_SHAPES
 from src.pipeline.training.run_tracker import ExperimentTag
 
@@ -77,7 +73,6 @@ __all__ = [
     "RunDigest",
     "RunSummary",
     "StaticTrainingOutput",
-    "VectorBlueprintOutput",
     "checkpoint_iteration_of",
     "curve_from",
     "describe_runs",
@@ -95,5 +90,4 @@ __all__ = [
     "sweep_bucket_counts",
     "train_pcs",
     "train_static",
-    "train_vector_blueprint",
 ]

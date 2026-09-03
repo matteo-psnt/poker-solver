@@ -76,18 +76,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="Checkpoint interval in iterations. Default is the KERNEL's: the "
-        "unit is its iteration, and 5M rungs would leave a board-free or pcs "
-        "run as one chunk.",
+        "unit is its iteration, and 5M rungs would leave a pcs run as one chunk.",
     )
     parser.add_argument(
         "--kernel",
-        choices=("scalar", "board-free", "pcs"),
+        choices=("scalar", "pcs"),
         default="scalar",
-        help="scalar = external-sampling MCCFR over the real game (train-static). "
-        "board-free = the vector kernel, which updates every row every iteration "
-        "but solves a bucket-transition approximation of the chance layer. "
-        "pcs = the hand-space vector kernel on one freshly sampled board per "
-        "iteration (train-pcs): exact cards, the real chance layer, every hand at once.",
+        help="pcs = the hand-space vector kernel on one freshly sampled board per "
+        "iteration (train-pcs): exact cards, the real chance layer, every hand at "
+        "once, and the trainer every blueprint since 08-25 has come from. "
+        "scalar = external-sampling MCCFR over the real game (train-static); it "
+        "lost to pcs on the same budget and survives as the cheap smoke test for "
+        "infra changes and as the lineage of the frozen baselines.",
     )
     parser.add_argument(
         "--retain-every",
@@ -95,28 +95,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=0,
         dest="retain_every",
         help="[pcs] Keep one rung per this many iterations for `score --at`. 0 keeps every rung.",
-    )
-    parser.add_argument(
-        "--universe-boards",
-        type=int,
-        default=2000,
-        dest="universe_boards",
-        help="[board-free] Real boards the bucket-transition matrices are estimated "
-        "from. They define the chance layer, so they define the game.",
-    )
-    parser.add_argument(
-        "--universe-seed",
-        type=int,
-        default=7,
-        dest="universe_seed",
-        help="[board-free] Draws the universe; part of the game's identity.",
-    )
-    parser.add_argument(
-        "--dtype",
-        default="",
-        choices=("", "float32", "float64"),
-        help="[board-free] Kernel precision. Default float32, measured to cost "
-        "nothing in strategy quality.",
     )
     parser.add_argument(
         "--warm-start-from",
@@ -176,7 +154,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 _OPS = {
     "scalar": TaskName.TRAIN,
-    "board-free": TaskName.TRAIN_VECTOR,
     "pcs": TaskName.TRAIN_PCS,
 }
 
@@ -244,9 +221,6 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 ),
                 retain_every=args.retain_every,
                 timeout=args.timeout,
-                universe_boards=args.universe_boards if args.kernel == "board-free" else 0,
-                universe_seed=args.universe_seed if args.kernel == "board-free" else 0,
-                dtype=args.dtype,
                 warm_start_from=args.warm_start_from,
                 warm_start_weight=args.warm_start_weight,
                 warm_start_at=args.warm_start_at,

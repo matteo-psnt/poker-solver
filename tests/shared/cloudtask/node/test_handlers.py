@@ -183,15 +183,13 @@ class TestTrain:
         (argv,) = seen
         assert argv[argv.index("--progress-file") + 1] == str(paths.work / "train-progress.json")
 
-    def test_the_board_free_trainer_reports_into_the_same_file(self, paths, log, monkeypatch):
+    def test_the_pcs_trainer_reports_into_the_same_file(self, paths, log, monkeypatch):
         """One task runs on a node and both trainers count the same thing
         against the same kind of target, so they share the file rather than
         keeping two names for one shape."""
         seen: list[list[str]] = []
         monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
-        task = node_plan.TaskPlan(
-            op=TaskName.TRAIN_VECTOR, config="quick_test", to=1000, universe_boards=10
-        )
+        task = node_plan.TaskPlan(op=TaskName.TRAIN_PCS, config="quick_test", to=1000)
 
         handlers._train(task, paths, log)
 

@@ -155,9 +155,6 @@ class TaskSpec:
     eval_method: str = ""
     eval_at: str = ""
     eval_flags: tuple[str, ...] = field(default_factory=tuple)
-    universe_boards: int = 0
-    universe_seed: int = 0
-    dtype: str = ""
     warm_start_from: str = ""
     warm_start_weight: int = 0
     warm_start_at: int = 0

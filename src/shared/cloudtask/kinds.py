@@ -46,12 +46,9 @@ class TaskName(StrEnum):
     """
 
     TRAIN = "train"
-    TRAIN_VECTOR = "train-vector"
     TRAIN_PCS = "train-pcs"
     EVALUATE = "evaluate"
     PRECOMPUTE = "precompute"
-    VECTOR_SWEEP = "vector-sweep"
-    ABSTRACTION_COUPLING = "abstraction-coupling"
     NET_PROBE = "net-probe"
 
 
@@ -101,10 +98,9 @@ class Submission(TaskFields, Protocol):
     def eval_at(self) -> str: ...
     @property
     def eval_flags(self) -> Sequence[str]: ...
+
     # Read by TrainVectorTask.validate: the sampled boards are the chance layer,
     # so a submission that omits them names no game and must be refused here.
-    @property
-    def universe_boards(self) -> int: ...
 
 
 class NodePlan(TaskFields, Protocol):
@@ -139,12 +135,6 @@ class NodePlan(TaskFields, Protocol):
     def eval_flags(self) -> Sequence[str]: ...
     @property
     def progress_path(self) -> str: ...
-    @property
-    def universe_boards(self) -> int: ...
-    @property
-    def universe_seed(self) -> int: ...
-    @property
-    def dtype(self) -> str: ...
     @property
     def warm_start_from(self) -> str: ...
     @property
@@ -523,99 +513,6 @@ def _refuse_scalar_only_priors(task: Any, kernel: str) -> None:
         )
 
 
-class TrainVectorTask(TaskKind):
-    """Train a board-free blueprint over the whole tree at once.
-
-    The same absolute-target contract as :class:`TrainTask`, and two differences
-    that are not cosmetic.
-
-    It takes NO ``--workers``. The kernel is one process, and splatting a shared
-    array carrying that flag into a command declaring none is the defect this
-    module exists to make impossible -- three retries, each dead four seconds in.
-
-    The universe knobs have no scalar analogue. The sampled boards estimate the
-    bucket-transition matrices, so they are the chance layer, and therefore the
-    GAME rather than the schedule. An unspecified universe would silently pick
-    which game the task solves, so it is refused instead of defaulted.
-    """
-
-    name = TaskName.TRAIN_VECTOR
-    publishes_run = True
-    unit = "iterations"
-    # The trainer's own default; a board-free run is hundreds of iterations.
-    default_checkpoint_every = 25
-    """The SAME file as the scalar trainer's, and deliberately: one task runs on
-    a node, it counts the same thing against the same kind of target, and two
-    names for one shape is a second thing to keep true."""
-    progress_file = "train-progress.json"
-
-    def validate(self, task: Any) -> None:
-        if not task.config:
-            raise BadTaskError("a training task needs a config, even when continuing a run")
-        if task.to <= 0:
-            raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
-        _refuse_scalar_only_priors(task, "board-free")
-        if task.universe_boards <= 0:
-            raise BadTaskError(
-                "a board-free task needs --universe-boards: the sampled boards define "
-                "the chance layer, and so the game it solves"
-            )
-
-    def commands(self, plan: Any) -> list[list[str]]:
-        argv = [
-            "train-vector",
-            "--config",
-            plan.config,
-            "--iterations",
-            str(plan.to),
-            "--run",
-            plan.train_run_id,
-        ]
-        # Always stated, never guarded on truthiness: seed 0 is a seed, and the
-        # universe IS the game this task solves -- letting the trainer's own
-        # default stand in would silently solve a different one.
-        argv += ["--universe-seed", str(plan.universe_seed)]
-        for flag, value in (
-            ("--universe-boards", plan.universe_boards),
-            ("--checkpoint-every", plan.checkpoint_every),
-        ):
-            if value:
-                argv += [flag, str(value)]
-        if plan.dtype:
-            argv += ["--dtype", plan.dtype]
-        if work := plan.progress_path:
-            argv += ["--progress-file", work]
-        for flag, value in (
-            ("--experiment", plan.experiment),
-            ("--arm", plan.arm),
-            ("--parent", plan.parent),
-        ):
-            if value:
-                argv += [flag, value]
-        for override in plan.sets:
-            argv += ["--set", override]
-        return [argv]
-
-    def label(self, task: Any) -> str:
-        words = ["vector", _subject(task)]
-        if task.to:
-            words.append(f"to{compact(task.to)}")
-        if task.arm:
-            words.append(task.arm)
-        return "-".join(word for word in words if word)
-
-    def describe(self, record: Mapping[str, Any]) -> str:
-        target = str(record.get("target_iteration") or "")
-        if target.isdigit() and target != "0":
-            return f"board-free ->{compact(int(target))}"
-        return "board-free"
-
-    def sample(self, plan: Any, state: Mapping[str, Any]) -> Progress | None:
-        """Same shape as the scalar trainer: ordinary checkpoints, and a live
-        count between them."""
-        return _iterations_done(plan, state, self.unit)
-
-
 class TrainPcsTask(TaskKind):
     """Train by public chance sampling: one board per iteration, every hand at once.
 
@@ -849,48 +746,6 @@ def _flag(flags: object, name: str) -> str:
     return ""
 
 
-class AbstractionCouplingTask(TaskKind):
-    """Price what the board-free game's board averaging costs, on one abstraction.
-
-    Rides the same fields as :class:`VectorSweepTask` -- ``config`` is the
-    abstraction directory and ``eval_flags`` the rest of the command line -- and
-    for the same reason: the wire is already the pass-through, and this kind
-    needs no field the sweep did not.
-
-    Unlike the sweep it produces ONE answer rather than a curve, so there is no
-    partial progress to sample and no rung to resume from. That is also why it
-    keeps retries: a failure here re-runs a measurement of minutes, not a
-    training arm of hours.
-    """
-
-    name = TaskName.ABSTRACTION_COUPLING
-    unit = "constants"
-    progress_file = "abstraction-coupling-progress.json"
-
-    def validate(self, task: TaskFields) -> None:
-        if not task.config:
-            raise BadTaskError("an abstraction-coupling task needs an abstraction directory")
-
-    def commands(self, plan: NodePlan) -> list[list[str]]:
-        argv = ["abstraction-coupling", "--abstraction", plan.config, *plan.eval_flags]
-        work = plan.progress_path
-        return [[*argv, "--progress-file", work] if work else argv]
-
-    def label(self, task: Submission) -> str:
-        return f"coupling-{task.config}"
-
-    def describe(self, record: Mapping[str, Any]) -> str:
-        return f"abstraction-coupling on {record.get('config') or ''}".strip()
-
-    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
-        """Always ``None``: the measurement is one pass with no rung inside it.
-
-        A bar would have to interpolate against a guess, and the honest rendering
-        of "no partial answer exists" is no bar at all.
-        """
-        return None
-
-
 class NetProbeTask(TaskKind):
     """Report what a node can reach outbound -- ports, IMDS, an AAD token.
 
@@ -919,56 +774,6 @@ class NetProbeTask(TaskKind):
     def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
         """Always ``None``: a handful of connects finish before a bar could draw."""
         return None
-
-
-class VectorSweepTask(TaskKind):
-    """Score one CFR kernel against iteration count on one abstraction.
-
-    A measurement, not a run: nothing is trained that anything later consumes,
-    and the output is a single JSON curve rather than a checkpoint ladder.
-
-    The parameters ride on fields that already exist rather than on new ones.
-    ``config`` is the abstraction directory, ``arm`` is the kernel -- which is
-    exactly what an arm IS here, one leg of a comparison -- and ``eval_flags``
-    carries the rest verbatim to the command line. Adding six fields to
-    TaskSpec, TaskPlan and the environment round-trip to say the same thing
-    would widen a wire that three other kinds have to keep passing through.
-    """
-
-    name = TaskName.VECTOR_SWEEP
-    unit = "checkpoints"
-    progress_file = "vector-sweep-progress.json"
-    """NOT retried: a retry restarts training from zero rather than resuming, so
-    three attempts at a deterministic failure bill three full sweeps."""
-    retries = 0
-
-    def validate(self, task: TaskFields) -> None:
-        if not task.config:
-            raise BadTaskError("a vector-sweep task needs an abstraction directory")
-
-    def commands(self, plan: NodePlan) -> list[list[str]]:
-        argv = ["vector-sweep", "--abstraction", plan.config, *plan.eval_flags]
-        work = plan.progress_path
-        return [[*argv, "--progress-file", work] if work else argv]
-
-    def label(self, task: Submission) -> str:
-        return f"vector-{task.arm or 'sweep'}-{task.config}"
-
-    def describe(self, record: Mapping[str, Any]) -> str:
-        kernel = record.get("arm") or "sweep"
-        return f"vector-sweep {kernel} on {record.get('config') or ''}".strip()
-
-    def sample(self, plan: NodePlan, state: Mapping[str, object]) -> Progress | None:  # noqa: ARG002
-        """Checkpoints scored, against checkpoints requested.
-
-        The curve IS the deliverable, so a checkpoint is the honest unit: each
-        one is a point that will survive a kill, not a fraction of a single
-        answer that only exists at the end.
-        """
-        done, total = state.get("done"), state.get("total")
-        if not isinstance(done, int | float) or not isinstance(total, int | float) or total <= 0:
-            return None
-        return Progress(float(done), float(total), self.unit)
 
 
 def samples_by_op(rows: Sequence[Mapping[str, Any]]) -> dict[str, list[Sample]]:
@@ -1075,12 +880,9 @@ KINDS: dict[str, TaskKind] = {
     str(instance.name): instance
     for instance in (
         TrainTask(),
-        TrainVectorTask(),
         TrainPcsTask(),
         EvaluateTask(),
         PrecomputeTask(),
-        VectorSweepTask(),
-        AbstractionCouplingTask(),
         NetProbeTask(),
     )
 }

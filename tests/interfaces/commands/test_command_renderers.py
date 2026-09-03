@@ -27,10 +27,6 @@ from src.interfaces.commands import (
     evaluate,
     load_all,
 )
-from src.interfaces.commands.abstraction_coupling import (
-    AbstractionCouplingPayload,
-    ConstantGap,
-)
 from src.interfaces.commands.activity import ActivityPayload, CommandActivity, Failure
 from src.interfaces.commands.arms import ArmsPayload
 from src.interfaces.commands.autoscale_check import AutoscalePayload, AutoscaleView
@@ -61,15 +57,11 @@ from src.interfaces.commands.serve import ServePayload
 from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
-from src.interfaces.commands.submit_coupling import SubmitCouplingPayload
 from src.interfaces.commands.submit_net_probe import SubmitNetProbePayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
-from src.interfaces.commands.submit_vector import SubmitVectorPayload, VectorArm
 from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.commands.train_pcs import PcsTrainingPayload
 from src.interfaces.commands.train_static import StaticTrainingPayload
-from src.interfaces.commands.train_vector import VectorBlueprintPayload
-from src.interfaces.commands.vector_sweep import SweepPoint, VectorSweepPayload
 from src.pipeline.services import EvaluationPayload
 from src.pipeline.services.experiments import ArmPoint, ArmsOutput, ArmTier, CurveOutput, CurvePoint
 from src.shared.task_history import TaskProgress, TaskRow
@@ -104,61 +96,6 @@ PAYLOADS: dict[str, Any] = {
         iterations_per_second=0.89,
         status="completed",
     ),
-    "abstraction-coupling": AbstractionCouplingPayload(
-        abstraction="buckets-F100T300R600-rexact-a1542e88",
-        buckets={"preflop": 169, "flop": 100, "turn": 300, "river": 600},
-        boards=2000,
-        seed=7,
-        accumulate_seconds=41.2,
-        measure_seconds=18.7,
-        gaps=[
-            ConstantGap(
-                name="transition:FLOP->TURN",
-                kind="coupling",
-                relative=0.8137,
-                recovered={1: 0.0, 8: 0.412, 64: 0.771},
-            ),
-            ConstantGap(
-                name="compatible:RIVER",
-                kind="dispersion",
-                relative=0.0219,
-                recovered={1: 0.0, 8: 0.104, 64: 0.298},
-            ),
-        ],
-    ),
-    "vector-sweep": VectorSweepPayload(
-        abstraction="buckets-F100T300R600-rexact-a1542e88",
-        buckets={"flop": 100, "turn": 300, "river": 600},
-        kernel="board-free",
-        derive_boards=6000,
-        train_boards=8,
-        score_boards=32,
-        in_sample=False,
-        stack=20,
-        nodes=2140,
-        infoset_rows=1_132_552,
-        derive_seconds=457.0,
-        uniform_baseline=4.1869,
-        uniform_baseline_unconstrained=4.4021,
-        done=2,
-        total=9,
-        points=[
-            SweepPoint(
-                iterations=400,
-                train_seconds=53.1,
-                exploitability=0.5392,
-                unconstrained=0.8811,
-            ),
-            SweepPoint(
-                iterations=1600,
-                train_seconds=210.1,
-                exploitability=0.693,
-                unconstrained=0.9902,
-            ),
-        ],
-        best_exploitability=0.5392,
-        best_at_iterations=400,
-    ),
     "reconcile-runs": ReconcilePlan(
         runs_considered=301,
         open_runs=28,
@@ -191,50 +128,6 @@ PAYLOADS: dict[str, Any] = {
         code_snapshot="code-20260805_000000",
         job_id="poker-20260805",
         tasks=["net-probe-000000-1"],
-    ),
-    "submit-coupling": SubmitCouplingPayload(
-        abstractions=[
-            "buckets-F10T20R30-r200-ae5a7e66",
-            "buckets-F100T300R600-rexact-a1542e88",
-        ],
-        boards=2000,
-        code_snapshot="code-20260805_000000",
-        job_id="poker-20260805",
-        tasks=["coupling-buckets-F10T20R30-000000-1"],
-    ),
-    "submit-vector": SubmitVectorPayload(
-        arms=[
-            VectorArm(
-                abstraction="buckets-F10T20R30-r200-ae5a7e66",
-                kernel="board-free",
-                derive_boards=6000,
-                score_seed=999,
-            ),
-            VectorArm(
-                abstraction="buckets-F10T20R30-r200-ae5a7e66",
-                kernel="hand-space",
-                derive_boards=0,
-            ),
-        ],
-        code_snapshot="code-20260805_000000",
-        job_id="poker-20260805",
-        tasks=["vector-board-free-buckets-F10T20R30-000000-1"],
-    ),
-    "train-vector": VectorBlueprintPayload(
-        run_id="vec-a",
-        runs_dir="data/runs",
-        config_name="production",
-        iterations=400,
-        num_rows=32_240_608,
-        touched_rows=32_240_608,
-        coverage=1.0,
-        runtime_seconds=1800.0,
-        seconds_per_iteration=4.5,
-        abstract_exploitability=1.16,
-        universe_boards=2000,
-        universe_seed=7,
-        dtype="float32",
-        status="completed",
     ),
     "precompute": PrecomputePayload(
         abstraction_config="production",
