@@ -51,9 +51,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--pool",
         choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it. `exact_br`'s fork-join is sized by FREE RAM, "
-        "so a bigger box buys workers, not just cores: a 91M-row checkpoint got "
-        "2 workers of 8 on a D16 and the walk is linear in that.",
+        help="Which pool runs it. `exact_br`'s fork-join is sized by FREE RAM, so "
+        "a bigger box buys workers, not just cores: a 91M-row checkpoint got 2 "
+        "workers of 8 on a D16 and the walk is linear in that. Per dollar it is "
+        "still a wash -- a D32 is ~1.8x faster at 2x the price. The lever a ladder "
+        "has is CONCURRENCY: `--at` makes one task per rung, so ten rungs on ten "
+        "D16s is one round where two D32s is five. Take a bigger box to make ONE "
+        "walk finish sooner, or when a D16 starves the fork-join -- not to score a "
+        "ladder.",
     )
     parser.add_argument(
         "flags",

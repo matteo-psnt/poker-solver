@@ -52,9 +52,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--pool",
         choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it: train (D16), big (the train-big D32 pool), "
-        "huge (the train-huge D64 pool, 32 physical cores) or mem (the train-mem "
-        "E64 pool, 512 GB -- the only one that fits a 200 bb PCS run's workers).",
+        help="Which pool runs it. USE train (D16) UNLESS YOU CAN SAY WHY NOT. Per "
+        "dollar it beats big 2.8x, huge 5.5x and mem 28x on PCS -- and huge is not "
+        "even faster in absolute terms, because PCS hits a DRAM-latency ceiling "
+        "long before it runs out of cores. The big boxes buy RAM, not speed: take "
+        "huge/mem only when ONE node must hold workers a D16's 32 GiB cannot, such "
+        "as a 200 bb run. PCS workers share one table per node, so that is the "
+        "only thing more nodes cannot substitute for; N independent arms are N "
+        "D16s, never one D64.",
     )
     parser.add_argument(
         "--workers",
