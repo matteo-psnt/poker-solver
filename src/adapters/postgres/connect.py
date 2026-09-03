@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from src.shared.ports.record import EvalSink, RecordSink
+    from src.shared.ports.record import EvalSink, RecordSink, RecordSource
 
 log = logging.getLogger(__name__)
 
@@ -134,3 +134,19 @@ def record_sink() -> Iterator[RecordSink | None]:
     finally:
         if sink is not None and not sink.flush(FLUSH_TIMEOUT_SECONDS):
             log.warning("record sink dropped events; the database is behind the share")
+
+
+def record_source_from_environment() -> RecordSource | None:
+    """A read side when a DSN is set, `None` when it is not.
+
+    The READER'S engine, not the sink's: this answers one question at the start
+    of a task and wants the pool the readers use, not the single pre-pinged
+    connection a writer holds open for hours.
+    """
+    engine = engine_from_environment()
+    if engine is None:
+        return None
+
+    from src.adapters.postgres.source import PostgresRecordSource  # noqa: PLC0415
+
+    return PostgresRecordSource(engine)

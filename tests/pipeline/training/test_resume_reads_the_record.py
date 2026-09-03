@@ -1,0 +1,81 @@
+"""A resume folds the run's events, and the file is no longer the only place.
+
+This is what `run.jsonl` was still needed for. `RunTracker.load` reads it to
+decide whether a task may continue -- the config it was trained under, the
+abstraction it is pinned to, the kernel. Without those a resume mints fresh
+metadata over a live ladder and trains from zero, which is the failure `opened`
+calls unrecoverable.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from src.core.actions.action_model import ActionModel
+from src.pipeline.training.run_tracker import RunTracker
+from src.pipeline.training.run_tracker.metadata import RunMetadata
+from src.shared import run_events
+from src.shared.config import Config
+
+
+class _Source:
+    """A `RecordSource` holding one run's events."""
+
+    def __init__(self, events: list[dict[str, Any]]) -> None:
+        self._events = events
+        self.asked: list[str] = []
+
+    def events(self, run_id: str) -> list[Any]:
+        self.asked.append(run_id)
+        return self._events
+
+
+def _record_at(where) -> list[dict[str, Any]]:
+    """A real run record, written the way a run writes one."""
+    config = Config.default()
+    tracker = RunTracker(
+        run_dir=where,
+        config_name="test",
+        config=config,
+        action_config_hash=ActionModel(config).get_config_hash(),
+    )
+    tracker.mark_completed()
+    return run_events.read(tracker.run_dir)
+
+
+class TestAResumeCanFoldFromTheDatabase:
+    def test_it_asks_the_source_before_the_file(self, tmp_path):
+        source = _Source(_record_at(tmp_path / "run-a"))
+        # A directory with NO run record at all -- only the source has it.
+        loaded = RunMetadata.load(tmp_path / "run-elsewhere", source)
+        assert source.asked == ["run-elsewhere"]
+        assert loaded.config_name == "test"
+
+    def test_a_run_the_source_does_not_know_falls_back_to_the_file(self, tmp_path):
+        """A run that predates the database, or a task with no DSN, resumes
+        exactly as it always did."""
+        _record_at(tmp_path / "run-b")
+        loaded = RunMetadata.load(tmp_path / "run-b", _Source([]))
+        assert loaded.config_name == "test"
+
+    def test_the_tracker_finds_a_run_that_exists_only_in_the_source(self, tmp_path):
+        """`_has_run_record` decided from the FILESYSTEM. Once the log stops
+        being published, a run that exists would read as one that does not --
+        and a resume that believes that trains from zero over a live ladder."""
+        source = _Source(_record_at(tmp_path / "run-c"))
+        tracker = RunTracker.load(tmp_path / "run-nowhere-on-disk", source)
+        assert tracker.metadata.config_name == "test"
+
+    def test_no_source_and_no_file_still_refuses(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            RunTracker.load(tmp_path / "run-missing")
+
+    def test_the_fold_is_the_same_one_either_way(self, tmp_path):
+        """The stored body IS the line the log holds, so the metadata a resume
+        gets from the database is the metadata it got from the file."""
+        events = _record_at(tmp_path / "run-d")
+        from_file = RunMetadata.load(tmp_path / "run-d")
+        from_db = RunMetadata.load(tmp_path / "run-d", _Source(events))
+        assert from_db.to_dict() == from_file.to_dict()

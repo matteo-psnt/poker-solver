@@ -185,3 +185,17 @@ def rung_ladder(engine: Any, run_id: str) -> list[int]:
     """
     with _read(engine) as connection:
         return [int(row[0]) for row in connection.execute(_LADDER, {"run_id": run_id})]
+
+
+# ORDER BY the event's OWN timestamp, then arrival. `gseq` alone is arrival
+# order and two processes write one run's events -- the node wrapper and the
+# trainer -- so a fold keyed on arrival can see an attempt end before it began.
+_RUN_EVENTS = sa.text("""
+    SELECT body FROM run_events WHERE run_id = :run_id ORDER BY at, gseq
+""")
+
+
+def run_event_bodies(engine: Any, run_id: str) -> list[dict[str, Any]]:
+    """One run's events, as the documents the fold reads."""
+    with _read(engine) as connection:
+        return [row[0] for row in connection.execute(_RUN_EVENTS, {"run_id": run_id})]
