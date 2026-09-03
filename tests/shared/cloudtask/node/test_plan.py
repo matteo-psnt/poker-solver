@@ -198,6 +198,12 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
         "postgresql://u:p@h:5432/record?sslmode=require",
         "postgresql://u:p@h:5432/record?sslmode=require",
     ),
+    # A SAS-shaped value, query string and all: the `?` is exactly what
+    # `blobstore.rung_uri` has to splice the blob name in FRONT of.
+    "POKER_SOLVER_CHECKPOINT_SAS": (
+        "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
+        "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
+    ),
     "RUN_OP": ("evaluate", "evaluate"),
     "RUN_CONFIG": ("production", "production"),
     "RUN_TO": (25_000_000, 25_000_000),

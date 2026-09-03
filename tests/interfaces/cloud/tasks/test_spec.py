@@ -149,6 +149,7 @@ class TestEnvironment:
         assert set(env) == {
             "CODE_SNAPSHOT",
             "POKER_SOLVER_RECORD_DSN",
+            "POKER_SOLVER_CHECKPOINT_SAS",
             "RUN_OP",
             "RUN_CONFIG",
             "RUN_TO",
