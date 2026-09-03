@@ -56,7 +56,6 @@ import numpy as np
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import ALL_COMBOS, NUM_COMBOS, blocked_combos
 from src.engine.search.subgame_cfr import RunoutEvaluator, nonblocking_mass
-from src.engine.solver.infoset.encoder import get_spr_bucket
 from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.mccfr.chance import begin_street
 from src.engine.solver.policy.lookup import blueprint_policy_table
@@ -318,6 +317,7 @@ class _BoardPlan:
 
     def __init__(self, config: PublicBRConfig):
         self._config = config
+        self._deal_cache: dict[tuple[Card, ...], list[tuple[tuple[Card, ...], float]]] = {}
         enumerator = CanonicalBoardEnumerator(Street.FLOP)
         infos = list(enumerator.iterate())
         counts = np.array([info.raw_count for info in infos], dtype=np.float64)
@@ -338,9 +338,21 @@ class _BoardPlan:
             ]
 
     def deal_options(self, board: tuple[Card, ...]) -> list[tuple[tuple[Card, ...], float]]:
-        """Weighted card branches extending ``board`` by one deal (public weights)."""
+        """Weighted card branches extending ``board`` by one deal (public weights).
+
+        Memoised on the board: the plan is deterministic in it, and the walk asks
+        the same question once per betting line that reaches the same deal -- a
+        few thousand times over for the turn. Recomputing meant a 52-card sweep,
+        a `SeedSequence` and a fresh `Generator` each time.
+        """
         if len(board) == 0:
             return self.flops
+        cached = self._deal_cache.get(board)
+        if cached is None:
+            cached = self._deal_cache[board] = self._deal_options(board)
+        return cached
+
+    def _deal_options(self, board: tuple[Card, ...]) -> list[tuple[tuple[Card, ...], float]]:
         if len(board) == 3:
             cards = self._street_cards(board, _TURN_STREAM, self._config.num_turns)
         elif len(board) == 4:
@@ -898,35 +910,36 @@ class PublicTreeBestResponse:
         gather through the board's bucket vector. The eval-time transform
         (threshold / purify) is applied to the dense rows, so it costs nothing
         per node.
+
+        A blocked combo carries bucket -1, and the cached rows are stored with
+        ONE EXTRA ROW on the end holding the blocked answer -- zeros, and False.
+        Numpy reads index -1 as the last row, so the gather delivers that answer
+        for free and the whole alive-mask dance goes: no boolean mask, no two
+        `np.zeros` allocations, no masked scatter, one gather each instead of
+        two. Measured on the profile this method was 30% of a walk.
         """
-        sequence = state.normalized_betting_sequence()
-        spr = min(state.stacks) / state.pot if state.pot > 0 else 0
-        spr_bucket = get_spr_bucket(spr)
-        context_key = (
-            state.current_player,
-            state.street,
-            sequence,
-            spr_bucket,
-            legal,
-            state.pot,
-            state.stacks,
-            state.to_call,
-        )
+        # `(street, sequence)` IS the node, and `BettingTree` verifies across the
+        # full production enumeration that it maps to exactly one
+        # `(actor, pot, stacks, to_call)`. So pot/stacks/to_call/spr/legal were
+        # all functions of the two fields beside them, and hashing them -- a
+        # tuple of `Action` objects among them -- was the whole remaining cost of
+        # this method. Being on-tree is not assumed: `rows_at` resolves through
+        # `tree.node_id`, which raises on a state the tree does not hold.
+        context_key = (state.current_player, state.street, state.normalized_betting_sequence())
         cached = self._policy_cache.get(context_key)
         if cached is None:
             rows, row_missing = blueprint_policy_table(
                 self._policy_source.rows_at(state), state, self._rules, legal
             )
-            cached = (transform_policy_rows(rows, row_missing, self._config), row_missing)
+            rows = transform_policy_rows(rows, row_missing, self._config)
+            cached = (
+                np.vstack([rows, np.zeros((1, rows.shape[1]))]),
+                np.append(row_missing, False),
+            )
             self._policy_cache[context_key] = cached
         rows, row_missing = cached
         bucket_vec = self._bucket_vector(state.board, state.street)
-        alive = bucket_vec >= 0
-        sigma = np.zeros((NUM_COMBOS, len(legal)), dtype=np.float64)
-        sigma[alive] = rows[bucket_vec[alive]]
-        missing = np.zeros(NUM_COMBOS, dtype=bool)
-        missing[alive] = row_missing[bucket_vec[alive]]
-        return sigma, missing
+        return rows[bucket_vec], row_missing[bucket_vec]
 
     def _bucket_vector(self, board: tuple[Card, ...], street: Street) -> np.ndarray:
         """Combo -> bucket id over ALL_COMBOS (-1 where blocked by the board)."""
