@@ -15,7 +15,7 @@ class TestRunTracker:
         config = Config.default()
         return ActionModel(config).get_config_hash()
 
-    def test_create_new_tracker(self, tmp_path):
+    def test_create_new_tracker(self, tmp_path, record):
         """Test creating a new run tracker."""
         run_dir = tmp_path / "run-test"
         config = Config.default()
@@ -25,6 +25,8 @@ class TestRunTracker:
             config_name="test",
             config=config,
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         )
 
         assert tracker.run_id == "run-test"
@@ -32,15 +34,17 @@ class TestRunTracker:
         assert tracker.metadata.status == "running"
         assert tracker.metadata.iterations == 0
 
-        # File should NOT exist yet (delayed creation)
-        metadata_file = run_dir / "run.jsonl"
-        assert not metadata_file.exists()
+        # Nothing recorded yet: construction is not creation, so a run that
+        # fails during setup leaves no record claiming it started.
+        assert record.events("run-test") == []
 
-        # Initialize to create file
         tracker.initialize()
-        assert metadata_file.exists()
+        assert [e["event"] for e in record.events("run-test")] == [
+            run_events.CREATED,
+            run_events.ATTEMPT_STARTED,
+        ]
 
-    def test_new_run_records_git_provenance(self, tmp_path):
+    def test_new_run_records_git_provenance(self, tmp_path, record):
         """A fresh run stamps the current git commit + dirty flag, surviving a round-trip."""
         run_dir = tmp_path / "run-git"
         tracker = RunTracker(
@@ -48,6 +52,8 @@ class TestRunTracker:
             config_name="test",
             config=Config.default(),
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         )
         # In this repo checkout the commit is a 40-char sha and dirty is a bool.
         commit = tracker.metadata.git_commit
@@ -55,11 +61,11 @@ class TestRunTracker:
         assert tracker.metadata.git_dirty in (True, False, None)
 
         tracker.initialize()
-        reloaded = RunTracker.load(run_dir)
+        reloaded = RunTracker.load(run_dir, record, record)
         assert reloaded.metadata.git_commit == tracker.metadata.git_commit
         assert reloaded.metadata.git_dirty == tracker.metadata.git_dirty
 
-    def test_legacy_metadata_without_git_loads_as_none(self, tmp_path):
+    def test_legacy_metadata_without_git_loads_as_none(self, tmp_path, record):
         """Pre-provenance runs (no git fields) must load with None, not crash."""
         run_dir = tmp_path / "run-legacy"
         run_dir.mkdir()
@@ -75,11 +81,11 @@ class TestRunTracker:
         }
         (run_dir / ".run.json").write_text(json.dumps(metadata))
         assert migrate_run_log(run_dir)
-        tracker = RunTracker.load(run_dir)
+        tracker = RunTracker.load(run_dir, record, record)
         assert tracker.metadata.git_commit is None
         assert tracker.metadata.git_dirty is None
 
-    def test_load_existing_tracker(self, tmp_path):
+    def test_load_existing_tracker(self, tmp_path, record):
         """Test loading an existing tracker."""
         run_dir = tmp_path / "run-existing"
         run_dir.mkdir()
@@ -99,13 +105,13 @@ class TestRunTracker:
         (run_dir / ".run.json").write_text(json.dumps(metadata))
         assert migrate_run_log(run_dir), "a legacy run dir must convert"
 
-        tracker = RunTracker.load(run_dir)
+        tracker = RunTracker.load(run_dir, record, record)
 
         assert tracker.run_id == "run-existing"
         assert tracker.metadata.status == "completed"
         assert tracker.metadata.iterations == 100
 
-    def test_update_progress(self, tmp_path):
+    def test_update_progress(self, tmp_path, record):
         """Test updating training progress."""
         run_dir = tmp_path / "run-update"
         tracker = RunTracker(
@@ -113,6 +119,8 @@ class TestRunTracker:
             config_name="test",
             config=Config.default(),
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         )
 
         tracker.update(
@@ -127,10 +135,10 @@ class TestRunTracker:
         assert tracker.metadata.num_infosets == 500
 
         # Verify persistence
-        tracker2 = RunTracker.load(run_dir)
+        tracker2 = RunTracker.load(run_dir, record, record)
         assert tracker2.metadata.iterations == 50
 
-    def test_mark_completed(self, tmp_path):
+    def test_mark_completed(self, tmp_path, record):
         """Test marking run as completed."""
         run_dir = tmp_path / "run-complete"
         tracker = RunTracker(
@@ -138,6 +146,8 @@ class TestRunTracker:
             config_name="test",
             config=Config.default(),
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         )
 
         tracker.mark_completed()
@@ -145,7 +155,7 @@ class TestRunTracker:
         assert tracker.metadata.status == "completed"
         assert tracker.metadata.completed_at is not None
 
-    def test_mark_failed(self, tmp_path):
+    def test_mark_failed(self, tmp_path, record):
         """Test marking run as failed."""
         run_dir = tmp_path / "run-failed"
         tracker = RunTracker(
@@ -153,6 +163,8 @@ class TestRunTracker:
             config_name="test",
             config=Config.default(),
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         )
 
         # Mark as failed with no iterations - should NOT create directory
@@ -165,6 +177,8 @@ class TestRunTracker:
             config_name="test",
             config=Config.default(),
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         )
         tracker2.update(iterations=5, runtime_seconds=1.0, num_infosets=100, storage_capacity=2000)
 
@@ -202,7 +216,7 @@ class TestRunTracker:
         runs = RunTracker.list_runs(tmp_path / "does-not-exist")
         assert runs == []
 
-    def test_load_legacy_metadata_without_attempts(self, tmp_path):
+    def test_load_legacy_metadata_without_attempts(self, tmp_path, record):
         """Pre-attempts .run.json (every frozen baseline on the Volume predates the
         attempts list) must still load — synthesizing one attempt — and resume on top.
 
@@ -228,7 +242,7 @@ class TestRunTracker:
         run_dir.mkdir()
         (run_dir / ".run.json").write_text(json.dumps(legacy))
         assert migrate_run_log(run_dir)
-        loaded = RunTracker.load(run_dir).metadata
+        loaded = RunTracker.load(run_dir, record, record).metadata
 
         assert len(loaded.attempts) == 1
         (attempt,) = loaded.attempts
@@ -259,58 +273,69 @@ def _metadata(**kw) -> RunMetadata:
 class TestTheRunLog:
     """A run is an append-only log; its state is the fold of that log."""
 
-    def _tracker(self, tmp_path, name="run-log"):
+    def _tracker(self, tmp_path, record, name="run-log"):
         return RunTracker(
             run_dir=tmp_path / name,
             config_name="quick_test",
             config=Config.default(),
             action_config_hash="abc123",
+            sink=record,
+            source=record,
         )
 
-    def test_creation_is_the_first_event(self, tmp_path):
+    def test_creation_is_the_first_event(self, tmp_path, record):
         """So a run listing answers identity from one line, not a whole fold."""
-        tracker = self._tracker(tmp_path)
+        tracker = self._tracker(tmp_path, record)
         tracker.initialize()
-        first = run_events.read(tracker.run_dir)[0]
+        first = record.events(tracker.run_id)[0]
         assert first["event"] == run_events.CREATED
         assert first["config_name"] == "quick_test"
 
-    def test_state_is_the_fold_of_the_events(self, tmp_path):
-        tracker = self._tracker(tmp_path)
+    def test_state_is_the_fold_of_the_events(self, tmp_path, record):
+        tracker = self._tracker(tmp_path, record)
         tracker.update(iterations=50, runtime_seconds=5.0, num_infosets=500, storage_capacity=2000)
         tracker.mark_completed()
 
-        reloaded = RunTracker.load(tracker.run_dir).metadata
+        reloaded = RunTracker.load(tracker.run_dir, record, record).metadata
         assert reloaded.iterations == 50
         assert reloaded.num_infosets == 500
         assert reloaded.status == "completed"
 
-    def test_nothing_is_ever_rewritten(self, tmp_path):
+    def test_nothing_is_ever_rewritten(self, tmp_path, record):
         """The append-only model removes the torn-write window entirely: a
         snapshot had to be rewritten in full on every update."""
-        tracker = self._tracker(tmp_path)
+        tracker = self._tracker(tmp_path, record)
         tracker.update(iterations=10, runtime_seconds=1.0, num_infosets=10, storage_capacity=100)
-        after_first = run_events.log_path(tracker.run_dir).read_text()
+        after_first = record.events(tracker.run_id)
         tracker.update(iterations=20, runtime_seconds=2.0, num_infosets=20, storage_capacity=100)
 
-        assert run_events.log_path(tracker.run_dir).read_text().startswith(after_first)
+        after_second = record.events(tracker.run_id)
+        assert after_second[: len(after_first)] == after_first
+        assert len(after_second) > len(after_first)
 
     def test_a_torn_final_line_costs_only_the_last_event(self, tmp_path):
-        tracker = self._tracker(tmp_path)
-        tracker.update(iterations=50, runtime_seconds=5.0, num_infosets=500, storage_capacity=2000)
-        with run_events.log_path(tracker.run_dir).open("a") as handle:
+        """Still a property of the FILE reader, which is the only thing that can
+        tear -- a legacy run's `run.jsonl` is read on every resume of it. The
+        tracker no longer writes one, so this asserts against `run_events`
+        directly rather than through a tracker that would answer from its
+        source and never open the file."""
+        run_dir = tmp_path / "run-torn"
+        run_dir.mkdir()
+        run_events.append(run_dir, run_events.CREATED, config_name="quick_test")
+        run_events.append(run_dir, "progress", iterations=50)
+        with run_events.log_path(run_dir).open("a") as handle:
             handle.write('{"event": "progress", "iterations": 99')
 
-        assert RunTracker.load(tracker.run_dir).metadata.iterations == 50
+        assert [e.get("iterations") for e in run_events.read(run_dir)] == [None, 50]
 
-    def test_a_resume_opens_a_second_attempt(self, tmp_path):
-        tracker = self._tracker(tmp_path)
+    def test_a_resume_opens_a_second_attempt(self, tmp_path, record):
+        tracker = self._tracker(tmp_path, record)
         tracker.update(iterations=50, runtime_seconds=5.0, num_infosets=500, storage_capacity=2000)
         tracker.mark_completed()
 
-        again = RunTracker.load(tracker.run_dir)
+        again = RunTracker.load(tracker.run_dir, record, record)
         again.mark_resumed()
-        assert len(RunTracker.load(tracker.run_dir).metadata.attempts) == 2
+        assert len(RunTracker.load(tracker.run_dir, record, record).metadata.attempts) == 2
 
 
 class TestMigrationFromTheSnapshotLayout:
@@ -331,11 +356,11 @@ class TestMigrationFromTheSnapshotLayout:
         (run_dir / ".run.json").write_text(json.dumps(payload))
         return run_dir
 
-    def test_the_fold_reproduces_the_snapshot(self, tmp_path):
+    def test_the_fold_reproduces_the_snapshot(self, tmp_path, record):
         run_dir = self._legacy(tmp_path)
         before = RunMetadata.from_dict(json.loads((run_dir / ".run.json").read_text()))
         assert migrate_run_log(run_dir)
-        after = RunTracker.load(run_dir).metadata
+        after = RunTracker.load(run_dir, record, record).metadata
 
         assert (after.run_id, after.iterations, after.status) == (
             before.run_id,
@@ -375,7 +400,7 @@ class TestFieldsAreScopedToTheEventThatOwnsThem:
     training folded back as `died` because their last closed attempt had.
     """
 
-    def test_a_dead_attempt_does_not_make_the_run_dead(self, tmp_path):
+    def test_a_dead_attempt_does_not_make_the_run_dead(self, tmp_path, record):
         run_dir = tmp_path / "run-a"
         run_dir.mkdir()
         metadata = RunMetadata.new(
@@ -387,11 +412,11 @@ class TestFieldsAreScopedToTheEventThatOwnsThem:
         run_events.append(run_dir, run_events.ATTEMPT_STARTED, index=1, kind="resume", start_iter=5)
         run_events.append(run_dir, run_events.PROGRESS, iterations=10, num_infosets=5)
 
-        folded = RunTracker.load(run_dir).metadata
+        folded = RunTracker.load(run_dir, record, record).metadata
         assert folded.status == "running", "the run is still training"
         assert folded.attempts[0].status == "died", "but its first attempt died"
 
-    def test_the_run_status_comes_only_from_a_status_event(self, tmp_path):
+    def test_the_run_status_comes_only_from_a_status_event(self, tmp_path, record):
         run_dir = tmp_path / "run-b"
         run_dir.mkdir()
         metadata = RunMetadata.new(
@@ -402,7 +427,7 @@ class TestFieldsAreScopedToTheEventThatOwnsThem:
         run_events.append(run_dir, run_events.ATTEMPT_ENDED, index=0, status="interrupted")
         run_events.append(run_dir, run_events.STATUS, status="completed", iterations=99)
 
-        assert RunTracker.load(run_dir).metadata.status == "completed"
+        assert RunTracker.load(run_dir, record, record).metadata.status == "completed"
 
 
 class TestRunsWrittenBeforeTheLog:
@@ -454,7 +479,7 @@ class TestResumeDetectionSeesBothLayouts:
 
 
 class TestReapingSurvivesTheFold:
-    def test_a_reaped_attempt_stays_dead(self, tmp_path):
+    def test_a_reaped_attempt_stays_dead(self, tmp_path, record):
         """Emitted only as attempt_started, the fold left every reaped attempt
         `running` -- the exact symptom the reaping exists to fix."""
         tracker = RunTracker(
@@ -462,40 +487,46 @@ class TestReapingSurvivesTheFold:
             config_name="quick_test",
             config=Config.default(),
             action_config_hash="abc123",
+            sink=record,
+            source=record,
         )
         tracker.update(iterations=50, runtime_seconds=9.0, num_infosets=5, storage_capacity=100)
 
-        again = RunTracker.load(tracker.run_dir)
+        again = RunTracker.load(tracker.run_dir, record, record)
         again.mark_resumed()
 
-        attempts = RunTracker.load(tracker.run_dir).metadata.attempts
+        attempts = RunTracker.load(tracker.run_dir, record, record).metadata.attempts
         assert [a.status for a in attempts] == ["died", "running"]
         assert attempts[0].runtime_seconds == 9.0, "and keeps the compute it did"
 
-    def test_one_resume_makes_exactly_one_new_attempt(self, tmp_path):
+    def test_one_resume_makes_exactly_one_new_attempt(self, tmp_path, record):
         tracker = RunTracker(
             run_dir=tmp_path / "run-b",
             config_name="quick_test",
             config=Config.default(),
             action_config_hash="abc123",
+            sink=record,
+            source=record,
         )
         tracker.update(iterations=10, runtime_seconds=1.0, num_infosets=5, storage_capacity=100)
         tracker.mark_completed()
 
-        RunTracker.load(tracker.run_dir).mark_resumed()
-        assert len(RunTracker.load(tracker.run_dir).metadata.attempts) == 2
+        RunTracker.load(tracker.run_dir, record, record).mark_resumed()
+        assert len(RunTracker.load(tracker.run_dir, record, record).metadata.attempts) == 2
 
-    def test_a_task_that_died_early_does_not_inherit_the_previous_runtime(self, tmp_path):
+    def test_a_task_that_died_early_does_not_inherit_the_previous_runtime(self, tmp_path, record):
         tracker = RunTracker(
             run_dir=tmp_path / "run-c",
             config_name="quick_test",
             config=Config.default(),
             action_config_hash="abc123",
+            sink=record,
+            source=record,
         )
         tracker.update(iterations=50, runtime_seconds=99.0, num_infosets=5, storage_capacity=100)
-        RunTracker.load(tracker.run_dir).mark_resumed()
+        RunTracker.load(tracker.run_dir, record, record).mark_resumed()
 
-        live = RunTracker.load(tracker.run_dir).metadata.attempts[-1]
+        live = RunTracker.load(tracker.run_dir, record, record).metadata.attempts[-1]
         assert live.runtime_seconds == 0.0, "this task has checkpointed nothing yet"
 
 
@@ -522,17 +553,17 @@ class TestLegacyResumeWithoutMigration:
         (run_dir / ".run.json").write_text(json.dumps(metadata.to_dict()))
         return run_dir, metadata
 
-    def test_the_replay_preserves_runtime_and_attempt_outcomes(self, tmp_path):
+    def test_the_replay_preserves_runtime_and_attempt_outcomes(self, tmp_path, record):
         run_dir, before = self._two_finished_attempts(tmp_path)
 
-        RunTracker.load(run_dir).initialize()
+        RunTracker.load(run_dir, record, record).initialize()
         after = RunMetadata.load(run_dir)
 
         assert after.runtime_seconds == before.runtime_seconds, "compute time survives the replay"
         assert [a.status for a in after.attempts] == [a.status for a in before.attempts]
         assert len(after.attempts) == 2, "no attempt is duplicated or invented"
 
-    def test_an_attempt_killed_mid_flight_stays_open(self, tmp_path):
+    def test_an_attempt_killed_mid_flight_stays_open(self, tmp_path, record):
         """`status=running` with a null `ended_at` is how a died attempt is
         recognised; closing it with an invented timestamp erases that."""
         run_dir, _ = self._two_finished_attempts(tmp_path)
@@ -540,8 +571,8 @@ class TestLegacyResumeWithoutMigration:
         payload["attempts"][-1].update(status="running", ended_at=None)
         (run_dir / ".run.json").write_text(json.dumps(payload))
 
-        RunTracker.load(run_dir).initialize()
-        events = run_events.read(run_dir)
+        RunTracker.load(run_dir, record, record).initialize()
+        events = record.events(run_dir.name)
 
         ended = run_events.events_of(events, run_events.ATTEMPT_ENDED)
         assert [e["index"] for e in ended] == [0], "only the attempt that truly closed"
@@ -575,7 +606,7 @@ class TestWhichWorktreeTrainedIt:
             "worktree-hybrid-kernels"
         )
 
-    def test_a_resumed_attempt_carries_it_too(self, monkeypatch, tmp_path):
+    def test_a_resumed_attempt_carries_it_too(self, monkeypatch, tmp_path, record):
         """The measured hole: `mark_resumed` recorded commit and dirty but not
         branch or snapshot, so the provenance per-attempt records exist FOR was
         null on every resume -- and a resume from another worktree is exactly
@@ -589,14 +620,16 @@ class TestWhichWorktreeTrainedIt:
             config_name="quick_test",
             config=Config.default(),
             action_config_hash="abc123",
+            sink=record,
+            source=record,
         )
         tracker.update(iterations=10, runtime_seconds=1.0, num_infosets=5, storage_capacity=100)
 
         monkeypatch.setattr(metadata_module, "get_git_branch", lambda: "worktree-b")
         monkeypatch.setattr(metadata_module, "get_code_snapshot", lambda: "code-20260202_000000")
-        RunTracker.load(tracker.run_dir).mark_resumed()
+        RunTracker.load(tracker.run_dir, record, record).mark_resumed()
 
-        resumed = RunTracker.load(tracker.run_dir).metadata.attempts[-1]
+        resumed = RunTracker.load(tracker.run_dir, record, record).metadata.attempts[-1]
         assert resumed.kind == "resume"
         assert resumed.git_branch == "worktree-b"
         assert resumed.code_snapshot == "code-20260202_000000"
@@ -612,7 +645,7 @@ class TestWhichWorktreeTrainedIt:
         assert restored.git_branch == "worktree-hybrid-kernels"
         assert restored.attempts[0].git_branch == "worktree-hybrid-kernels"
 
-    def test_it_survives_the_event_log(self, monkeypatch, tmp_path):
+    def test_it_survives_the_event_log(self, monkeypatch, tmp_path, record):
         """The log is the source of truth; a field only in `to_dict` is lost."""
         from src.pipeline.training.run_tracker import metadata as metadata_module
 
@@ -625,9 +658,11 @@ class TestWhichWorktreeTrainedIt:
             config_name="test",
             config=Config.default(),
             action_config_hash=self._action_config_hash(),
+            sink=record,
+            source=record,
         ).initialize()
 
-        folded = RunMetadata.from_events(run_events.read(run_dir))
+        folded = RunMetadata.from_events(record.events("run-x"))
 
         assert folded.git_branch == "worktree-vector-cfr"
         assert folded.attempts[0].git_branch == "worktree-vector-cfr"

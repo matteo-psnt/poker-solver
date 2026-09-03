@@ -12,6 +12,7 @@ from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
 from src.pipeline.training.run_tracker import RunMetadata, RunTracker
 from src.shared import records
 from src.shared.gitinfo import commits_ahead_of
+from src.shared.ports.record import RecordSource
 
 
 def checkpoint_iteration_of(run_dir: Path, at_iteration: int | None = None) -> int | None:
@@ -118,7 +119,10 @@ def describe_runs(runs_dir: Path) -> list[RunSummary]:
     return [_summarize_run(runs_dir, name) for name in reversed(names)]
 
 
-def load_run_metadata(run_dir: Path) -> RunMetadata:
-    """Load run metadata from an existing run directory."""
-    tracker = RunTracker.load(run_dir)
-    return tracker.metadata
+def load_run_metadata(run_dir: Path, source: RecordSource | None = None) -> RunMetadata:
+    """Load run metadata, from whichever store holds the run.
+
+    `source` is asked first. Once the log stops being published, a run
+    directory holds its checkpoints and nothing that says what they are.
+    """
+    return RunTracker.load(run_dir, source).metadata

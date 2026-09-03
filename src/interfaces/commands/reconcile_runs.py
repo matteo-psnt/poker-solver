@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from src.adapters.postgres import connect
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command, records_root
 from src.shared import records, run_events, task_history
@@ -32,6 +33,8 @@ from src.shared import records, run_events, task_history
 if TYPE_CHECKING:
     import argparse
     from pathlib import Path
+
+    from src.shared.ports.record import RecordSource
 
 # A run is closable only when EVERY task speaking for it has settled, tested
 # POSITIVELY against `task_history.TERMINAL_CAUSES` -- the same set that already
@@ -105,7 +108,7 @@ class ReconcilePlan(BaseModel):
     written: int = 0
 
 
-def _status_of(run_dir: Path) -> str:
+def _status_of(run_dir: Path, source: RecordSource | None) -> str:
     """The run's own last word, through the fold that reads BOTH layouts.
 
     Not a raw scan of `run.jsonl`. A run written before the event log has a
@@ -122,7 +125,7 @@ def _status_of(run_dir: Path) -> str:
     from src.pipeline.training.run_tracker.metadata import RunMetadata  # noqa: PLC0415
 
     try:
-        return RunMetadata.load(run_dir).status or "unknown"
+        return RunMetadata.load(run_dir, source).status or "unknown"
     except (OSError, ValueError, KeyError):
         return "unknown"
 
@@ -134,6 +137,7 @@ def run(args: argparse.Namespace) -> ReconcilePlan:
 
     config = CloudConfig.load()
     service = share.share_client(config)
+    source = connect.record_source_from_environment()
 
     # Through `tasks`, not `task_history.read_tasks`, and that is the whole
     # point: `tasks` materialises legs/ AND reconciles the unresolved ones
@@ -156,7 +160,7 @@ def run(args: argparse.Namespace) -> ReconcilePlan:
         plan.runs_considered = len(wanted)
 
         for run_dir in wanted:
-            if _status_of(run_dir) != "running":
+            if _status_of(run_dir, source) != "running":
                 continue
             plan.open_runs += 1
             tasks = by_run.get(run_dir.name, [])

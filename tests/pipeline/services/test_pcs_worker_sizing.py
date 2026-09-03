@@ -22,6 +22,7 @@ from src.pipeline.training.pcs_parallel import (
     ram_safe_workers,
     worker_bytes,
 )
+from tests.memory_record import MemoryRecord
 from tests.pipeline.training.test_static_parallel import Buckets
 from tests.test_helpers import make_test_config
 
@@ -86,7 +87,7 @@ def test_train_pcs_hands_the_kernel_count_to_the_clamp(monkeypatch, tmp_path):
 
     seen: dict[str, object] = {}
 
-    def record(tree, num_terminals, **kwargs):
+    def capture(tree, num_terminals, **kwargs):
         seen.update(kwargs)
         raise StopError
 
@@ -94,13 +95,16 @@ def test_train_pcs_hands_the_kernel_count_to_the_clamp(monkeypatch, tmp_path):
     monkeypatch.setattr(
         pcs_training.blueprint, "resolve_card_abstraction_hash", lambda _c: "stub-abstraction"
     )
-    monkeypatch.setattr(pcs_training.pcs_parallel, "ram_safe_workers", record)
+    monkeypatch.setattr(pcs_training.pcs_parallel, "ram_safe_workers", capture)
 
     with pytest.raises(StopError):
         pcs_training.train_pcs(
             "quick_test",
             iterations=1,
             runs_dir=tmp_path,
+            # A tracker with no sink records nowhere and refuses; the clamp is
+            # reached well after the run is opened.
+            sink=MemoryRecord(),
             config_overrides={
                 "pcs__cfr_br": "turn_river",
                 "pcs__runout_mode": "turn",

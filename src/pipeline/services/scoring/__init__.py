@@ -42,7 +42,7 @@ from src.shared import records
 
 # At runtime, not under TYPE_CHECKING: this module has no postponed
 # annotations, and `ports` is Protocols with no imports of its own.
-from src.shared.ports.record import EvalSink
+from src.shared.ports.record import EvalSink, RecordSource
 
 PROGRESS_ARTIFACT = "evaluate-progress.json"
 
@@ -89,6 +89,7 @@ def evaluate_and_record(
     progress_file: Path | None = None,
     policy_profile: bool = False,
     sink: EvalSink | None = None,
+    record_source: RecordSource | None = None,
 ) -> EvaluationPayload:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
 
@@ -117,6 +118,7 @@ def evaluate_and_record(
             # minutes and made a long score look exactly like a hung one.
             on_branch=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             policy_profile=policy_profile,
+            record_source=record_source,
         )
         estimator = EXACT_BR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_exact_br_knobs_from_params(
@@ -150,6 +152,7 @@ def evaluate_and_record(
             leaf_rollouts=resolver_leaf_rollouts,
             workers=resolver_gate_workers,
             allin_runouts=resolver_allin_runouts,
+            record_source=record_source,
         )
         estimator = RESOLVER_GATE_ESTIMATOR_LABEL
         knobs = eval_ledger.build_resolver_match_knobs(out.results)
@@ -163,6 +166,7 @@ def evaluate_and_record(
             resolver_blend_alpha=resolver_blend_alpha,
             abstraction_hash=abstraction_hash,
             at_iteration=at_iteration,
+            record_source=record_source,
         )
         estimator = LBR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_lbr_knobs(config, out.results)
@@ -176,7 +180,7 @@ def evaluate_and_record(
         tree_fingerprint=out.tree_fingerprint,
     )
     try:
-        metadata = load_run_metadata(run_dir)
+        metadata = load_run_metadata(run_dir, record_source)
         result_path, document = eval_ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload.model_dump(),

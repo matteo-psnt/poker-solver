@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
     ledger_for,
@@ -73,6 +74,7 @@ def run(args: argparse.Namespace) -> RunInfoPayload:
             ledger_path=ledger_for(root),
             tier_index=args.tier,
             tasks_dir=Path(args.tasks_dir) if args.tasks_dir else None,
+            record_source=connect.record_source_from_environment(),
         )
     fields = digest.model_dump()
     # Trimmed to the tail: a 30M run has thirty checkpoints and the reader wants

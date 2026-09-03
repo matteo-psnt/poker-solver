@@ -9,6 +9,7 @@ from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig, co
 from src.pipeline.evaluation.policy_profile import profile_policy
 from src.pipeline.services.runs import checkpoint_iteration_of
 from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
+from src.shared.ports.record import RecordSource
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ def evaluate_run_exact_br(
     at_iteration: int | None = None,
     on_branch: Callable[[int, int], None] | None = None,
     policy_profile: bool = False,
+    record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Exact best response on the sampled public tree (deterministic point value).
 
@@ -59,6 +61,7 @@ def evaluate_run_exact_br(
         config.avg_window_from,
         config.avg_gamma,
         (config.mix_run, config.mix_at, config.mix_weight),
+        record_source,
     )
     metadata, solver, storage, factory = (
         prepared.metadata,

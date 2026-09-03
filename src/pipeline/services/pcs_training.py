@@ -25,9 +25,9 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.vector import compile_tree
 from src.pipeline import blueprint
 from src.pipeline.training import pcs_parallel
-from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
+from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
 from src.pipeline.training.static_parallel import train_static_parallel
-from src.shared import records, run_events
+from src.shared import records
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
@@ -134,13 +134,17 @@ def train_pcs(
     if run_id is None:
         run_id = f"pcs-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
-    resuming = run_events.log_path(run_dir).exists() or (run_dir / ".run.json").exists()
+    # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
+    # written, so a directory check answers `False` for every run created
+    # after the flip -- which mints fresh metadata over a live ladder and
+    # restarts training from zero.
+    resuming = has_run_record(run_dir, record_source)
 
     action_model = ActionModel(config)
     abstraction = blueprint.build_card_abstraction(config)
     abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
     if resuming:
-        tracker = RunTracker.load(run_dir, record_source)
+        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(

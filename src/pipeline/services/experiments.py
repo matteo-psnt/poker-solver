@@ -17,6 +17,7 @@ from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared import records, run_events, task_history
 from src.shared.cloudtask.node import archive
+from src.shared.ports.record import RecordSource
 
 
 class CurvePoint(BaseModel):
@@ -355,14 +356,22 @@ def run_digest(
     ledger_path: Path,
     tier_index: int = 0,
     tasks_dir: Path | None = None,
+    record_source: RecordSource | None = None,
 ) -> RunDigest:
     """Join every record this run left behind. Pure reader.
 
     ``tasks_dir`` points at a local copy of the share's ``legs/`` (``just fetch``
     brings one down). Omitted for a purely local run, which has no tasks.
     """
-    metadata = load_run_metadata(run_dir)
-    progress = run_events.checkpoints(run_events.read(run_dir))
+    metadata = load_run_metadata(run_dir, record_source)
+    # The checkpoint series, from the store that holds it. `run_events.read`
+    # answers from a file that a published run no longer has.
+    recorded = (
+        [dict(event) for event in record_source.events(run_dir.name)]
+        if record_source is not None
+        else []
+    )
+    progress = run_events.checkpoints(recorded or run_events.read(run_dir))
     curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
     tasks = (
         [row for row in task_history.read_tasks(tasks_dir) if row.run_id == run_dir.name]
