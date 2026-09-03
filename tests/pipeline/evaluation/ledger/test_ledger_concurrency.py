@@ -46,7 +46,11 @@ def _record_one(run_dir: Path, index: int):
             "pair_samples_mbb": [1.0, 2.0],
         },
     }
-    return ledger.record_evaluation(
+    # BUILD, then WRITE. `record_evaluation` no longer writes anything, but
+    # every rule below -- unique naming, rebuild-by-glob, payload resolution --
+    # is about the FILE LAYOUT, which still governs the pre-flip corpus and the
+    # blueprint-match payloads `write_eval` goes on producing.
+    eval_id, document = ledger.record_evaluation(
         run_dir=run_dir,
         payload=payload,
         provenance=_provenance(run_dir.name),
@@ -54,6 +58,7 @@ def _record_one(run_dir: Path, index: int):
         estimator="lbr",
         knobs=knobs,
     )
+    return ledger.write_eval(run_dir, document, eval_id), document
 
 
 class TestUniqueNaming:
