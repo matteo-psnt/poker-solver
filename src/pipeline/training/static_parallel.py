@@ -39,7 +39,6 @@ from src.engine.solver.mccfr.static_solver import StaticTreeSolver
 from src.engine.solver.storage.static_array import StaticArrayStorage
 from src.engine.solver.storage.static_checkpoint import load_checkpoint, save_checkpoint
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
-from src.shared import run_events
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
@@ -265,24 +264,23 @@ class _ProgressReporter:
             logger.warning("Could not publish training progress; training continues.")
 
 
-def _append_checkpoint_event(checkpoint_dir: Path, **fields: Any) -> None:
-    """Append the mid-flight row to the log and NOTHING ELSE.
+def _unrecorded_checkpoint(checkpoint_dir: Path, **fields: Any) -> None:
+    """Log the mid-flight row for a caller with no tracker, and record nothing.
 
-    The fallback for a caller with no tracker -- tests, and anything driving the
-    trainer directly. A run that has one passes `on_checkpoint` instead, because
-    this reaches the file only: it was the one event the record sink never saw,
-    which left `progress` reading checkpoint events out of a database that had
-    none for any run since the last import.
+    This used to append the row to `run.jsonl`, which is now WORSE than doing
+    nothing: nothing else writes that file any more, so a direct-drive caller
+    would create one holding checkpoints and no `created` event -- and
+    `has_run_record` answers True on a file that exists, so the next resume
+    would find a run whose fold raises `run log has no 'created' event` instead
+    of one it can simply start.
 
-    `records.append_log` propagates on purpose, so its callers can choose. Here
-    the choice is clear: this runs immediately AFTER `save_checkpoint` succeeded,
-    so a full disk or an IO error on `run.jsonl` would throw away a good rung and
-    mark the run failed over telemetry.
+    A run with a tracker passes `on_checkpoint` and never reaches here.
     """
-    try:
-        run_events.append(checkpoint_dir, run_events.CHECKPOINT, **fields)
-    except Exception:  # telemetry must not fail a checkpoint already written
-        logger.warning("Could not record the checkpoint event; training continues.", exc_info=True)
+    logger.info(
+        "[static] checkpoint at %s not recorded: no tracker driving this run (%s)",
+        fields.get("iteration"),
+        checkpoint_dir.name,
+    )
 
 
 REAP_POLL_SECONDS = 30.0
@@ -500,11 +498,10 @@ def train_static_parallel(
                 # After save_checkpoint, so a row never describes state the
                 # arrays did not reach.
                 task_elapsed = time.time() - started
-                # The tracker's when a run has one, so the event reaches the
-                # sink as well as the log; the file-only append otherwise.
-                record_checkpoint = on_checkpoint or partial(
-                    _append_checkpoint_event, checkpoint_dir
-                )
+                # The tracker's when a run has one -- the sink is the only
+                # place a checkpoint lands. A caller with no tracker gets a
+                # log line, because there is nowhere else to put it.
+                record_checkpoint = on_checkpoint or partial(_unrecorded_checkpoint, checkpoint_dir)
                 record_checkpoint(
                     ts=datetime.now(UTC).isoformat(),
                     iteration=done,
