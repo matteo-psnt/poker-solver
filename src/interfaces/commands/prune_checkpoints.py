@@ -22,7 +22,6 @@ from pydantic import BaseModel
 from src.adapters.postgres import connect
 from src.interfaces.commands._base import Command, records_root, resolve_run_dir
 from src.interfaces.errors import CommandError
-from src.shared import run_events
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -108,25 +107,25 @@ def _scored_iterations(run_dir: Path) -> set[int]:
 def _is_terminal(run_dir: Path, source: RecordSource | None) -> bool:
     """Whether the run has stopped writing, defaulting to NO.
 
-    A run still training publishes new rungs, and its newest may be mid-copy.
-    Read through `run_events` rather than the file: a bare scan for `status`
-    returns the last ATTEMPT's, and an attempt that ended `died` under a run
-    still training would read as terminal here -- which is the direction that
-    deletes a live ladder. `kind=STATUS` is what separates the two facts, and
-    the default is `running` so an unreadable record protects rather than
-    prunes.
+    Through `RunMetadata.load`, which is the ONE place that knows all three
+    layouts -- the source, the event log, and the `.run.json` a run written
+    before the log carries. This folded the events itself and therefore could
+    not see a legacy run's status at all: `tail_value` handed back its
+    `running` default, and 9 completed runs holding 44 rungs were protected as
+    "still running" forever. `reconcile-runs._status_of` already asked the
+    question this way; two answers to "is this run finished" is one too many.
+
+    The scoping matters and comes free with the fold: a run still training
+    publishes new rungs and an ATTEMPT that ended `died` under it must not read
+    as the run's own terminal state -- that is the direction that deletes a live
+    ladder. An unreadable record protects rather than prunes.
     """
+    from src.pipeline.training.run_tracker.metadata import RunMetadata  # noqa: PLC0415
+
     try:
-        # `or`, not a branch on the source EXISTING: a run written before the
-        # flip lives only in `run.jsonl`, and committing to an empty source for
-        # it makes `tail_value` return its `running` default -- so every
-        # pre-flip run the backfill missed reads as protected forever, and it
-        # reads later as prune having stopped working.
-        recorded = [dict(e) for e in source.events(run_dir.name)] if source else []
-        events = recorded or run_events.read(run_dir)
-    except (OSError, ValueError):
+        status = RunMetadata.load(run_dir, source).status or "running"
+    except (OSError, ValueError, KeyError):
         return False
-    status = run_events.tail_value(events, "status", "running", kind=run_events.STATUS)
     # `abandoned` is `reconcile-runs`' word for a run whose last task exited
     # cleanly and was never continued. It stopped, which is all this asks.
     return status in {"completed", "failed", "cancelled", "abandoned"}
