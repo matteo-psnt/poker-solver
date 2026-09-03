@@ -52,14 +52,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--pool",
         choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it. USE train (D16) UNLESS YOU CAN SAY WHY NOT. Per "
-        "dollar it beats big 2.8x, huge 5.5x and mem 28x on PCS -- and huge is not "
-        "even faster in absolute terms, because PCS hits a DRAM-latency ceiling "
-        "long before it runs out of cores. The big boxes buy RAM, not speed: take "
-        "huge/mem only when ONE node must hold workers a D16's 32 GiB cannot, such "
-        "as a 200 bb run. PCS workers share one table per node, so that is the "
-        "only thing more nodes cannot substitute for; N independent arms are N "
-        "D16s, never one D64.",
+        help="Which pool runs it: train (D16), big (D32), huge (D64) or mem (E64, "
+        "512 GB -- the only one that fits a 200 bb PCS run's workers). SCALAR is "
+        "settled and BIGGER WINS: ~60k it/s at D16/15w, ~115k at D32/31w, ~152k at "
+        "D64/63w, a ratio that RISES with run length, at 0.88 efficiency per billed "
+        "vCPU -- so under 'wall-clock is the scarce thing' take the big box for a "
+        "long run. PCS is NOT settled: its RAM clamp leaves every D box at ~25-28% "
+        "of its cores, which predicts a wash per dollar, while task-level history "
+        "says train is severalfold cheaper. Those disagree and the history is "
+        "confounded by task length, so until a same-wave A/B settles it prefer "
+        "train for PCS and spread N arms over N nodes rather than stacking one.",
     )
     parser.add_argument(
         "--workers",
