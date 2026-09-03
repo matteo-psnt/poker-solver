@@ -2662,11 +2662,6 @@
             "title": "Code Snapshot",
             "type": "string"
           },
-          "dual_write": {
-            "default": false,
-            "title": "Dual Write",
-            "type": "boolean"
-          },
           "force": {
             "default": false,
             "title": "Force",
@@ -2681,6 +2676,11 @@
             "default": "submit-precompute",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "target_name": {
             "title": "Target Name",
@@ -3596,11 +3596,6 @@
             "title": "Code Snapshot",
             "type": "string"
           },
-          "dual_write": {
-            "default": false,
-            "title": "Dual Write",
-            "type": "boolean"
-          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -3614,6 +3609,11 @@
             "default": "score",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "run_id": {
             "title": "Run Id",
@@ -4067,11 +4067,6 @@
             "title": "Code Snapshot",
             "type": "string"
           },
-          "dual_write": {
-            "default": false,
-            "title": "Dual Write",
-            "type": "boolean"
-          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -4081,6 +4076,11 @@
             "default": "submit-coupling",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "tasks": {
             "default": [],
@@ -4105,11 +4105,6 @@
             "title": "Code Snapshot",
             "type": "string"
           },
-          "dual_write": {
-            "default": false,
-            "title": "Dual Write",
-            "type": "boolean"
-          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -4119,6 +4114,11 @@
             "default": "submit",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "target_iteration": {
             "title": "Target Iteration",
@@ -4290,11 +4290,6 @@
             "title": "Code Snapshot",
             "type": "string"
           },
-          "dual_write": {
-            "default": false,
-            "title": "Dual Write",
-            "type": "boolean"
-          },
           "job_id": {
             "title": "Job Id",
             "type": "string"
@@ -4304,6 +4299,11 @@
             "default": "submit-vector",
             "title": "Op",
             "type": "string"
+          },
+          "records_to_database": {
+            "default": false,
+            "title": "Records To Database",
+            "type": "boolean"
           },
           "tasks": {
             "default": [],

@@ -1821,11 +1821,6 @@ export interface components {
             /** Code Snapshot */
             code_snapshot: string;
             /**
-             * Dual Write
-             * @default false
-             */
-            dual_write: boolean;
-            /**
              * Force
              * @default false
              */
@@ -1838,6 +1833,11 @@ export interface components {
              * @constant
              */
             op: "submit-precompute";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /** Target Name */
             target_name: string;
             /**
@@ -2218,11 +2218,6 @@ export interface components {
         ScorePayload: {
             /** Code Snapshot */
             code_snapshot: string;
-            /**
-             * Dual Write
-             * @default false
-             */
-            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /** Method */
@@ -2233,6 +2228,11 @@ export interface components {
              * @constant
              */
             op: "score";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /** Run Id */
             run_id: string;
             /** Rungs */
@@ -2350,11 +2350,6 @@ export interface components {
             boards: number;
             /** Code Snapshot */
             code_snapshot: string;
-            /**
-             * Dual Write
-             * @default false
-             */
-            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /**
@@ -2363,6 +2358,11 @@ export interface components {
              * @constant
              */
             op: "submit-coupling";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /**
              * Tasks
              * @default []
@@ -2376,11 +2376,6 @@ export interface components {
         SubmitPayload: {
             /** Code Snapshot */
             code_snapshot: string;
-            /**
-             * Dual Write
-             * @default false
-             */
-            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /**
@@ -2389,6 +2384,11 @@ export interface components {
              * @constant
              */
             op: "submit";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /** Target Iteration */
             target_iteration: number;
             /**
@@ -2435,11 +2435,6 @@ export interface components {
             arms?: components["schemas"]["VectorArm"][];
             /** Code Snapshot */
             code_snapshot: string;
-            /**
-             * Dual Write
-             * @default false
-             */
-            dual_write: boolean;
             /** Job Id */
             job_id: string;
             /**
@@ -2448,6 +2443,11 @@ export interface components {
              * @constant
              */
             op: "submit-vector";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /**
              * Tasks
              * @default []
