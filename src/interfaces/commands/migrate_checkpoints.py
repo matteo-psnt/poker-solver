@@ -79,6 +79,7 @@ class MigratedPayload(BaseModel):
 def run(args: argparse.Namespace) -> MigratedPayload:
     """Walk the share's archive and upload every rung the container lacks."""
     import os  # noqa: PLC0415 -- node-only, and only when actually migrating
+    import time  # noqa: PLC0415 -- see above
     from pathlib import Path  # noqa: PLC0415 -- see above
 
     from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- see above
@@ -96,16 +97,38 @@ def run(args: argparse.Namespace) -> MigratedPayload:
 
     payload = MigratedPayload(verified=bool(args.verify))
     wanted = set(args.runs or [])
-    for run_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+    # TIMED AND PRINTED AT EVERY STAGE, because the first version of this
+    # printed only after a successful upload and told me nothing when it spent
+    # thirty minutes reaching zero. Reading a share directory is latency-bound
+    # and this project has lost hours to reasoning about that instead of
+    # measuring it.
+    started = time.monotonic()
+    listed = sorted(p for p in root.iterdir() if p.is_dir())
+    print(f"listed {len(listed)} run(s) in {time.monotonic() - started:.1f}s", flush=True)
+    for run_dir in listed:
         if wanted and run_dir.name not in wanted:
             continue
         payload.runs_considered += 1
-        for snapshot in sorted(_snapshots(run_dir)):
+        at = time.monotonic()
+        snapshots = sorted(_snapshots(run_dir))
+        if snapshots:
+            print(
+                f"{run_dir.name}: {len(snapshots)} rung(s), listed in {time.monotonic() - at:.1f}s",
+                flush=True,
+            )
+        for snapshot in snapshots:
             if args.limit and payload.rungs_uploaded >= args.limit:
                 payload.stopped_early = True
                 return payload
             try:
-                if blobstore.exists(sas, run_dir.name, snapshot):
+                at = time.monotonic()
+                present = blobstore.exists(sas, run_dir.name, snapshot)
+                print(
+                    f"  {snapshot}: HEAD {time.monotonic() - at:.1f}s -> "
+                    f"{'present' if present else 'absent'}",
+                    flush=True,
+                )
+                if present:
                     payload.rungs_already_there += 1
                     continue
                 if args.verify:
@@ -118,14 +141,17 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 if not (run_dir / archive.marker_for(snapshot)).exists():
                     payload.failures.append(f"{run_dir.name}/{snapshot}: no completion marker")
                     continue
-                payload.bytes_uploaded += blobstore.put_rung(
-                    sas, run_dir.name, snapshot, run_dir / snapshot
+                at = time.monotonic()
+                size = blobstore.put_rung(sas, run_dir.name, snapshot, run_dir / snapshot)
+                payload.bytes_uploaded += size
+                print(
+                    f"  {snapshot}: {size / 1024**2:.0f} MiB in {time.monotonic() - at:.1f}s",
+                    flush=True,
                 )
             except Exception as error:  # noqa: BLE001 -- one bad rung must not end the sweep
                 payload.failures.append(f"{run_dir.name}/{snapshot}: {type(error).__name__}")
                 continue
             payload.rungs_uploaded += 1
-            print(f"  {run_dir.name}/{snapshot}", flush=True)
     return payload
 
 
