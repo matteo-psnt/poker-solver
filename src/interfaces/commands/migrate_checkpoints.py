@@ -95,6 +95,9 @@ def run(args: argparse.Namespace) -> MigratedPayload:
     if not root.is_dir():
         raise CommandError(f"no archive directory at {root}")
 
+    # Node-local scratch: staging is the point, so it must not be on the share.
+    work = Path(os.environ.get("RUN_WORK_DIR") or "/mnt/work") / "migrate-staging"
+    work.mkdir(parents=True, exist_ok=True)
     payload = MigratedPayload(verified=bool(args.verify))
     wanted = set(args.runs or [])
     # TIMED AND PRINTED AT EVERY STAGE, because the first version of this
@@ -153,6 +156,41 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 continue
             payload.rungs_uploaded += 1
     return payload
+
+
+def _upload(sas: str, run_dir: Path, snapshot: str, work: Path) -> int:
+    """Stage the rung to LOCAL DISK, then tar and upload it from there.
+
+    THE WHOLE COST IS PER-FILE LATENCY, not bytes. A rung is ~4,200 zarr chunk
+    files and `tarfile.add` walks them SERIALLY: over SMB that is minutes per
+    rung, and the first sweep spent its entire 30-minute budget without
+    finishing one. Across ~1,200 rungs it is five million round trips.
+
+    `archive.copy_tree` already solves this -- it is the parallel copier the
+    publish path uses, with up to 64 workers -- so the fix is to pay the SMB
+    cost once, concurrently, and let tar read a local disk.
+    """
+    import shutil  # noqa: PLC0415 -- node-only
+    import time  # noqa: PLC0415 -- node-only
+
+    from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- node-only
+
+    staged = work / snapshot
+    shutil.rmtree(staged, ignore_errors=True)
+    at = time.monotonic()
+    copied = archive.copy_tree(run_dir / snapshot, staged, update=False)
+    fetched = time.monotonic() - at
+    at = time.monotonic()
+    try:
+        size = blobstore.put_rung(sas, run_dir.name, snapshot, staged)
+    finally:
+        shutil.rmtree(staged, ignore_errors=True)
+    print(
+        f"  {snapshot}: staged {copied / 1024**2:.0f} MiB in {fetched:.1f}s, "
+        f"uploaded {size / 1024**2:.0f} MiB in {time.monotonic() - at:.1f}s",
+        flush=True,
+    )
+    return size
 
 
 def _snapshots(run_dir: Path) -> list[str]:
