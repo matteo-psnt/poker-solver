@@ -5,7 +5,7 @@ never agree: an event written live and then re-imported landed TWICE. Measured
 on one task -- 6 events on the share, 11 in the database -- and 83 surplus rows
 across the record before the identity was shared.
 
-Counts hid it. `backfill-record --verify` reported "database ahead (a live run)",
+Counts hid it. The importer's `--verify` (since deleted) reported "database ahead",
 which is the healthy direction and was also, here, duplication.
 """
 

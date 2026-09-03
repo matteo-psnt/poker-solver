@@ -54,38 +54,38 @@ resource "azurerm_postgresql_flexible_server" "record" {
   # so this is not a number anyone should have to watch.
   auto_grow_enabled = true
 
-  # THE RECOVERY WINDOW, and about to be the only one. While the share still
-  # holds the record, losing this server costs a four-minute `backfill-record`;
-  # once publishing stops, point-in-time restore is the whole story. 35 days is
-  # the Flexible Server maximum and updatable in place, unlike the flag below.
+  # THE RECOVERY WINDOW, and now the ONLY one. Publishing stopped on 09-03:
+  # the share holds snapshots and leg documents, and nothing that can rebuild a
+  # run's events, its checkpoints or its evals. Point-in-time restore is the
+  # whole story. 35 days is the Flexible Server maximum and updatable in place,
+  # unlike the flag below. Runbook: `docs/record-recovery.md`, exercised 09-02.
   backup_retention_days = 35
 
   # Locally redundant, MATCHING THE SHARE, which is `Standard_LRS` -- so
-  # retiring the JSON copy does not quietly downgrade region protection; there
-  # has never been any. Turning this on FORCES REPLACEMENT of the server, so the
-  # cheap moment to change your mind is while the share can still rebuild the
-  # database in four minutes. After that it is a dump and restore.
+  # retiring the JSON copy did not quietly downgrade region protection; there
+  # has never been any. Turning this on FORCES REPLACEMENT of the server, and
+  # the cheap moment to change your mind has PASSED: with no rebuildable copy,
+  # switching now is a dump and restore, not a flag flip.
   geo_redundant_backup_enabled = false
 
   public_network_access_enabled = true
 
   # NOT set: `high_availability`. It doubles the bill to protect against a zone
-  # loss, and the thing being protected is a record that is reconstructible from
-  # the share for as long as the share exists.
+  # loss. This was justified by the record being reconstructible from the share;
+  # it no longer is, so the justification is now cost against a 35-day PITR
+  # window and a zone loss being rare -- worth revisiting, not merely inherited.
 
   tags = local.tags
 
   lifecycle {
-    # ON since every reader answers from here: `runs`, `progress`, `tasks`,
-    # `ledger` and `curve`. It is not yet the ONLY copy -- the share still holds
-    # the record and `backfill-record` still rebuilds this from it -- so losing
-    # the server would cost an import rather than the experiment. But an import
-    # is four minutes and a `terraform destroy` that reached this would be an
-    # accident nobody meant, which is what this exists to stop.
+    # ON, and this is now THE ONLY COPY. Every reader answers from here --
+    # `runs`, `progress`, `tasks`, `ledger`, `curve` -- and since 09-03 nothing
+    # republishes the JSON it was imported from. Losing this server loses the
+    # experiment, not an import.
     #
-    # The stronger reason arrives with the commit that stops publishing JSON:
-    # at that moment this becomes irreplaceable, and turning it on then would
-    # be turning it on one step too late.
+    # It was turned on one step EARLY, deliberately, while the loss was still
+    # only four minutes of re-import. That was the point: turning it on at the
+    # moment it became irreplaceable would have been one step too late.
     prevent_destroy = true
 
     ignore_changes = [zone]

@@ -36,13 +36,14 @@ def eval_values(
 ) -> dict[str, Any]:
     """One evaluation document as the columns `evals` holds.
 
-    Shared by the live writer and `backfill-record`, so an eval that arrives
-    live and the same eval re-imported from the share are the same row -- which
-    is exactly what `--verify` compares.
+    The ONE place a document becomes columns. It was shared by the live writer
+    and the importer so the two agreed; the importer is gone and the invariants
+    stay, because they are what makes a row PAIRABLE, not what made two writers
+    match.
 
-    `run_id` is PASSED rather than read from the document. Both callers know it
-    from the directory the document lives in, and that is the authoritative
-    answer; taking it from the payload instead would have let the two writers
+    `run_id` is PASSED rather than read from the document. The caller knows it
+    from the run being scored, and that is the authoritative answer; taking it
+    from the payload instead would have let the two writers
     disagree about which run an eval belongs to on any document where the two
     differ. They agree on all 2,139 rows today, which is the data agreeing, not
     the code.

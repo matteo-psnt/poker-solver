@@ -4,7 +4,7 @@ It was appended straight to `run.jsonl` by the trainer, so it was the ONE event
 type the record sink never saw. `progress` reads checkpoint events, and once it
 answered from the database it found none for any run since the last import --
 which a comparison over historical runs cannot catch, because those had all been
-imported. Caught by `backfill-record --verify` on a live run instead: share 6
+imported. Caught by the importer's `--verify` (since deleted) on a live run: share 6
 events, database 5. The sink is now the ONLY store, so this is not a
 dual-write check -- it is the whole record for a rung.
 """

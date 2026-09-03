@@ -85,9 +85,12 @@ def test_a_reachable_database_gets_one_statement():
 
 
 class TestTheRowIsBuiltONCE:
-    """The live writer and `backfill-record` build the same row, because
-    `--verify` compares them and a divergence in the direction "database behind
-    the share" is how this migration reports a bug.
+    """`eval_values` is the only place a document becomes columns.
+
+    It began as the rule two writers had to share. The importer is gone and
+    these hold for a stronger reason: the sink is the ONLY record of an eval, so
+    a column read wrong here is not a divergence anyone can compare away -- it
+    is the measurement, stored wrong, with nothing left to check it against.
     """
 
     def test_the_seed_comes_from_base_seed(self):

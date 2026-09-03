@@ -96,7 +96,7 @@ def rung_uri(run_id: str, iteration: int) -> str:
     claim is worth recording under the eventual name now.
 
     Here because two writers produce it -- the trainer as it checkpoints and
-    `backfill-record` as it imports -- and a name spelled two ways is two rungs
+    the importer as it read -- and a name spelled two ways is two rungs
     where the record should hold one.
     """
     return f"rungs/{run_id}/{iteration}"
