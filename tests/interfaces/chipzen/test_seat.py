@@ -23,6 +23,7 @@ from src.interfaces.chipzen.seat import (
     WARM_BUDGET_MS,
     BlueprintSeat,
     SeatTally,
+    band_for,
     budget_for,
     sdk_state_payload,
     surface_sdk_logs,
@@ -736,37 +737,114 @@ class TestTheSeatCountsItsOwnStackOffs:
     big bet can arrive as an all-in.
     """
 
+    DEEP = ">50bb"
+
     def turn(self):
         return TurnState.parse(turn_payload(hand_number=1, your_stack=STACK))
 
     def test_a_raise_priced_at_max_is_a_stack_off(self):
         tally, turn = SeatTally(), self.turn()
-        tally.note_action({"action": "raise", "params": {"amount": turn.max_raise}}, turn)
+        tally.note_action(
+            {"action": "raise", "params": {"amount": turn.max_raise}}, turn, self.DEEP
+        )
         assert tally.jams == 1
+        assert tally.jams_by_band == {self.DEEP: 1}
 
     def test_a_raise_over_max_still_counts(self):
         """The clamp happens upstream; a caller that skipped it must not slip by."""
         tally, turn = SeatTally(), self.turn()
-        tally.note_action({"action": "raise", "params": {"amount": turn.max_raise + 1}}, turn)
+        tally.note_action(
+            {"action": "raise", "params": {"amount": turn.max_raise + 1}}, turn, self.DEEP
+        )
         assert tally.jams == 1
 
     def test_a_smaller_raise_is_not(self):
         tally, turn = SeatTally(), self.turn()
-        tally.note_action({"action": "raise", "params": {"amount": turn.min_raise}}, turn)
+        tally.note_action(
+            {"action": "raise", "params": {"amount": turn.min_raise}}, turn, self.DEEP
+        )
         assert tally.jams == 0
 
     def test_calling_all_in_is_not_a_stack_off(self):
         """Committing because we were SHOVED ON is not shipping it ourselves."""
         tally, turn = SeatTally(), self.turn()
-        tally.note_action({"action": "call", "params": {}}, turn)
+        tally.note_action({"action": "call", "params": {}}, turn, self.DEEP)
         assert tally.jams == 0
 
     def test_folds_and_checks_carry_no_amount(self):
         tally, turn = SeatTally(), self.turn()
-        tally.note_action({"action": "fold", "params": {}}, turn)
-        tally.note_action({"action": "check", "params": {}}, turn)
+        tally.note_action({"action": "fold", "params": {}}, turn, self.DEEP)
+        tally.note_action({"action": "check", "params": {}}, turn, self.DEEP)
         assert tally.jams == 0
+
+    def test_the_bands_stay_separate(self):
+        """The whole point: a correct 3 bb shove must not hide a 90 bb one.
+
+        Summed into one integer these are indistinguishable, and the short-stack
+        shoves -- which are correct poker, and at 3 bb are every raise there is
+        -- swamp the deep ones the complaint is about.
+        """
+        tally, turn = SeatTally(), self.turn()
+        for _ in range(9):
+            tally.note_action(
+                {"action": "raise", "params": {"amount": turn.max_raise}}, turn, "<=10bb"
+            )
+        tally.note_action(
+            {"action": "raise", "params": {"amount": turn.max_raise}}, turn, self.DEEP
+        )
+        assert tally.jams == 10
+        assert tally.jams_by_band[self.DEEP] == 1
+        assert "<=10bb:9" in tally.jam_census()
 
     def test_the_summary_always_states_it(self):
         """Zero must PRINT. An omitted field reads as 'not measured'."""
-        assert "0 stack-offs" in SeatTally().summary()
+        assert "0 stack-offs (none)" in SeatTally().summary()
+
+
+class TestBandFor:
+    @pytest.mark.parametrize(
+        ("depth", "band"),
+        [(2.0, "<=10bb"), (10.0, "<=10bb"), (10.1, "<=25bb"), (50.0, "<=50bb"), (99.0, ">50bb")],
+    )
+    def test_edges(self, depth, band):
+        assert band_for(depth) == band
+
+
+class TestTheCounterMatchesTheFrameActuallySent:
+    """End-to-end through `decide_frame`, not against a hand-built payload.
+
+    Every unit test above hands `note_action` a dict I wrote myself, which is
+    exactly the fixture-written-to-the-code failure this repo keeps hitting:
+    five bugs in two sessions passed a full suite because no test made the real
+    call site produce the value. This ties the counter to the frame the seat
+    ACTUALLY emits, so it cannot pass while the call site is wrong.
+    """
+
+    @pytest.mark.parametrize("stack", [STACK, STACK // 4, BB * 8, BB * 2])
+    def test_the_tally_agrees_with_the_wire(self, seat, stack):
+        payload = turn_payload(hand_number=1, your_stack=stack)
+        turn = TurnState.parse(payload)
+        frame = seat.decide_frame(payload)
+
+        shipped = (
+            frame["action"] == "raise"
+            and turn.max_raise > 0
+            and frame["params"]["amount"] >= turn.max_raise
+        )
+        assert seat.tally.jams == (1 if shipped else 0)
+
+    def test_a_stack_off_is_filed_under_the_depth_it_happened_at(self, seat):
+        """The band recorded must be the band of the hand's ACTUAL depth.
+
+        Asserting a literal band here would pin the fixture's depth, not the
+        behaviour -- `blueprint` is module-scoped and shared, so which action
+        comes back depends on what ran before, and an earlier draft of this
+        test passed or failed with the -k pattern. The invariant that does
+        hold whatever is chosen: if a stack-off was counted, it was counted
+        against `band_for` of the depth the tally recorded for that hand.
+        """
+        payload = turn_payload(hand_number=1, your_stack=STACK)
+        seat.decide_frame(payload)
+        if not seat.tally.jams_by_band:
+            pytest.skip("this blueprint did not ship it here; the wire test covers the count")
+        assert set(seat.tally.jams_by_band) == {band_for(seat.tally.depth_by_hand[1])}
