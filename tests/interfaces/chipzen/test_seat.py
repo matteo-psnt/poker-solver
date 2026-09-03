@@ -22,6 +22,7 @@ from src.interfaces.chipzen.seat import (
     TIGHT_CLOCK_MS,
     WARM_BUDGET_MS,
     BlueprintSeat,
+    SeatTally,
     budget_for,
     sdk_state_payload,
     surface_sdk_logs,
@@ -723,3 +724,49 @@ class TestResolverOnlyOffTree:
         seen = self._spy(monkeypatch)
         seat._choose(self._spot(seat, off_tree=0))
         assert seen == [None]
+
+
+class TestTheSeatCountsItsOwnStackOffs:
+    """The live seat measures the number the shoving complaint is about.
+
+    Until this counter existed the only live reading of it came from parsing
+    match histories by hand, so a duel's "2.97% of hands" and the arena's
+    "12.76%" were never the same instrument. Read off the WIRE, because
+    `wire_action` clamps into `[min_raise, max_raise]` and a size meant as a
+    big bet can arrive as an all-in.
+    """
+
+    def turn(self):
+        return TurnState.parse(turn_payload(hand_number=1, your_stack=STACK))
+
+    def test_a_raise_priced_at_max_is_a_stack_off(self):
+        tally, turn = SeatTally(), self.turn()
+        tally.note_action({"action": "raise", "params": {"amount": turn.max_raise}}, turn)
+        assert tally.jams == 1
+
+    def test_a_raise_over_max_still_counts(self):
+        """The clamp happens upstream; a caller that skipped it must not slip by."""
+        tally, turn = SeatTally(), self.turn()
+        tally.note_action({"action": "raise", "params": {"amount": turn.max_raise + 1}}, turn)
+        assert tally.jams == 1
+
+    def test_a_smaller_raise_is_not(self):
+        tally, turn = SeatTally(), self.turn()
+        tally.note_action({"action": "raise", "params": {"amount": turn.min_raise}}, turn)
+        assert tally.jams == 0
+
+    def test_calling_all_in_is_not_a_stack_off(self):
+        """Committing because we were SHOVED ON is not shipping it ourselves."""
+        tally, turn = SeatTally(), self.turn()
+        tally.note_action({"action": "call", "params": {}}, turn)
+        assert tally.jams == 0
+
+    def test_folds_and_checks_carry_no_amount(self):
+        tally, turn = SeatTally(), self.turn()
+        tally.note_action({"action": "fold", "params": {}}, turn)
+        tally.note_action({"action": "check", "params": {}}, turn)
+        assert tally.jams == 0
+
+    def test_the_summary_always_states_it(self):
+        """Zero must PRINT. An omitted field reads as 'not measured'."""
+        assert "0 stack-offs" in SeatTally().summary()

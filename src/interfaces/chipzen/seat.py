@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 
 from src.interfaces.chipzen.adapter import (
+    RAISE,
     Spot,
     TableScale,
     reconstruct,
@@ -212,10 +213,33 @@ class SeatTally:
     out_of_tree: int = 0
     #: Times the ladder moved to a different rung. Zero on a one-rung ladder.
     rung_switches: int = 0
+    #: Hands where we put our WHOLE remaining stack in as the AGGRESSOR. Their
+    #: wire has no all-in, so a raise priced at `max_raise` IS one.
+    #:
+    #: Here because it is the number the shoving complaint is about and the one
+    #: every duel reports, and until now the live seat did not measure it at
+    #: all -- the 12.76%-of-hands figure came from parsing match histories by
+    #: hand. A duel says what a blueprint WOULD do; only this says what the
+    #: fielded seat DID. Comparable to the duel figures directly: a hand can be
+    #: stacked off at most once, so this over `len(per_hand)` is per-hand.
+    jams: int = 0
 
     @property
     def off_tree(self) -> int:
         return sum(self.per_hand.values())
+
+    def note_action(self, action: Mapping[str, Any], turn: TurnState) -> None:
+        """Count a stack-off, read off the WIRE rather than off our own tree.
+
+        `wire_action` clamps into `[min_raise, max_raise]`, so a size the
+        blueprint meant as a big bet can arrive as an all-in; what the table saw
+        is the only thing worth counting.
+        """
+        if action.get("action") != RAISE:
+            return
+        amount = action.get("params", {}).get("amount")
+        if amount is not None and turn.max_raise > 0 and int(amount) >= turn.max_raise:
+            self.jams += 1
 
     def saw(self, hand: int, off_tree: int) -> None:
         """Record this hand's off-tree count, keeping the largest seen for it."""
@@ -225,7 +249,8 @@ class SeatTally:
         return (
             f"{self.decisions} decisions over {len(self.per_hand)} hands, "
             f"{self.off_tree} off-tree opponent actions, "
-            f"{self.truncated} truncated replays, {self.fallbacks} safe defaults"
+            f"{self.truncated} truncated replays, {self.fallbacks} safe defaults, "
+            f"{self.jams} stack-offs"
             + (f", {self.escalated} past a blind escalation" if self.escalated else "")
             + (
                 f", depth {min(self.depth_by_hand.values()):.0f}-"
@@ -437,7 +462,9 @@ class BlueprintSeat:
 
         try:
             chosen = self._choose(spot)
-            return wire_action(chosen, turn, spot)
+            action = wire_action(chosen, turn, spot)
+            self.tally.note_action(action, turn)
+            return action
         except Exception:
             logger.exception("No usable action for hand %s; passing.", turn.hand_number)
             self.tally.fallbacks += 1
