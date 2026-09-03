@@ -12,10 +12,11 @@ import pytest
 
 from src.shared import records, task_history
 from src.shared.cloudtask import task_log
+from tests.legacy_legs import write_leg
 
 
 def _node(share, task_id, event, cause=None, **kw):
-    return task_log.write_node_record(share, task_id=task_id, event=event, cause=cause, **kw)
+    return write_leg(share, task_id, event, cause, **kw)
 
 
 class TestNodeRecord:
@@ -311,7 +312,7 @@ class TestWhatATaskDid:
     """
 
     def test_an_evaluation_records_the_rung_and_the_seed_it_scored(self, tmp_path):
-        task_log.write_node_record(
+        write_leg(
             tmp_path,
             task_id="t1",
             event=task_log.EVENT_STARTED,
@@ -327,7 +328,7 @@ class TestWhatATaskDid:
     def test_three_seeds_on_one_checkpoint_are_now_distinguishable(self, tmp_path):
         """The exact case that had to be kept in a scratchpad file."""
         for index, seed in enumerate(("7", "13", "29")):
-            task_log.write_node_record(
+            write_leg(
                 tmp_path,
                 task_id=f"t{index}",
                 event=task_log.EVENT_STARTED,
@@ -339,7 +340,7 @@ class TestWhatATaskDid:
         assert len({row.what for row in task_history.read_tasks(tmp_path)}) == 3
 
     def test_a_training_task_says_what_it_was_aiming_at(self, tmp_path):
-        task_log.write_node_record(
+        write_leg(
             tmp_path,
             task_id="t1",
             event=task_log.EVENT_STARTED,
@@ -351,7 +352,7 @@ class TestWhatATaskDid:
 
     def test_a_task_from_before_these_fields_degrades_to_its_op(self, tmp_path):
         """Honest: those records genuinely hold nothing more to show."""
-        task_log.write_node_record(
+        write_leg(
             tmp_path,
             task_id="t1",
             event=task_log.EVENT_STARTED,
@@ -376,7 +377,7 @@ class TestWhichCodeRan:
     """
 
     def test_the_snapshot_that_ran_is_recorded(self, tmp_path):
-        task_log.write_node_record(
+        write_leg(
             tmp_path,
             task_id="t1",
             event=task_log.EVENT_STARTED,
@@ -393,7 +394,7 @@ class TestWhichCodeRan:
     def test_two_worktrees_on_one_dirty_commit_are_distinguishable(self, tmp_path):
         """The case the commit alone cannot answer, which is the normal one."""
         for index, branch in enumerate(("worktree-hybrid-kernels", "worktree-vector-cfr")):
-            task_log.write_node_record(
+            write_leg(
                 tmp_path,
                 task_id=f"t{index}",
                 event=task_log.EVENT_STARTED,
@@ -410,7 +411,7 @@ class TestWhichCodeRan:
 
     def test_provenance_survives_a_task_that_died_before_finishing(self, tmp_path):
         """The start record carries it, and that is the only record such a task has."""
-        task_log.write_node_record(
+        write_leg(
             tmp_path,
             task_id="t1",
             event=task_log.EVENT_STARTED,

@@ -272,13 +272,19 @@ def test_the_whole_package_imports_on_the_node_interpreter():
 
 @pytest.mark.timeout(300)
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to provide the node interpreter")
-def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
-    """The one thing that must work even when everything else has failed."""
+def test_a_task_record_can_be_built_on_the_node_interpreter():
+    """The one thing that must work even when everything else has failed.
+
+    Building it, not writing it: there is no file any more. What still has to
+    hold on the bare interpreter is that this module IMPORTS -- it is loaded
+    before `uv sync`, so a third-party import reaching it kills the task at
+    bootstrap, before it can record the thing that would explain it.
+    """
     script = (
         f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r});"
-        "from src.shared.cloudtask.task_log import write_node_record;"
-        f"write_node_record({str(tmp_path)!r}, task_id='t', event='started');"
-        "print('ok')"
+        "from src.shared.cloudtask.task_log import node_record;"
+        "r = node_record(task_id='t', attempt=1, event='started');"
+        "print(r['task_id'], r['attempt'], r['event'])"
     )
     result = subprocess.run(
         ["uv", "run", "--python", NODE_PYTHON, "--no-project", "python", "-c", script],
@@ -290,4 +296,4 @@ def test_a_task_record_can_be_written_on_the_node_interpreter(tmp_path):
     if "no interpreter found" in result.stderr.lower():
         pytest.skip(f"python {NODE_PYTHON} unavailable on this machine")
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "legs" / "t.1.start.json").exists()
+    assert "t 1 started" in result.stdout
