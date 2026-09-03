@@ -108,3 +108,48 @@ class TestWhatItDoesWhenItCannot:
         monkeypatch.setattr(archive.blobstore, "put_rung", _put)
         run_dir = _run(tmp_path, "static-100.zarr", "static-200.zarr")
         assert archive.publish_rungs_to_blob(run_dir, "run-a", SAS) == 1
+
+
+class TestTheFlip:
+    """With a SAS, the snapshot bytes stop going to the share.
+
+    What still goes there is the metadata -- manifests, `.run.json`, loose
+    result files -- which is kilobytes against the 831 GiB the snapshots were.
+    """
+
+    def test_snapshots_do_not_reach_the_share(self, tmp_path, monkeypatch):
+        run_dir = _run(tmp_path, "static-100.zarr")
+        destination = tmp_path / "share" / "run-a"
+        monkeypatch.setattr(archive, "_publish_snapshot", lambda *_a: pytest.fail("copied bytes"))
+        assert archive.publish_run(run_dir, destination, sas=SAS) is True
+        assert not (destination / "static-100.zarr").exists()
+
+    def test_the_marker_is_still_written(self, tmp_path):
+        """It is what says the rung is complete SOMEWHERE. `migrate-checkpoints`
+        refuses an unmarked rung, `prune-checkpoints` reads markers to know what
+        the share holds, and `_rungs_landed` accepts one in place of the bytes.
+        """
+        run_dir = _run(tmp_path, "static-100.zarr")
+        destination = tmp_path / "share" / "run-a"
+        archive.publish_run(run_dir, destination, sas=SAS)
+        assert (destination / archive.marker_for("static-100.zarr")).exists()
+
+    def test_the_manifest_is_published_on_a_marker_alone(self, tmp_path):
+        """Requiring the DIRECTORY would freeze manifest publishing the moment
+        snapshots stopped landing here: the manifest would name rungs the share
+        does not hold and the run would never advertise a checkpoint again."""
+        run_dir = _run(tmp_path, "static-100.zarr")
+        (run_dir / "STATIC_CHECKPOINT.json").write_text(
+            '{"iteration": 100, "zarr": "static-100.zarr", "retained": []}'
+        )
+        destination = tmp_path / "share" / "run-a"
+        assert archive.publish_run(run_dir, destination, sas=SAS) is True
+        assert (destination / "STATIC_CHECKPOINT.json").exists()
+
+    def test_without_a_sas_the_share_still_gets_the_bytes(self, tmp_path):
+        """The rollback. A task dispatched before the container existed
+        publishes exactly as it always did."""
+        run_dir = _run(tmp_path, "static-100.zarr")
+        destination = tmp_path / "share" / "run-a"
+        assert archive.publish_run(run_dir, destination) is True
+        assert (destination / "static-100.zarr" / ".zarray").exists()

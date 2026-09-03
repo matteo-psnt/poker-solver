@@ -136,12 +136,22 @@ def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: b
         return sum(pool.map(transfer, files))
 
 
-def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
+def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = "") -> bool:
     """Copy one run directory to the share. Returns False if anything failed.
 
     Idempotent and safe to call while training continues, which is what lets
     the mid-run watcher use it. Never raises: a failed publish must not kill a
     task that is still making progress on local disk.
+
+    WITH A SAS, THE SNAPSHOTS DO NOT GO TO THE SHARE. They go to the container
+    instead -- `publish_rungs_to_blob` puts them there on the same tick -- and
+    what stays here is the metadata: the manifests, `.run.json`, the loose
+    result files. Those are kilobytes; the snapshots were 831 GiB.
+
+    The marker still gets written for a rung that lands in the container, and
+    that is not vestigial: `migrate-checkpoints` refuses to upload an unmarked
+    rung, `prune-checkpoints` reads markers to know what the share holds, and a
+    node fetching from a share that predates the container still needs them.
     """
     destination.mkdir(parents=True, exist_ok=True)
     # READ BEFORE THE LADDER, published after it. A rung takes minutes over SMB
@@ -167,6 +177,12 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
         # the manifest name a rung the next fetch refuses. Nor is it rare --
         # measured at 6.6 minutes re-uploading 809 MB already on the share.
         if marker.exists():
+            continue
+        if sas:
+            # THE BYTES GO TO THE CONTAINER, and the marker records that this
+            # rung is complete somewhere. `_rungs_landed` below checks the
+            # marker rather than the directory for exactly this case.
+            _touch(marker)
             continue
         _unlink(marker)
         if _publish_snapshot(child, destination / child.name, log):
@@ -242,7 +258,14 @@ def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quie
 
 
 def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
-    """Is every rung this manifest names actually a directory on the share?
+    """Is every rung this manifest names actually somewhere a fetch can get it?
+
+    A DIRECTORY OR A MARKER. The directory is the share holding the bytes; the
+    marker alone means they went to the container instead, which is what a
+    publish with a SAS does. Requiring the directory would freeze manifest
+    publishing for every run the moment the snapshots stopped landing here --
+    the manifest would name rungs, the share would hold none of them, and the
+    run would never advertise a checkpoint again.
 
     ABSENCE only. A rung present but unmarked is refused at FETCH time by
     :func:`require_complete`, which is where that case belongs -- refusing it
@@ -250,13 +273,14 @@ def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
     a later publish can add a marker to a rung this node no longer has.
     """
     named = _named_rungs(manifest)
-    missing = sorted(name for name in named if not (destination / name).is_dir())
+    missing = sorted(
+        name
+        for name in named
+        if not (destination / name).is_dir() and not (destination / marker_for(name)).exists()
+    )
     if missing:
-        log(f"WARN manifest names {', '.join(missing)}, not on the share -- NOT publishing it")
+        log(f"WARN manifest names {', '.join(missing)}, nowhere to be found -- NOT publishing it")
         return False
-    unmarked = sorted(n for n in named if not (destination / marker_for(n)).exists())
-    if unmarked:
-        log(f"WARN manifest names unmarked rung(s) {', '.join(unmarked)}; a fetch will refuse them")
     return True
 
 

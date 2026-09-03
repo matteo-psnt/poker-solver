@@ -47,6 +47,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=0,
         help="Stop after this many rungs (0 = no limit). A task has a deadline.",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Upload nothing; report which published rungs the container lacks.",
+    )
 
 
 class MigratedPayload(BaseModel):
@@ -59,6 +64,16 @@ class MigratedPayload(BaseModel):
     bytes_uploaded: int = 0
     failures: list[str] = Field(default_factory=list)
     stopped_early: bool = False
+    verified: bool = False
+    """Rungs the SHARE holds that the container does not.
+
+    THE COMPLETENESS TEST, and it is deliberately not "every rung in
+    `checkpoints`": the record claims a rung the moment a trainer commits it,
+    and the retain policy drops some before any publish runs -- so the record
+    names rungs no store has ever held. The share is what the container has to
+    reproduce.
+    """
+    missing: list[str] = Field(default_factory=list)
 
 
 def run(args: argparse.Namespace) -> MigratedPayload:
@@ -79,7 +94,7 @@ def run(args: argparse.Namespace) -> MigratedPayload:
     if not root.is_dir():
         raise CommandError(f"no archive directory at {root}")
 
-    payload = MigratedPayload()
+    payload = MigratedPayload(verified=bool(args.verify))
     wanted = set(args.runs or [])
     for run_dir in sorted(p for p in root.iterdir() if p.is_dir()):
         if wanted and run_dir.name not in wanted:
@@ -92,6 +107,9 @@ def run(args: argparse.Namespace) -> MigratedPayload:
             try:
                 if blobstore.exists(sas, run_dir.name, snapshot):
                     payload.rungs_already_there += 1
+                    continue
+                if args.verify:
+                    payload.missing.append(f"{run_dir.name}/{snapshot}")
                     continue
                 # THE SHARE'S MARKER STILL GOVERNS what may be uploaded. A rung
                 # with no marker was interrupted mid-publish, and copying it
@@ -116,6 +134,17 @@ def _snapshots(run_dir: Path) -> list[str]:
 
 
 def render(payload: MigratedPayload) -> None:
+    if payload.verified:
+        print(f"runs considered:  {payload.runs_considered:,}")
+        print(f"already in blob:  {payload.rungs_already_there:,}")
+        print(f"MISSING:          {len(payload.missing):,}")
+        for line in payload.missing[:30]:
+            print(f"  {line}")
+        if len(payload.missing) > 30:
+            print(f"  ... and {len(payload.missing) - 30:,} more")
+        if not payload.missing and not payload.failures:
+            print("\nEvery published rung is in the container.")
+        return
     print(f"runs considered:  {payload.runs_considered:,}")
     print(
         f"rungs uploaded:   {payload.rungs_uploaded:,}  ({payload.bytes_uploaded / 1024**3:.1f} GiB)"
