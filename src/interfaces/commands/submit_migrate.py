@@ -49,11 +49,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _flags(args: argparse.Namespace) -> tuple[str, ...]:
+    """The sweep's own command line, carried verbatim on `eval_flags`.
+
+    ONE `--runs` WITH MANY VALUES, not one flag per run. `--runs` takes
+    `nargs="*"`, so a repeated flag keeps only the LAST -- `--runs a --runs b`
+    parses to `["b"]`, and the sweep would migrate one run of two and report
+    success.
+    """
     flags: list[str] = []
     if args.limit:
         flags += ["--limit", str(args.limit)]
-    for run_id in args.runs or ():
-        flags += ["--runs", run_id]
+    if args.runs:
+        flags += ["--runs", *args.runs]
     return tuple(flags)
 
 
