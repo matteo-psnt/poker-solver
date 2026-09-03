@@ -111,17 +111,17 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             if not (prior / name).is_dir():
                 log(f"FATAL warm-start prior has no rung {wanted} ({name} absent on the share)")
                 return 1, "missing-rung"
-            archive.require_complete(prior, name)
-            archive.fetch_snapshot(prior, destination, name)
+            archive.require_complete(prior, name, plan.checkpoint_sas)
+            archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas)
             log(f"fetched warm-start rung {name}")
         else:
-            archive.fetch_current_rung(prior, destination, log)
+            archive.fetch_current_rung(prior, destination, log, plan.checkpoint_sas)
     _refresh_abstractions(paths, log)
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():
         log(f"fetching published checkpoint for {run_id}")
-        archive.fetch_current_rung(published, paths.runs / run_id, log)
+        archive.fetch_current_rung(published, paths.runs / run_id, log, plan.checkpoint_sas)
 
     plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
@@ -233,7 +233,9 @@ def _fetch_rungs(
     """
     requested = list(plan.eval_rungs)
     if not requested:
-        if archive.fetch_current_rung(published, paths.runs / plan.run_id, log):
+        if archive.fetch_current_rung(
+            published, paths.runs / plan.run_id, log, plan.checkpoint_sas
+        ):
             return []
         log(f"FATAL {plan.run_id} has no published checkpoint to score")
         return None
@@ -269,9 +271,15 @@ def _fetch_mix_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
     wanted = [options["--mix-at"]] if "--mix-at" in options else []
     destination = paths.runs / other
     if wanted:
-        fetched = archive.fetch_for_evaluation(source, destination, wanted, log)
+        fetched = archive.fetch_for_evaluation(
+            source, destination, wanted, log, plan.checkpoint_sas
+        )
     else:
-        fetched = ["current"] if archive.fetch_current_rung(source, destination, log) else []
+        fetched = (
+            ["current"]
+            if archive.fetch_current_rung(source, destination, log, plan.checkpoint_sas)
+            else []
+        )
     if not fetched:
         log(f"FATAL could not fetch the mixture partner {other}")
         return False
@@ -471,6 +479,26 @@ def _measurement(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int
     return 0, None
 
 
+def _migrate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
+    """Move published rungs from the mounted share into the container.
+
+    The bytes are on the share and a node has it mounted inside the region.
+    Nothing is fetched to `runs/` and nothing is published back: the sweep
+    reads the archive in place and writes objects.
+
+    `--share` is passed explicitly rather than left to the node's default so
+    the same command is runnable against a local copy when debugging it.
+    """
+    log(f"migrate-checkpoints: share={paths.share} (timeout {plan.timeout_seconds}s)")
+    code = run_guarded(
+        _cli([*plan.commands[0], "--share", str(paths.share)]),
+        cwd=paths.code,
+        timeout=plan.timeout_seconds,
+        log=log,
+    )
+    return code, None
+
+
 def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
     """The end-of-task publish: a TRAINING task's own run, and nothing else.
 
@@ -513,4 +541,5 @@ HANDLERS: dict[str, Handler] = {
     TaskName.PRECOMPUTE: _precompute,
     # Same executor: an abstraction off the share, one command, one JSON result.
     TaskName.NET_PROBE: _probe,
+    TaskName.MIGRATE_CHECKPOINTS: _migrate,
 }
