@@ -112,14 +112,17 @@ serve-ssh:
 # `offtree=1`, which confines the resolver to hands that have left our tree,
 # the only place its edge was ever measured. `extra` stages runs the seat will
 # NOT play, so a candidate can be duelled against the fielded ladder on the box
-# before it is given the chair.
+# before it is given the chair. `noresolver=1` turns the runtime resolver off
+# entirely -- measured 09-12 to be worth nothing and to cost 1.83x the
+# stack-off rate.
 #
 # The record's address rides along as $2: the box reads the run from Postgres
 # and has no Terraform of its own to ask.
-serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="":
+serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="" noresolver="":
     ssh solver@$({{tfv}} output -raw public_ip) \
         "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} \
-         RESOLVER_OFF_TREE={{offtree}} EXTRA_RUNS={{extra}} bash -s" \
+         RESOLVER_OFF_TREE={{offtree}} EXTRA_RUNS={{extra}} \
+         NO_RESOLVER={{noresolver}} bash -s" \
         -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
            "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 

@@ -443,6 +443,24 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # and both readings are ~1.8 sigma, i.e. neither is a result. One node's rate
 # is not a policy's rate.
 #
+# $NO_RESOLVER turns the runtime resolver OFF entirely. MEASURED 09-12 against
+# a genuine off-tree opponent (the `gears` arm is a different action tree, so
+# it makes off-menu sizes by construction) at the budget actually fielded:
+#
+#   resolver on @900ms   -227.8 +/- 235.4 mbb/hand vs gears   6.62% stack-offs/hand
+#   resolver off          -27.8 +/- 144.5                      3.62%
+#
+# The resolver is worth -200 +/- 276 mbb/hand -- indistinguishable from zero --
+# while multiplying stack-offs by 1.83 (z=2.72). Its whole justification was
+# +528 mbb/hand OFF-TREE, and that figure sits 2.6 sigma from this measurement:
+# it was taken at the EVALUATOR's settings and never re-checked at 900 ms.
+#
+# The mechanism is visible in single spots: with Kc8h at 53 bb the blueprint
+# folds 150 times out of 150 and the resolver ships the whole stack 27.3% of
+# the time, offering only fold-or-jam -- a local tree ending at the next street
+# has no future betting to play for. In an ELIMINATION format that trade is
+# worse than the mbb figure suggests: a stack-off that loses ends the match.
+#
 # $RESOLVER_OFF_TREE runs the resolver only once the hand has left our tree.
 # Its measured +528 mbb/hand is an OFF-TREE gain; on tree it is worth
 # -203.6 +/- 133.1 mbb/hand (1.5 sigma, nothing) while DOUBLING the stack-off
@@ -459,7 +477,7 @@ RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
-SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
+SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${NO_RESOLVER:+ --no-resolver}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
 EOF
 # The DSN carries a password, and this file gained one the moment the seat began
 # reading run metadata from the record. Same mode as `/etc/blueprint.env`.
