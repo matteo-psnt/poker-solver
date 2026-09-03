@@ -421,11 +421,21 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # That is why both are staged above. Empty when $AT is unset, which the unit
 # expands to no arguments.
 # $BUDGET_MS caps the per-decision budget. Unset leaves the seat's own sizing,
-# which is what is fielded: `budget_for` is clock/2 - 800 ms capped at
-# `MAX_BUDGET_MS`=900, so the TIGHT 2,000 ms clock the seat assumes when the
-# frame states none yields 200 ms, and 900 needs a stated clock of 3,400 ms or
-# more. 200 ms is not the cap -- it is the common case, and it sits near the
-# ~300 ms at which the resolver's 528 mbb/hand was actually measured.
+# which is what is fielded, and MEASURED over 26 h of live matches that is
+# 900 ms -- the `MAX_BUDGET_MS` cap -- not the tight-clock default:
+#
+#   Clock 30,000 ms -> budget 900 ms   x100   every real match
+#   Clock  5,000 ms -> budget 900 ms     x2
+#   Clock unstated  -> budget 200 ms    x32   warm/startup path only
+#
+# `budget_for` is clock/2 - 800 capped at 900, so the 2,000 ms clock assumed
+# when a frame states none gives 200 -- but frames in a MATCH state 30 s. Read
+# the journal for this, not the formula: reasoning from the code alone got it
+# backwards once already.
+#
+# That leaves a live question. The resolver's 528 mbb/hand was measured near
+# 300 ms and it is fielded at 900, three times the work at the one knob
+# `DEC-0013` says converges to shipping stacks.
 #
 # It is NOT a stack-off lever, though one reading said so: a single spot jammed
 # 32.5% at 200 ms against 41.0% at 900. Over a full duel the sign is the other
