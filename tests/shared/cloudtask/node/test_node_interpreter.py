@@ -208,15 +208,28 @@ def test_the_pool_installs_the_wrappers_one_dependency_where_it_will_be_found():
     assert f"PYTHONPATH={NODE_DEPS_DIR}" in TASK_COMMAND_TEMPLATE
 
 
-def test_the_dependency_install_cannot_brick_a_node():
-    """A start task that FAILS bricks the node, and this file has lost nodes to
-    that -- including one to this very line. The one thing here whose absence
-    costs nothing that matters must not be the thing that takes a node down:
-    `legmirror` catches the missing driver and the task trains exactly as
-    before, which is what an unset DSN already does."""
+def test_a_node_that_cannot_import_the_driver_does_not_come_up():
+    """The INVERTED version of a guard this file used to hold.
+
+    It required `|| echo` on the install, because a start task that fails
+    bricks the node and a missing driver then cost only a mirrored copy of a
+    record the share already held. The share holds nothing now: a node that
+    cannot reach the database accepts training work and fails every task at its
+    first event. Bricking it is the cheaper failure, and it is the one Batch
+    reports and autoscale replaces.
+
+    The IMPORT is what is asserted, not the install's exit code: an install that
+    "succeeded" into a directory the wrapper cannot import from is the failure
+    this exists to catch, and it is the one an exit code cannot see.
+    """
+    from src.interfaces.cloud.tasks.spec import NODE_DEPS_DIR
+
     main_tf = (REPO_ROOT / "infra" / "main.tf").read_text()
-    install = main_tf[main_tf.index("psycopg[binary]") :][:200]
-    assert "|| echo" in install, "an unguarded install in a `set -e` start task bricks the node"
+    install = main_tf[main_tf.index('--quiet "psycopg[binary]"') :][:300]
+    assert "|| echo" not in install, "a swallowed install leaves a node that fails every task"
+    assert f'PYTHONPATH={NODE_DEPS_DIR} /usr/local/bin/python3.13 -c "import psycopg"' in install, (
+        "the install must be verified by importing, under the wrapper's own interpreter and path"
+    )
 
 
 def test_the_entry_point_adds_the_repo_to_the_path_before_importing():
