@@ -104,3 +104,42 @@ class TestWhatItStores:
             "start",
             {"task_id": "task-a", "attempt": 1, "ts": "2026-09-01T00:00:00+00:00"},
         )
+
+
+class TestTheRowIsWrittenWhereTheRecordIsMade:
+    """The direct half. `publish` re-reads this task's files and upserts what it
+    finds, which is self-healing -- but it can only heal a record that HAS a
+    file, and progress is about to stop having one.
+    """
+
+    def test_one_record_becomes_one_row(self, tmp_path, monkeypatch):
+        stored: list = []
+        monkeypatch.setattr(legmirror, "_store", lambda _dsn, rows: stored.extend(rows))
+        legmirror.record("task-a", 1, "start", {"task_id": "task-a", "ts": "t"}, dsn=DSN)
+        assert [(r["task_id"], r["attempt"], r["leg"]) for r in stored] == [("task-a", 1, "start")]
+
+    def test_it_builds_the_row_with_task_logs_builder(self, tmp_path, monkeypatch):
+        """The node, the importer and the reader's write-back all go through
+        `task_log.leg_row`. A second builder is a divergence `--verify` reports
+        forever."""
+        stored: list = []
+        monkeypatch.setattr(legmirror, "_store", lambda _dsn, rows: stored.extend(rows))
+        doc = {"task_id": "task-a", "done": 3.0, "ts": "t"}
+        legmirror.record("task-a", task_log.TASK_SCOPED, "progress", doc, dsn=DSN)
+        assert stored == [task_log.leg_row("task-a", task_log.TASK_SCOPED, "progress", doc)]
+
+    def test_no_dsn_writes_nothing(self, tmp_path, monkeypatch):
+        stored: list = []
+        monkeypatch.setattr(legmirror, "_store", lambda _dsn, rows: stored.extend(rows))
+        legmirror.record("task-a", 1, "start", {"task_id": "task-a"}, dsn="")
+        assert stored == []
+
+    def test_a_failure_cannot_cost_the_task(self, tmp_path, monkeypatch):
+        def _explode(_dsn, _rows):
+            raise RuntimeError("database is gone")
+
+        monkeypatch.setattr(legmirror, "_store", _explode)
+        logged: list[str] = []
+        legmirror.record("task-a", 1, "exit", {"task_id": "task-a"}, dsn=DSN, log=logged.append)
+        assert logged
+        assert "not recorded" in logged[0]

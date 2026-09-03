@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from src.shared.cloudtask import task_log
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
 # One statement, and the conflict target is the leg's own key. `progress` is
@@ -42,6 +42,32 @@ _UPSERT = """
 # Short on purpose. Nothing waits on the answer, and the alternative to failing
 # fast is holding the watcher thread while a task's work is what matters.
 CONNECT_TIMEOUT_SECONDS = 15
+
+
+def record(
+    task_id: str,
+    attempt: int,
+    leg: str,
+    document: Mapping[str, Any],
+    *,
+    dsn: str,
+    log: Callable[[str], None] | None = None,
+) -> None:
+    """Store ONE record, at the moment it is made. NEVER FATAL.
+
+    The direct half. :func:`publish` re-reads this task's files and upserts
+    whatever it finds, which is self-healing and is why it stays -- but it can
+    only heal a record that has a FILE, and progress is about to stop having
+    one. Writing the row where the record is made covers what the re-read
+    cannot, and costs one statement rather than a directory listing.
+    """
+    if not dsn:
+        return
+    try:
+        _store(dsn, [task_log.leg_row(task_id, attempt, leg, document)])
+    except Exception as exc:  # noqa: BLE001 -- a task must not die recording itself
+        if log:
+            log(f"leg {leg} not recorded: {type(exc).__name__}: {exc}".strip()[:200])
 
 
 def publish(
