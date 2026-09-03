@@ -23,7 +23,7 @@ from src.shared import gitinfo
 from src.shared.cloudtask import kinds
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from src.interfaces.cloud.tasks.spec import TaskSpec
 
@@ -123,6 +123,7 @@ def stage_and_queue(
     # on 30 draws from a 32k space avoiding a collision (~1.4%) -- and a
     # collision raises mid-loop, after some rungs are already queued and with
     # no record of which.
+    _refuse_without_a_record(specs)
     for index, task in enumerate(specs):
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
         identifier = spec.task_id(task.label, now, nonce)
@@ -140,6 +141,30 @@ def stage_and_queue(
         # way. Any one of them answers -- they are stamped together.
         dual_write=bool(specs and specs[0].record_dsn),
     )
+
+
+def _refuse_without_a_record(specs: Sequence[TaskSpec]) -> None:
+    """A task that cannot record itself must not be queued.
+
+    `record_dsn` is read from the DISPATCHING SHELL and sealed into the task for
+    its whole life, and it used to be optional: an empty one meant files only,
+    which was the pre-migration behaviour and the rollback. Progress is no
+    longer published to the share, so an empty one now means a task whose
+    progress exists NOWHERE -- and the failure is silent, hours later, on a
+    screen showing a bar that never moved.
+
+    Refused here rather than warned about, because the warning was already
+    there. `submit` has printed `record: SHARE ONLY` since the day two runs
+    finished while the database still called them running, and tasks kept being
+    queued without it -- 65 leg documents from one afternoon reached the share
+    and nothing else.
+    """
+    if specs and not specs[0].record_dsn:
+        raise CommandError(
+            "No POKER_SOLVER_RECORD_DSN in this shell, so these tasks would record "
+            "their progress nowhere -- the share no longer holds it.\n"
+            '  eval "$(just record-env)"'
+        )
 
 
 def _pool_binding(config: CloudConfig, pool: str) -> tuple[str, str]:
