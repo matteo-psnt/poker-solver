@@ -1,10 +1,9 @@
-"""The eval sink's policy, which is the opposite of the run sink's.
+"""The eval sink's policy, INVERTED with the retirement of the share's copy.
 
-`opened` may raise, because a run that cannot record its own existence must not
-proceed. An evaluation is the other case entirely: the document is already on
-the share by the time this is called, the share is the source of truth, and the
-row is one the importer can rebuild. Raising here would throw away hours of
-finished evaluation over a transport fault.
+It used to swallow everything, and the justification was explicit: the document
+was already on the share, so a lost row cost an import. Now the row IS the
+evaluation. An eval that ran for hours and recorded nothing is worse than one
+that says so, so it retries and then raises.
 """
 
 from __future__ import annotations
@@ -48,10 +47,35 @@ class _Recording:
         self.statements.append(statement)
 
 
-def test_an_unreachable_database_does_not_fail_the_eval(caplog):
-    """Measured against a real engine that raises on `begin`."""
-    evals.PostgresEvalSink(_Exploding()).scored("e-1", "run-a", DOCUMENT, "digest")
-    assert "not recorded" in caplog.text, "a lost row must at least say so"
+def test_an_unreachable_database_raises(monkeypatch):
+    """The row IS the evaluation now. Silence would mean hours of compute with
+    no record and nothing saying so."""
+    monkeypatch.setattr(evals, "BACKOFF_SECONDS", 0)
+    with pytest.raises(RuntimeError, match="database is gone"):
+        evals.PostgresEvalSink(_Exploding()).scored("e-1", "run-a", DOCUMENT, "digest")
+
+
+def test_a_blip_is_retried_before_it_is_believed(monkeypatch):
+    """A dropped connection is not a lost evaluation. The write is idempotent --
+    `eval_id` is unique by construction and the insert ignores a conflict -- so
+    retrying after an ambiguous failure cannot double-write."""
+    monkeypatch.setattr(evals, "BACKOFF_SECONDS", 0)
+
+    class _FlakyThenFine(_Recording):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tries = 0
+
+        def begin(self):
+            self.tries += 1
+            if self.tries == 1:
+                raise RuntimeError("connection reset")
+            return self
+
+    engine = _FlakyThenFine()
+    evals.PostgresEvalSink(engine).scored("e-1", "run-a", DOCUMENT, "digest")
+    assert engine.tries == 2
+    assert len(engine.statements) == 1
 
 
 def test_a_reachable_database_gets_one_statement():
