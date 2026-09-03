@@ -21,10 +21,18 @@ from src.shared.config import Config
 
 
 class _Source:
-    """A `RecordSource` holding one run's events."""
+    """A `RecordSource` holding one run's events AS THE DATABASE STORES THEM.
+
+    `event` is a column there and a key in the file, and the fold looks it up by
+    key. A test fed events straight off the file cannot see the difference --
+    this one strips and restores it the way the adapter does, because the first
+    version did not and a resume died on a node looking for `created`.
+    """
 
     def __init__(self, events: list[dict[str, Any]]) -> None:
-        self._events = events
+        stored = [{k: v for k, v in e.items() if k != "event"} for e in events]
+        kinds = [e.get("event") for e in events]
+        self._events = [{**body, "event": kind} for body, kind in zip(stored, kinds, strict=True)]
         self.asked: list[str] = []
 
     def events(self, run_id: str) -> list[Any]:
