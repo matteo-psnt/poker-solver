@@ -30,7 +30,11 @@ from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, legmirror, progress
 from src.shared.cloudtask.node.handlers import HANDLERS, publish_own_run
 from src.shared.cloudtask.node.paths import NodePaths
-from src.shared.cloudtask.node.plan import BadEnvironmentError, parse_environment
+from src.shared.cloudtask.node.plan import (
+    BadEnvironmentError,
+    parse_environment,
+    run_id_for,
+)
 from src.shared.cloudtask.node.process import EXIT_TIMEOUT, Killed, TaskLogger, run_guarded
 
 if TYPE_CHECKING:
@@ -219,13 +223,18 @@ def _node_fields(
     cause: str | None = None,
 ) -> dict[str, Any]:
     """The record's body, straight from the environment."""
+    op = os.environ.get("RUN_OP") or TaskName.TRAIN
     return task_log.node_record(
         task_id=task_id,
         attempt=attempt,
         job_id=os.environ.get("AZ_BATCH_JOB_ID", ""),
         node_id=os.environ.get("AZ_BATCH_NODE_ID", ""),
-        run_id=os.environ.get("RUN_ID", ""),
-        op=os.environ.get("RUN_OP") or TaskName.TRAIN,
+        # DERIVED, not the raw variable. A fresh training task is given no
+        # RUN_ID -- the trainer names the run after the task -- so writing the
+        # variable recorded no run at all and nothing could attribute the task
+        # to it. `run_id_for` is that rule, stated once.
+        run_id=run_id_for(op, os.environ.get("RUN_ID", ""), task_id),
+        op=op,
         config=os.environ.get("RUN_CONFIG", ""),
         target_iteration=os.environ.get("RUN_TO", ""),
         # `RUN_TO` is a TRAIN target and an evaluate task leaves it 0, so

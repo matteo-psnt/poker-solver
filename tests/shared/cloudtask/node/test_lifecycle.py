@@ -16,6 +16,7 @@ from src.shared import cache
 from src.shared.cloudtask import task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import lifecycle
+from src.shared.cloudtask.node import plan as plan_module
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.process import Killed, TaskLogger
 from tests.shared.cloudtask.node.conftest import python
@@ -239,3 +240,42 @@ class TestTheCacheSurvivesBetweenTasks:
 
         monkeypatch.setattr(Path, "chmod", refuse)
         self._stage(paths, monkeypatch)  # must still return 0
+
+
+class TestALegRecordsTheRunItBelongsTo:
+    """MEASURED: 1,256 leg rows across 329 tasks recorded no run at all.
+
+    A fresh training task is given no `RUN_ID` -- the trainer names the run
+    after the TASK, so a Batch retry continues it rather than starting a second
+    one from zero. `_record` wrote the raw variable, so the task -> run link was
+    never written down: `reconcile-runs` reported "no task record" for 24
+    finished runs, refused to close them, and `prune-checkpoints` protected
+    every one of their ladders as "still running". Unprunable disk, from an
+    empty string.
+    """
+
+    def test_a_fresh_training_task_derives_its_run(self):
+        assert plan_module.run_id_for(TaskName.TRAIN, "", "train-abc") == "run-train-abc"
+
+    def test_the_pcs_kernel_mints_a_run_too(self):
+        """Same executor, same naming -- an op-by-op list that missed it would
+        lose exactly the arms this project runs most."""
+        assert plan_module.run_id_for(TaskName.TRAIN_PCS, "", "pcs-abc") == "run-pcs-abc"
+
+    def test_an_explicit_run_always_wins(self):
+        """A continuation names its run, and deriving over the top would point
+        a retry's records at a run that does not exist."""
+        assert plan_module.run_id_for(TaskName.TRAIN, "run-real", "train-abc") == "run-real"
+
+    def test_an_op_that_mints_nothing_stays_empty(self):
+        """A precompute owns no run. `run-buckets-...` would be a link to
+        something that never existed -- worse than the gap it fills."""
+        assert plan_module.run_id_for(TaskName.PRECOMPUTE, "", "buckets-abc") == ""
+
+    def test_the_plan_and_the_record_cannot_disagree(self, monkeypatch):
+        """`train_run_id` is what the TRAINER writes to and `_record` is what
+        the leg says it wrote to. Two derivations would be two answers about
+        one task, which is the defect this replaced."""
+        monkeypatch.setenv("AZ_BATCH_TASK_ID", "train-xyz")
+        built = plan_module.TaskPlan(op=TaskName.TRAIN, config="quick_test", to=1000)
+        assert built.train_run_id == plan_module.run_id_for(TaskName.TRAIN, "", "train-xyz")
