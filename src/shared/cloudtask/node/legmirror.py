@@ -45,12 +45,18 @@ _UPSERT = """
 # the record of the failure that caused the retry. Batch retries one task
 # sequentially, so the race is theoretical; the constraint is what makes it not
 # matter.
+# EVERY PARAMETER IS CAST, and that is not decoration. `task_id` appears twice
+# -- once selected, once compared against the column -- and Postgres deduced
+# `text` from one and `character varying` from the other, refusing the statement
+# with `AmbiguousParameter` rather than guessing. Measured on a node: three
+# retries, each exiting 44 in seconds, having recorded nothing. Nothing but a
+# real server can catch this; the fake driver a unit test uses parses no SQL.
 _CLAIM = """
     INSERT INTO legs (task_id, attempt, leg, run_id, at, body)
-    SELECT %(task_id)s,
+    SELECT %(task_id)s::varchar,
            COALESCE(MAX(attempt), 0) + 1,
-           %(leg)s, %(run_id)s, %(at)s, %(body)s
-      FROM legs WHERE task_id = %(task_id)s AND attempt >= 0
+           %(leg)s::varchar, %(run_id)s::varchar, %(at)s::timestamptz, %(body)s::jsonb
+      FROM legs WHERE task_id = %(task_id)s::varchar AND attempt >= 0
     RETURNING attempt
 """
 

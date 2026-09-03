@@ -112,6 +112,22 @@ class TestClaimingAnAttempt:
         legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
         assert "attempt >= 0" in connection.executed[0][0]
 
+    def test_every_parameter_is_cast(self, monkeypatch):
+        """MEASURED, on a node, three retries deep: `task_id` is both selected
+        and compared against its column, so Postgres deduced `text` from one
+        context and `character varying` from the other and refused the whole
+        statement with `AmbiguousParameter`.
+
+        Asserted as text because nothing else here can see it -- the fake driver
+        below parses no SQL, which is exactly why this reached a node. The real
+        check is `scratchpad/claim_probe.py` against a live server.
+        """
+        connection = _driver(monkeypatch, _Connection(answer=(1,)))
+        legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
+        statement = connection.executed[0][0]
+        for placeholder in ("task_id", "leg", "run_id", "at", "body"):
+            assert f"%({placeholder})s::" in statement, f"{placeholder} is not cast"
+
     def test_it_commits(self, monkeypatch):
         connection = _driver(monkeypatch, _Connection(answer=(1,)))
         legmirror.claim_attempt("task-a", {"task_id": "task-a"}, dsn=DSN)
