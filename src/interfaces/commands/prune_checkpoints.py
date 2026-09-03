@@ -117,11 +117,13 @@ def _is_terminal(run_dir: Path, source: RecordSource | None) -> bool:
     prunes.
     """
     try:
-        events = (
-            [dict(event) for event in source.events(run_dir.name)]
-            if source is not None
-            else run_events.read(run_dir)
-        )
+        # `or`, not a branch on the source EXISTING: a run written before the
+        # flip lives only in `run.jsonl`, and committing to an empty source for
+        # it makes `tail_value` return its `running` default -- so every
+        # pre-flip run the backfill missed reads as protected forever, and it
+        # reads later as prune having stopped working.
+        recorded = [dict(e) for e in source.events(run_dir.name)] if source else []
+        events = recorded or run_events.read(run_dir)
     except (OSError, ValueError):
         return False
     status = run_events.tail_value(events, "status", "running", kind=run_events.STATUS)
