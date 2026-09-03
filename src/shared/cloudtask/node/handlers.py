@@ -484,6 +484,11 @@ def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
     run_dir = paths.runs / plan.train_run_id
     if run_dir.is_dir():
         archive.publish_run(run_dir, paths.archive / run_dir.name, log)
+        # BOTH STORES, while there are two. The container is where rungs are
+        # going; the share is what still answers every fetch. Publishing to one
+        # and reading from the other is the state this migration passes through,
+        # not one it stops in.
+        archive.publish_rungs_to_blob(run_dir, run_dir.name, plan.checkpoint_sas, log)
 
 
 def _probe(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:

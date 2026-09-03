@@ -44,6 +44,17 @@ class TestOnlyATrainerMayWrite:
         assert "w" in permissions
         assert "c" in permissions
 
+    @pytest.mark.parametrize("write", [True, False])
+    def test_no_task_can_delete_a_checkpoint(self, write):
+        """Not even a trainer. Overwriting its own rung is republishing, which
+        is ordinary; removing one is `prune-checkpoints`' job and belongs to an
+        operator reading a dry run, not to a task that crashed oddly.
+
+        Verified live: cleaning up the round-trip probe needed a credential
+        minted for the purpose, because neither task SAS could do it.
+        """
+        assert "d" not in _query(blob.container_sas(ACCOUNT, KEY, write=write))["sp"]
+
     def test_both_may_list(self):
         """Fetching "the current rung" resolves a name before it reads bytes."""
         for write in (True, False):

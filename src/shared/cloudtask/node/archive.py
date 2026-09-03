@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from src.shared import records
+from src.shared.cloudtask.node import blobstore
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -199,6 +200,45 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
             return False
     log(f"published {run_dir.name}")
     return True
+
+
+def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quiet) -> int:
+    """PUT every snapshot this run holds that the container does not. Never raises.
+
+    A SEPARATE PASS from `publish_run`, deliberately, though both run on the
+    same tick. The share's short-circuit is its completion MARKER, and a rung
+    already marked there is skipped -- so a Blob publish riding inside that loop
+    would never upload the rungs that landed before the container existed. The
+    two stores answer "do you have this rung" independently, which is also what
+    lets one of them go away.
+
+    Existence is a HEAD against the object itself rather than a marker beside
+    it: one rung is one atomically-committed blob, so there is no half-written
+    state to guard against and nothing to keep in step.
+
+    Returns how many rungs it uploaded. An empty `sas` uploads nothing and
+    returns 0, which is the rollout and the rollback.
+    """
+    if not sas:
+        return 0
+    landed = 0
+    for child in sorted(run_dir.iterdir()):
+        if not child.is_dir() or not is_snapshot(child.name):
+            continue
+        try:
+            if blobstore.exists(sas, run_id, child.name):
+                continue
+            size = blobstore.put_rung(sas, run_id, child.name, child)
+        except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
+            # LOUD, because the alternative is the failure shape this project
+            # keeps paying for: a write that reports success and lands nowhere.
+            # The share still has the rung today, so this costs a copy and not
+            # the run -- which stops being true the moment the share does.
+            log(f"WARN rung {child.name} NOT in the container: {type(error).__name__}: {error}")
+            continue
+        landed += 1
+        log(f"blob {run_id}/{child.name} <- {size:,} bytes")
+    return landed
 
 
 def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
