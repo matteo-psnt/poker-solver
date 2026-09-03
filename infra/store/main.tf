@@ -79,6 +79,22 @@ resource "azurerm_storage_share" "data" {
   storage_account_id = azurerm_storage_account.store.id
   quota              = var.share_quota_gb
 
+  # HOT, not TransactionOptimized. The premium tier buys cheap transactions at
+  # roughly twice the per-GiB price, and it was the right trade when the record
+  # was written to this share a document at a time: 241 MILLION transactions on
+  # 2026-08-25, where Hot's per-operation rate would have dominated everything.
+  #
+  # The record moved to Postgres on 09-03 and the share stopped being written
+  # per-record. Measured the same day: 1.3 million transactions, a ~200x drop,
+  # against ~830 GiB of mostly-cold checkpoints. The premium now buys nothing
+  # and is charged on every GiB.
+  #
+  # Hot rather than Cool because a resume still FETCHES a rung: Cool halves
+  # storage again but multiplies the read, and this share exists to be read from
+  # by nodes. Checkpoints are moving to Blob, where lifecycle tiering can do
+  # what Files cannot -- this is the right tier for what REMAINS.
+  access_tier = "Hot"
+
   lifecycle {
     prevent_destroy = true
   }
