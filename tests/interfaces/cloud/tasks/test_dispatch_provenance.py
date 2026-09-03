@@ -243,6 +243,10 @@ class TestQueueLoop:
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
         monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
         monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
+        # The SAS is minted against the real SDK, which wants an account and a
+        # key. Faked at the MINTING seam rather than by inventing credentials,
+        # so these tests stay about queueing.
+        monkeypatch.setattr(dispatch, "_with_checkpoint_access", lambda _config, specs: list(specs))
         monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
         monkeypatch.setattr(dispatch.batch, "ensure_job", lambda *a: "poker-20260805")
 
@@ -297,6 +301,7 @@ class TestPoolBinding:
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
         monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
         monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch, "_with_checkpoint_access", lambda _config, specs: list(specs))
         monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
         monkeypatch.setattr(
             dispatch.batch,

@@ -124,6 +124,7 @@ def stage_and_queue(
     # collision raises mid-loop, after some rungs are already queued and with
     # no record of which.
     _refuse_without_a_record(specs)
+    specs = _with_checkpoint_access(config, specs)
     for index, task in enumerate(specs):
         nonce = index * NONCE_CEILING + secrets.randbelow(NONCE_CEILING)
         identifier = spec.task_id(task.label, now, nonce)
@@ -141,6 +142,31 @@ def stage_and_queue(
         # way. Any one of them answers -- they are stamped together.
         records_to_database=bool(specs and specs[0].record_dsn),
     )
+
+
+def _with_checkpoint_access(config: CloudConfig, specs: Sequence[TaskSpec]) -> list[TaskSpec]:
+    """Seal a container SAS into each task, scoped to what its KIND may do.
+
+    A training task publishes rungs and needs write. Everything else -- an
+    evaluate, a score, a duel -- only FETCHES one, and handing those a writable
+    credential would put the power to overwrite a checkpoint in every task that
+    merely reads one. The blast radius of a leaked or mis-sealed task is the
+    difference between a lost score and a lost run.
+
+    Minted per dispatch and never stored, so there is nothing to rotate.
+    """
+    from src.interfaces.cloud.store import blob  # noqa: PLC0415 -- Azure only when dispatching
+
+    minted: dict[bool, str] = {}
+    sealed = []
+    for task in specs:
+        write = task.op in blob.WRITES_CHECKPOINTS
+        if write not in minted:
+            minted[write] = blob.container_sas(
+                config.storage_account, config.share_key, write=write
+            )
+        sealed.append(replace(task, checkpoint_sas=minted[write]))
+    return sealed
 
 
 def _refuse_without_a_record(specs: Sequence[TaskSpec]) -> None:
