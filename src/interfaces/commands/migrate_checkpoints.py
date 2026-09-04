@@ -74,6 +74,15 @@ class MigratedPayload(BaseModel):
     reproduce.
     """
     missing: list[str] = Field(default_factory=list)
+    """Rungs the share holds with a completion marker, that the container
+    lacks. These are migratable and a sweep will move them."""
+    unmarked: list[str] = Field(default_factory=list)
+    """Rungs the share holds WITHOUT a marker, which no sweep will move.
+
+    Pre-marker or interrupted, and indistinguishable from here. They are not a
+    migration failure -- they are snapshots nothing has ever been willing to
+    load, since `require_complete` refuses them at fetch time too.
+    """
 
 
 def run(args: argparse.Namespace) -> MigratedPayload:
@@ -134,15 +143,20 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 if present:
                     payload.rungs_already_there += 1
                     continue
+                # THE SHARE'S MARKER GOVERNS what may be uploaded. A rung with
+                # no marker is either pre-marker or was interrupted mid-publish,
+                # and the two are indistinguishable from here -- so copying one
+                # in would launder a possibly-partial snapshot into a store
+                # where existence MEANS complete.
+                #
+                # Classified BEFORE the verify branch, because "missing" and
+                # "can never be migrated as it stands" are different answers and
+                # a count that merges them cannot gate a deletion.
+                if not (run_dir / archive.marker_for(snapshot)).exists():
+                    payload.unmarked.append(f"{run_dir.name}/{snapshot}")
+                    continue
                 if args.verify:
                     payload.missing.append(f"{run_dir.name}/{snapshot}")
-                    continue
-                # THE SHARE'S MARKER STILL GOVERNS what may be uploaded. A rung
-                # with no marker was interrupted mid-publish, and copying it
-                # into the container would launder a partial snapshot into a
-                # store where existence MEANS complete.
-                if not (run_dir / archive.marker_for(snapshot)).exists():
-                    payload.failures.append(f"{run_dir.name}/{snapshot}: no completion marker")
                     continue
                 at = time.monotonic()
                 size = blobstore.put_rung(sas, run_dir.name, snapshot, run_dir / snapshot)
@@ -201,13 +215,18 @@ def render(payload: MigratedPayload) -> None:
     if payload.verified:
         print(f"runs considered:  {payload.runs_considered:,}")
         print(f"already in blob:  {payload.rungs_already_there:,}")
-        print(f"MISSING:          {len(payload.missing):,}")
-        for line in payload.missing[:30]:
-            print(f"  {line}")
-        if len(payload.missing) > 30:
-            print(f"  ... and {len(payload.missing) - 30:,} more")
-        if not payload.missing and not payload.failures:
-            print("\nEvery published rung is in the container.")
+        print(f"MISSING (marked): {len(payload.missing):,}   <- a sweep will move these")
+        print(f"unmarked:         {len(payload.unmarked):,}   <- no sweep will, ever")
+        for line in payload.missing[:20]:
+            print(f"  missing  {line}")
+        if len(payload.missing) > 20:
+            print(f"  ... and {len(payload.missing) - 20:,} more")
+        for line in payload.unmarked[:10]:
+            print(f"  unmarked {line}")
+        if len(payload.unmarked) > 10:
+            print(f"  ... and {len(payload.unmarked) - 10:,} more")
+        if not payload.missing:
+            print("\nEvery MARKED rung on the share is in the container.")
         return
     print(f"runs considered:  {payload.runs_considered:,}")
     print(
@@ -216,6 +235,8 @@ def render(payload: MigratedPayload) -> None:
     print(f"already present:  {payload.rungs_already_there:,}")
     if payload.stopped_early:
         print("STOPPED EARLY at --limit; re-run to continue where this left off.")
+    if payload.unmarked:
+        print(f"skipped, unmarked: {len(payload.unmarked):,}  (a fetch refuses these too)")
     if payload.failures:
         print(f"\n{len(payload.failures)} rung(s) NOT migrated:")
         for line in payload.failures[:20]:
