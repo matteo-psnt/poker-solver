@@ -178,24 +178,49 @@ def code_snapshot_sas(account: str, key: str, container: str, snapshot: str) -> 
     return f"https://{account}.blob.core.windows.net/{container}/{blob_name}?{token}"
 
 
-def holds_rung(config: Any, run_id: str, object_name: str) -> bool:
-    """Whether the container holds one rung, asked from the LAPTOP.
+def _client(config: Any, run_id: str, object_name: str) -> Any:
+    """A client for one rung, from the LAPTOP.
 
-    The node asks this through `blobstore` over a SAS; a dispatcher has the
-    account key and the SDK, so it asks directly. Both exist because the
-    question is now asked on both sides of a dispatch: since rungs live in the
-    container, "is this rung published" cannot be answered by the share alone.
+    The node reaches the container through `blobstore` over a SAS; a dispatcher
+    has the account key and the SDK, so it goes direct. Both halves exist
+    because since rungs live in the container, questions about a rung -- does it
+    exist, how big is it, delete it -- are asked on both sides of a dispatch.
     """
-    from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- see above
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
 
     service = BlobServiceClient(
         account_url=f"https://{config.storage_account}.blob.core.windows.net",
         credential=config.share_key,
     )
-    blob = service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
+    return service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
+
+
+def rung_size(config: Any, run_id: str, object_name: str) -> int:
+    """Bytes the container holds for one rung; 0 when it holds none."""
+    from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
+
     try:
-        blob.get_blob_properties()
+        return int(_client(config, run_id, object_name).get_blob_properties().size or 0)
+    except ResourceNotFoundError:
+        return 0
+
+
+def holds_rung(config: Any, run_id: str, object_name: str) -> bool:
+    """Whether the container holds one rung."""
+    return rung_size(config, run_id, object_name) > 0
+
+
+def delete_rung(config: Any, run_id: str, object_name: str) -> bool:
+    """Remove one rung from the container. False when it was not there.
+
+    The ONLY delete this project performs against the container, and it is
+    reached from `prune-checkpoints` alone -- no task SAS carries `delete`, so
+    nothing running on a node can do this even by accident.
+    """
+    from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
+
+    try:
+        _client(config, run_id, object_name).delete_blob()
     except ResourceNotFoundError:
         return False
     return True

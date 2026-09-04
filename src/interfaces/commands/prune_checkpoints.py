@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from src.adapters.postgres import connect, queries
 from src.interfaces.commands._base import Command, records_root, resolve_run_dir
 from src.interfaces.errors import CommandError
+from src.shared import records
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -32,10 +33,17 @@ if TYPE_CHECKING:
 
 GB = 1024**3
 
-# `static-<iteration>.zarr`. The iteration is what orders a ladder; a name that
-# does not carry one is not a rung this command knows how to reason about, and
-# is therefore never a candidate.
-_RUNG = re.compile(r"^static-(\d+)\.zarr$")
+# `static-<iteration>` under either extension. The iteration is what orders a
+# ladder; a name that does not carry one is not a rung this command knows how
+# to reason about, and is therefore never a candidate.
+#
+# BOTH SPELLINGS, because the share carries whichever name a rung was published
+# under. Fixed on `.zarr` this matched nothing for any run written after the
+# format changed, so those runs were never pruned at all.
+_RUNG = re.compile(
+    rf"^static-(\d+)(?:{re.escape(records.LEGACY_SNAPSHOT_SUFFIX)}"
+    rf"|{re.escape(records.SNAPSHOT_SUFFIX)})$"
+)
 
 # Parallel by round trip, not by bytes: a snapshot is thousands of tiny chunk
 # files and Azure Files deletes them one at a time.
@@ -82,6 +90,7 @@ class PrunePlan(BaseModel):
     runs_affected: int = 0
     rungs_dropped: int = 0
     files_deleted: int = 0
+    objects_deleted: int = 0
     freed_gib: float = 0.0
     protected: list[str] = []
     plan: list[dict[str, Any]] = []
@@ -137,19 +146,25 @@ def _is_terminal(run_dir: Path, source: RecordSource | None) -> bool:
     return status in {"completed", "failed", "cancelled", "abandoned"}
 
 
-def _published_rungs(run_dir: Path) -> list[int]:
-    """Iterations the SHARE holds, read from the completion markers.
+def _published_rungs(run_dir: Path) -> dict[int, str]:
+    """Iteration -> the snapshot NAME its completion marker names.
 
-    The markers are the share's own answer and the manifest is not: pruning
+    The markers are the run's own answer and the manifest is not: pruning
     removes a snapshot without rewriting the manifest that advertises it, which
     is the disagreement `verify_published_rungs` exists to absorb.
+
+    The name as well as the iteration, because a rung is `static-N.zarr` before
+    the format change and `static-N.ckpt.zst` after it. Rebuilding a spelling
+    at each of the three places that delete or price one is how a rung gets
+    reported and then not removed.
     """
-    rungs = []
-    for path in run_dir.glob(f"{archive.MARKER_PREFIX}static-*.zarr"):
-        match = _RUNG.match(path.name[len(archive.MARKER_PREFIX) :])
+    found: dict[int, str] = {}
+    for path in run_dir.glob(f"{archive.MARKER_PREFIX}static-*"):
+        name = path.name[len(archive.MARKER_PREFIX) :]
+        match = _RUNG.match(name)
         if match:
-            rungs.append(int(match.group(1)))
-    return sorted(rungs)
+            found[int(match.group(1))] = name
+    return found
 
 
 def run(args: argparse.Namespace) -> PrunePlan:
@@ -158,7 +173,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
         raise CommandError("--keep must be at least 1: a run always keeps its latest rung.")
 
     from src.interfaces.cloud.config import CloudConfig  # noqa: PLC0415 -- Azure only when applying
-    from src.interfaces.cloud.store import share  # noqa: PLC0415
+    from src.interfaces.cloud.store import blob, share  # noqa: PLC0415
 
     source = connect.record_source_from_environment()
     engine = connect.engine_from_environment()
@@ -176,7 +191,8 @@ def run(args: argparse.Namespace) -> PrunePlan:
         swept: list[str] = []
 
         for run_dir in wanted:
-            rungs = _published_rungs(run_dir)
+            published = _published_rungs(run_dir)
+            rungs = sorted(published)
             if not rungs:
                 continue
             if not _is_terminal(run_dir, source):
@@ -198,6 +214,9 @@ def run(args: argparse.Namespace) -> PrunePlan:
                     # list rather than recomputing it, so what is printed and
                     # what is deleted cannot diverge.
                     "drop": drop,
+                    # The NAMES beside the iterations, so `--apply` deletes what
+                    # was printed rather than rebuilding a spelling for it.
+                    "snapshots": [published[iteration] for iteration in drop],
                     "dropping": len(drop),
                     "keeping": sorted(keep),
                     "scored_kept": sorted(scored & set(rungs)),
@@ -212,7 +231,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
     service = share.share_client(config)
 
     def _price(entry: dict[str, Any]) -> float:
-        snapshot = f"static-{entry['drop'][0]}.zarr"
+        snapshot = entry["snapshots"][0]
         base = f"{share.ARCHIVE_DIR}/{entry['run']}/{snapshot}"
         entries = share.list_entries(service, config.share_name, base)
         total = sum(e.size or 0 for e in entries if not e.is_directory)
@@ -222,6 +241,12 @@ def run(args: argparse.Namespace) -> PrunePlan:
                 for e in share.list_entries(service, config.share_name, f"{base}/{sub}")
                 if not e.is_directory
             )
+        # WHICHEVER STORE HOLDS IT. A migrated rung has a marker on the share
+        # and no bytes beside it, so listing the share alone prices the whole
+        # plan at zero -- and a plan that says it frees nothing is one nobody
+        # runs.
+        if not total:
+            total = blob.rung_size(config, entry["run"], records.object_name(snapshot))
         return total / GB
 
     if plan.plan and args.price:
@@ -236,8 +261,7 @@ def run(args: argparse.Namespace) -> PrunePlan:
         return plan
 
     for entry in plan.plan:
-        for iteration in entry["drop"]:
-            snapshot = f"static-{iteration}.zarr"
+        for snapshot in entry["snapshots"]:
             base = f"{share.ARCHIVE_DIR}/{entry['run']}/{snapshot}"
             # The marker FIRST, and this ordering was chosen the wrong way round
             # once. A marker is the share's own claim that a rung is complete --
@@ -260,10 +284,20 @@ def run(args: argparse.Namespace) -> PrunePlan:
                     )
                 )
             plan.files_deleted += sum(1 for ok in deleted if ok)
+            # A rung on the share may also be a single FILE rather than a
+            # directory, since the format changed.
+            if share.delete_file(service, config.share_name, base):
+                plan.files_deleted += 1
             # Azure Files keeps the directory when its files go, and an empty one
             # still costs the parent listing a name -- which is the walk every
             # metadata read pays per run.
             _remove_empty_tree(share, service, config.share_name, base)
+            # AND THE CONTAINER, which is where the rung actually lives now.
+            # Deleting only the share left the object behind forever: the
+            # container is the one store that still grows and this is the only
+            # thing that removes anything from it.
+            if blob.delete_rung(config, entry["run"], records.object_name(snapshot)):
+                plan.objects_deleted += 1
 
     # SELF-HEALING, and the reason the ordering comment above can promise it:
     # a sweep interrupted before this existed left directories emptied of files
@@ -278,7 +312,8 @@ def run(args: argparse.Namespace) -> PrunePlan:
             for e in listing
             if not e.is_directory and e.name.startswith(archive.MARKER_PREFIX)
         }
-        for snapshot in (e.name for e in listing if e.is_directory and _RUNG.match(e.name)):
+        files = {e.name for e in listing if not e.is_directory}
+        for snapshot in (e.name for e in listing if _RUNG.match(e.name)):
             if snapshot in claimed:
                 continue
             # UNCLAIMED on a terminal run, so unloadable whatever it holds: the
@@ -287,6 +322,11 @@ def run(args: argparse.Namespace) -> PrunePlan:
             # contain. Either our own interrupted sweep or a copy that died with
             # the run -- both are bytes nothing can reference.
             base = f"{run_base}/{snapshot}"
+            if snapshot in files:
+                # One object rather than a tree, since the format changed.
+                if share.delete_file(service, config.share_name, base):
+                    plan.files_deleted += 1
+                continue
             paths = [path for path, _etag in share.walk_files(service, config.share_name, base)]
             if paths:
                 with ThreadPoolExecutor(max_workers=_PARALLEL_DELETES) as pool:
@@ -329,7 +369,12 @@ def render(payload: PrunePlan) -> None:
             print(f"  {line}")
     print(f"\nrungs {verb}: {payload.rungs_dropped}  ({payload.freed_gib:,.0f} GiB)")
     if payload.applied:
-        print(f"files deleted: {payload.files_deleted:,}")
+        # BOTH STORES, counted apart. A rung lives on the share as thousands of
+        # chunk files or in the container as one object, so a single total
+        # cannot say whether the container was reached -- and for a year it was
+        # not reached at all.
+        print(f"share files deleted:      {payload.files_deleted:,}")
+        print(f"container objects deleted: {payload.objects_deleted:,}")
     else:
         print("DRY RUN -- nothing was deleted. Re-run with --apply to execute this plan.")
 
