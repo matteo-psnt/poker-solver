@@ -26,9 +26,26 @@ class TestOnlyATrainerMayWrite:
         assert TaskName.TRAIN in blob.WRITES_CHECKPOINTS
         assert TaskName.TRAIN_PCS in blob.WRITES_CHECKPOINTS
 
+    def test_the_migration_writes(self):
+        """Moving the history IS writing rungs. Omitted from this set, the sweep
+        was handed a read-only SAS and every upload came back 403
+        `AuthorizationPermissionMismatch` -- the scoping working exactly as
+        designed against a list that was wrong."""
+        assert TaskName.MIGRATE_CHECKPOINTS in blob.WRITES_CHECKPOINTS
+
     @pytest.mark.parametrize("op", [TaskName.EVALUATE, TaskName.PRECOMPUTE, TaskName.NET_PROBE])
     def test_everything_else_only_reads(self, op):
         assert op not in blob.WRITES_CHECKPOINTS
+
+    def test_every_kind_is_classified(self):
+        """A kind that is neither named a writer nor deliberately a reader is a
+        kind whose credential nobody decided. It silently gets read-only, which
+        is safe for a fetch and a 403 for anything that publishes."""
+        from src.shared.cloudtask import kinds
+
+        readers = {TaskName.EVALUATE, TaskName.PRECOMPUTE, TaskName.NET_PROBE}
+        unclassified = set(kinds.KINDS) - {str(op) for op in blob.WRITES_CHECKPOINTS | readers}
+        assert not unclassified, f"no checkpoint-access decision for: {sorted(unclassified)}"
 
     def test_a_reader_sas_carries_no_write_permission(self):
         token = blob.container_sas(ACCOUNT, KEY, write=False)
