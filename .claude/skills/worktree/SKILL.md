@@ -37,21 +37,17 @@ worktree, with `P` = primary checkout:
       ln -sfn "$P/.claude/skills/$s" ".claude/skills/$s"
     done
 
-    # 2. BOTH Terraform states. Initialising only infra/ leaves the identical
-    #    error, because config.py reads infra/store too.
-    ln -sfn "$P/infra/terraform.tfstate"       infra/terraform.tfstate
-    ln -sfn "$P/infra/store/terraform.tfstate" infra/store/terraform.tfstate
-    (cd infra       && terraform init -input=false)
-    (cd infra/store && terraform init -input=false)
-
-Once the remote state backend has been migrated (`backend.tf` present in each
-root rather than `backend.tf.disabled` -- see "State" in `infra/README.md`),
-step 2 is the two `terraform init` lines only: there is no state file to link.
+    # 2. BOTH Terraform roots the CLI reads. State is remote (a blob per
+    #    root), so this only fetches providers and the backend pointer;
+    #    initialising only infra/ leaves the identical error, because
+    #    config.py reads infra/store too.
+    terraform -chdir=infra       init -input=false
+    terraform -chdir=infra/store init -input=false
 
 Cloud commands (`pool-status`, `submit`, `score`) work from a worktree once
 those are in place. Symlinking `.terraform` ITSELF does not work — init must
-populate a real directory; symlinking the state FILE is fine. `INFRA_DIR` is a
-relative path, which is why this is per-worktree rather than once globally.
+populate a real directory. `INFRA_DIR` is a relative path, which is why this
+is per-worktree rather than once globally.
 
 Only if you need `npm run gen:types`: `ln -sfn "$P/console/node_modules"
 console/node_modules`. `.gitignore` has `console/node_modules/` with a trailing

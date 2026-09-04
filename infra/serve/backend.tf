@@ -1,6 +1,6 @@
-# Remote state, PREPARED BUT OFF. Rename to backend.tf and run
-# `terraform -chdir=infra/serve init -migrate-state` once the `tfstate` container
-# exists (`infra/store` creates it). Procedure: "State" in infra/README.md.
+# State lives in the store's `tfstate` container, one blob per root, under
+# AAD -- never the account key. Three local files with several sessions
+# applying was a corruption waiting to happen; the blob lease is the lock.
 terraform {
   backend "azurerm" {
     resource_group_name  = "poker-solver-store-rg"

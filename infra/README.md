@@ -375,34 +375,17 @@ that is not a copy.
 
 ## State
 
-Terraform state is local today (`infra/terraform.tfstate`,
-`infra/store/terraform.tfstate`, `infra/serve/terraform.tfstate`, all
-gitignored -- they carry resource detail you would not want committed). A
-remote backend is **prepared, not applied**: each root holds a
-`backend.tf.disabled` pointing at a private `tfstate` container on the store
-account (`pokersolverstore`, `poker-solver-store-rg`), one blob per root --
-`compute.tfstate`, `store.tfstate`, `serve.tfstate` -- authenticated with AAD,
-never the account key.
+Terraform state is REMOTE: one blob per root in the store account's private
+`tfstate` container (`compute.tfstate`, `store.tfstate`, `serve.tfstate`),
+declared in each root's `backend.tf` and authenticated with AAD, never the
+account key. Several sessions apply against this repo at once; a local file per
+checkout was a corruption waiting to happen, and the blob lease is the lock.
 
-The hand-off, in this order, because the store root will keep its own state in
-the container it creates:
-
-```bash
-terraform -chdir=infra/store apply          # creates the tfstate container and
-                                            # grants you Storage Blob Data Contributor
-for d in infra infra/store infra/serve; do
-  mv "$d/backend.tf.disabled" "$d/backend.tf"
-  terraform -chdir="$d" init -migrate-state # answer yes: copies local -> blob
-done
-```
-
-`use_azuread_auth` needs **Storage Blob Data Contributor** on the account for
-whoever runs Terraform; `infra/store/main.tf` declares that assignment for the
-applying identity, and it also covers reading `checkpoints`, so no separate
-Reader grant is needed. Role assignments take a few minutes to propagate -- an
-`AuthorizationPermissionMismatch` from `init -migrate-state` straight after the
-apply means wait, not misconfigured. Once migrated, a fresh worktree needs
-`terraform init` per root and no tfstate symlinks.
+Whoever runs Terraform needs **Storage Blob Data Contributor** on the account;
+`infra/store/main.tf` grants it to the applying identity. A fresh checkout needs
+only `terraform -chdir=<root> init` per root -- there is no state file to copy or
+link. The old local `terraform.tfstate` files are gitignored leftovers of the
+migration and read by nothing.
 
 `infra/.terraform.lock.hcl` *is* committed, like `uv.lock`: it pins the `azurerm`
 provider version so a fresh `terraform init` elsewhere resolves the same one.

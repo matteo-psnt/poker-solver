@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
+from src.interfaces.errors import CommandError
 from src.shared import gitinfo
 from src.shared.cloudtask import kinds
 from src.shared.cloudtask.kinds import TaskName
@@ -81,7 +82,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--kernel",
         choices=("pcs", "scalar"),
-        default="pcs",
+        default=None,
         help="pcs (default) = the hand-space vector kernel on one freshly sampled "
         "board per iteration (train-pcs): exact cards, the real chance layer, every "
         "hand at once, and the trainer every blueprint since 08-25 has come from. "
@@ -157,6 +158,25 @@ _OPS = {
     "pcs": TaskName.TRAIN_PCS,
 }
 
+# A pcs iteration is ONE BOARD, ~1/s on a quick_test node, and every pcs arm to
+# date has asked for at most a few thousand. A `--to` above this with the kernel
+# left to default is a scalar-sized number typed against the wrong trainer: a
+# 200k quick_test probe would have run for two days.
+PCS_DEFAULT_TO_CEILING = 20_000
+
+
+def _kernel(args: argparse.Namespace) -> str:
+    """The kernel, defaulting to pcs -- unless the target says otherwise."""
+    if args.kernel is not None:
+        return args.kernel
+    if args.to > PCS_DEFAULT_TO_CEILING:
+        raise CommandError(
+            f"--to {args.to:,} with the default kernel (pcs) is {args.to:,} BOARDS, at "
+            "roughly one per second. If this is a scalar smoke test, pass "
+            "`--kernel scalar`; if you mean that many boards, pass `--kernel pcs`."
+        )
+    return "pcs"
+
 
 def _arm(args: argparse.Namespace) -> str:
     """The arm label, defaulting to the branch this was submitted from.
@@ -200,12 +220,13 @@ def run(args: argparse.Namespace) -> SubmitPayload:
     # Only a CONTINUE carries a run id, and only then can it be a fragment the
     # node cannot match. A fresh run's id does not exist yet.
     run_id = resolve_published_run(args.run) if args.run else args.run
+    kernel = _kernel(args)
     payload = dispatch.stage_and_queue(
         pool=args.pool,
         make_tasks=lambda snapshot: [
             spec.TaskSpec(
                 code_snapshot=snapshot,
-                op=_OPS[args.kernel],
+                op=_OPS[kernel],
                 config=args.config,
                 to=args.to,
                 run_id=run_id,
@@ -217,7 +238,7 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 checkpoint_every=(
                     args.checkpoint_every
                     if args.checkpoint_every is not None
-                    else kinds.kind(_OPS[args.kernel]).default_checkpoint_every
+                    else kinds.kind(_OPS[kernel]).default_checkpoint_every
                 ),
                 retain_every=args.retain_every,
                 timeout=args.timeout,

@@ -291,8 +291,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
     return services.evaluate_and_record(
         run_dir,
         # The composition root, same as the trainers': `pipeline` holds a port
-        # and this decides what implements it. No DSN is no sink, which is the
-        # rollout and the rollback both.
+        # and this decides what implements it.
         sink=connect.eval_sink_from_environment(),
         record_source=connect.record_source_from_environment(),
         method=args.method,

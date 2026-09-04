@@ -1,6 +1,7 @@
 """Tests for the headless (non-interactive) CLI transport."""
 
 import argparse
+import contextlib
 import json
 from datetime import UTC
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pytest
 
 from src.interfaces.cli import headless
 from src.interfaces.commands import _base
+from src.interfaces.commands import evaluate as evaluate_cmd
 from src.interfaces.commands import ledger as ledger_cmd
 from src.interfaces.commands import train_static as train_static_cmd
 from src.interfaces.errors import CommandError
@@ -64,6 +66,19 @@ def test_no_command_writes_a_self_overwriting_result_file():
     assert not hasattr(_base, "write_result")
 
 
+def _no_record(monkeypatch, command_module):
+    """The work is faked, so the record it would write to is too: these tests
+    must never reach a real server through the store state."""
+
+    @contextlib.contextmanager
+    def _sink():
+        yield None
+
+    monkeypatch.setattr(command_module.connect, "record_sink", _sink)
+    monkeypatch.setattr(command_module.connect, "eval_sink_from_environment", lambda: None)
+    monkeypatch.setattr(command_module.connect, "record_source_from_environment", lambda: None)
+
+
 def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
     """With --json, log noise must go to stderr and stdout must be parseable JSON."""
     out = StaticTrainingOutput(
@@ -86,6 +101,7 @@ def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
         return out
 
     monkeypatch.setattr(train_static_cmd.services, "train_static", _fake_train)
+    _no_record(monkeypatch, train_static_cmd)
 
     rc = headless.main(["train-static", "--config", "quick_test", "--json"])
 
@@ -113,6 +129,7 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     # Patched on the owning submodule: `evaluate_and_record` dispatches through its
     # own namespace, which the re-export in the package __init__ does not stand in for.
     monkeypatch.setattr(services_scoring, "evaluate_run_lbr", lambda *a, **kw: fake_out)
+    _no_record(monkeypatch, evaluate_cmd)
 
     rc = headless.main(["evaluate", "--run", "run-xyz", "--runs-dir", str(tmp_path), "--json"])
 

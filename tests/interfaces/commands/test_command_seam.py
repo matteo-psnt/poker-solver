@@ -139,8 +139,9 @@ class TestARefusalIsAValue:
 class TestTheCommandLinePutsTheExitBack:
     """The CLI keeps its old behaviour; it just no longer imposes it on others."""
 
-    def test_a_refusal_is_exit_1_and_a_message_on_stderr(self, published, capsys):
-        assert published.is_dir()
+    def test_a_refusal_is_exit_1_and_a_message_on_stderr(self, monkeypatch, capsys):
+        monkeypatch.setattr(progress.connect, "engine_from_environment", lambda: object())
+        monkeypatch.setattr(progress.queries, "run_ids", lambda _e: [])
         code = headless.main(["progress", "--run", "nope"])
         assert code == 1
         assert "Run not found" in capsys.readouterr().err

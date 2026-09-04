@@ -130,7 +130,7 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
     """Argparse transport around :func:`services.train_static`."""
     # The composition root, and the only layer that may name an adapter:
     # `the_work_does_not_know_its_adapters` forbids the service from doing this
-    # itself. `None` when no DSN is set, which is the pre-migration behaviour.
+    # itself.
     with connect.record_sink() as sink:
         out = services.train_static(
             args.config,
