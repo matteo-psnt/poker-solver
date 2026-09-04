@@ -20,6 +20,7 @@ import tarfile
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from src.shared.cloudtask.kinds import TaskName
 
@@ -175,3 +176,26 @@ def code_snapshot_sas(account: str, key: str, container: str, snapshot: str) -> 
         expiry=now + SAS_LIFETIME,
     )
     return f"https://{account}.blob.core.windows.net/{container}/{blob_name}?{token}"
+
+
+def holds_rung(config: Any, run_id: str, object_name: str) -> bool:
+    """Whether the container holds one rung, asked from the LAPTOP.
+
+    The node asks this through `blobstore` over a SAS; a dispatcher has the
+    account key and the SDK, so it asks directly. Both exist because the
+    question is now asked on both sides of a dispatch: since rungs live in the
+    container, "is this rung published" cannot be answered by the share alone.
+    """
+    from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- see above
+
+    service = BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    )
+    blob = service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
+    try:
+        blob.get_blob_properties()
+    except ResourceNotFoundError:
+        return False
+    return True

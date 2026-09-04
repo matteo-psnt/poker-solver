@@ -96,3 +96,55 @@ def test_every_missing_rung_is_reported_at_once(share_holding):
     workspace = share_holding(_complete(100_000_000))
     with pytest.raises(CommandError, match="5000000, 10000000"):
         workspace.verify_published_rungs(RUN, ["5000000", "10000000", "100000000"])
+
+
+def _migrated(*iterations: int) -> list[str]:
+    """A run the migration has moved: markers on the share, bytes in the
+    container, and not one snapshot directory left beside them."""
+    return [f".complete-static-{iteration}.zarr" for iteration in iterations]
+
+
+class TestAMigratedRungIsStillPublished:
+    """Requiring the share to list a DIRECTORY refused every run the migration
+    had moved -- six 300M runs hold 316 marked rungs and no directory at all,
+    so a score of any of them was rejected in the terminal before it could
+    reach a node that would have found the rung in the container.
+    """
+
+    def test_a_rung_only_the_container_holds_is_accepted(self, share_holding, monkeypatch):
+        workspace = share_holding(_migrated(100_000_000, 300_000_000))
+        from src.interfaces.cloud.store import blob
+
+        monkeypatch.setattr(blob, "holds_rung", lambda *_a: True)
+        workspace.verify_published_rungs(RUN, ["300000000"])
+
+    def test_a_marker_with_no_bytes_in_either_store_is_still_refused(
+        self, share_holding, monkeypatch
+    ):
+        """Three rungs are in exactly this state -- marked, no share copy, no
+        object. Accepting them on the marker alone is what this check exists to
+        prevent: a node allocation that dies on a rung nothing holds."""
+        workspace = share_holding(_migrated(45_000_000))
+        from src.interfaces.cloud.store import blob
+
+        monkeypatch.setattr(blob, "holds_rung", lambda *_a: False)
+        with pytest.raises(CommandError, match="no published, complete checkpoint"):
+            workspace.verify_published_rungs(RUN, ["45000000"])
+
+    def test_the_container_is_not_consulted_when_the_share_has_it(self, share_holding, monkeypatch):
+        """One round trip per rung, and a ladder score asks for thirty."""
+        workspace = share_holding(_complete(100_000_000))
+        from src.interfaces.cloud.store import blob
+
+        asked: list[str] = []
+        monkeypatch.setattr(blob, "holds_rung", lambda *a: bool(asked.append(a[2])))
+        workspace.verify_published_rungs(RUN, ["100000000"])
+        assert asked == []
+
+    def test_a_rung_published_under_the_new_name_is_accepted(self, share_holding):
+        """Published without a SAS, a rung lands on the share as one FILE named
+        `static-N.ckpt.zst`; the old check only ever looked for `.zarr`."""
+        workspace = share_holding(
+            ["static-300000000.ckpt.zst", ".complete-static-300000000.ckpt.zst"]
+        )
+        workspace.verify_published_rungs(RUN, ["300000000"])

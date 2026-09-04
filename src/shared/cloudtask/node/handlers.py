@@ -106,11 +106,18 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
         destination = paths.runs / plan.warm_start_from
         if wanted:
             archive.fetch_metadata(prior, destination)
-            name = f"static-{wanted}.zarr"
-            if not (prior / name).is_dir():
-                log(f"FATAL warm-start prior has no rung {wanted} ({name} absent on the share)")
+            # THE PRIOR'S MANIFEST NAMES ITS RUNGS, and asking the share for a
+            # directory is a second opinion that fails for every migrated run:
+            # the rung is in the container and there is no directory to find.
+            name = dict(archive.manifest_entries(prior)).get(int(wanted), "")
+            if not name:
+                log(f"FATAL warm-start prior has no rung {wanted} (its manifest names none)")
                 return 1, "missing-rung"
-            archive.require_complete(prior, name, plan.checkpoint_sas)
+            try:
+                archive.require_complete(prior, name, plan.checkpoint_sas)
+            except archive.FetchRefusedError as refusal:
+                log(f"FATAL warm-start rung {wanted}: {refusal}")
+                return 1, "missing-rung"
             archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas)
             log(f"fetched warm-start rung {name}")
         else:
