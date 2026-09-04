@@ -179,21 +179,47 @@ class TestTheGateSeesWhatIsNotOnTheShare:
         assert payload.recoverable == ["run-b/static-100.zarr"]
         assert payload.missing == [], "it is not on the share; a sweep cannot move it"
 
-    def test_a_rung_with_no_bytes_at_all_is_reported_lost(self, stranded, monkeypatch):
+    def test_a_rung_with_no_bytes_at_all_is_a_phantom_and_blocks_nothing(
+        self, stranded, monkeypatch, capsys
+    ):
+        """MEASURED: 1,030 of these against 3 genuinely gone. `prune` drops a
+        snapshot without rewriting the manifest that advertises it, so a
+        settled run's ladder names rungs it has not held for weeks. Treating
+        the manifest as the authority on what EXISTS reported all of them as
+        loss and refused a deletion that was safe."""
         import src.shared.cloudtask.node.blobstore as blobstore
 
         monkeypatch.setattr(blobstore, "exists", lambda *_a: False)
         payload = migrate_checkpoints.run(_args(stranded, verify=True))
+        migrate_checkpoints.render(payload)
 
-        assert payload.lost == ["run-b/static-100.zarr"]
+        assert payload.phantom == ["run-b/static-100.zarr"]
+        out = capsys.readouterr().out
+        assert "SHARE: every rung it holds is in the container" in out
 
-    def test_an_outstanding_rung_refuses_the_deletion(self, stranded, monkeypatch, capsys):
+    def test_a_rung_only_a_tar_holds_refuses_the_tar_deletion_alone(
+        self, stranded, monkeypatch, capsys
+    ):
+        """The two deletions are gated on different things: the share can be
+        safe while the tars are not."""
+        import src.shared.cloudtask.node.blobstore as blobstore
+
+        monkeypatch.setattr(blobstore, "exists", lambda _s, _r, name: name.endswith(".tar"))
+        migrate_checkpoints.render(migrate_checkpoints.run(_args(stranded, verify=True)))
+
+        out = capsys.readouterr().out
+        assert "TARS:  DO NOT DELETE" in out
+        assert "SHARE: every rung it holds is in the container" in out
+
+    def test_a_rung_the_share_holds_and_the_container_lacks_refuses_the_share(
+        self, share, monkeypatch, capsys
+    ):
         import src.shared.cloudtask.node.blobstore as blobstore
 
         monkeypatch.setattr(blobstore, "exists", lambda *_a: False)
-        migrate_checkpoints.render(migrate_checkpoints.run(_args(stranded, verify=True)))
+        migrate_checkpoints.render(migrate_checkpoints.run(_args(share, verify=True)))
 
-        assert "DO NOT DELETE the share" in capsys.readouterr().out
+        assert "SHARE: DO NOT DELETE" in capsys.readouterr().out
 
     def test_a_share_directory_no_manifest_names_is_not_migrated(self, share, monkeypatch):
         """`_prune` deletes what the manifest does not name, so an orphan

@@ -103,9 +103,17 @@ class MigratedPayload(BaseModel):
     the share, so the tar is the ONLY copy -- 313 rungs across six 300M runs.
     `--recover-tars` converts them; nothing at HEAD can read one as it stands.
     """
-    lost: list[str] = Field(default_factory=list)
-    """Claimed rungs with no bytes in either store. The manifest names a rung
-    that exists nowhere, so every fetch of it refuses forever."""
+    phantom: list[str] = Field(default_factory=list)
+    """Claimed rungs with no bytes in either store.
+
+    PRUNE MAKES THESE BY DESIGN and they are not data loss: dropping a rung
+    deletes the snapshot without rewriting the manifest that advertises it, so
+    a settled run's ladder names rungs it has not held for weeks -- measured
+    1,030 of them against 3 that are genuinely gone. They block no deletion,
+    because deleting the share cannot take away bytes that are not there. They
+    are why this gate cannot treat the manifest as the authority on what
+    EXISTS; it is only the authority on what a fetch will ask for.
+    """
     unclaimed: list[str] = Field(default_factory=list)
     """Share directories NO manifest names. Nothing can resolve them, so they
     are not migrated -- and they are the one thing safe to delete outright."""
@@ -234,8 +242,7 @@ def _one_rung(
                 payload.bytes_uploaded += _recover_from_tar(sas, run_dir.name, snapshot, work)
                 payload.rungs_uploaded += 1
             return
-        print(f"  {snapshot}: LOST, no bytes in either store", flush=True)
-        payload.lost.append(f"{run_dir.name}/{snapshot}")
+        payload.phantom.append(f"{run_dir.name}/{snapshot}")
         return
 
     # THE SHARE'S MARKER GOVERNS what may be uploaded. A rung with no marker is
@@ -424,8 +431,6 @@ def render(payload: MigratedPayload) -> None:
         print("STOPPED EARLY at --limit; re-run to continue where this left off.")
     if payload.unmarked:
         print(f"skipped, unmarked: {len(payload.unmarked):,}  (a fetch refuses these too)")
-    if payload.lost:
-        print(f"LOST, no bytes anywhere: {len(payload.lost):,}")
     if payload.failures:
         print(f"\n{len(payload.failures)} rung(s) NOT migrated:")
         for line in payload.failures[:20]:
@@ -449,13 +454,12 @@ def _render_verification(payload: MigratedPayload) -> None:
     print(f"MISSING (marked):     {len(payload.missing):,}   <- a sweep will move these")
     print(f"unmarked:             {len(payload.unmarked):,}   <- no sweep will, ever")
     print(f"RECOVERABLE from tar: {len(payload.recoverable):,}   <- --recover-tars moves these")
-    print(f"LOST (no bytes):      {len(payload.lost):,}   <- claimed, exists nowhere")
     print(f"UNREADABLE object:    {len(payload.unreadable):,}   <- present but will not open")
     print(f"unclaimed on share:   {len(payload.unclaimed):,}   <- no manifest names them")
+    print(f"phantom ladder rows:  {len(payload.phantom):,}   <- pruned; block nothing")
     for label, lines, cap in (
         ("missing", payload.missing, 20),
         ("recoverable", payload.recoverable, 10),
-        ("LOST", payload.lost, 20),
         ("UNREADABLE", payload.unreadable, 20),
         ("unmarked", payload.unmarked, 10),
         ("unclaimed", payload.unclaimed, 10),
@@ -464,14 +468,21 @@ def _render_verification(payload: MigratedPayload) -> None:
             print(f"  {label}  {line}")
         if len(lines) > cap:
             print(f"  ... and {len(lines) - cap:,} more {label}")
-    blocking = payload.missing + payload.recoverable + payload.lost + payload.unreadable
-    if blocking:
-        print(
-            f"\nDO NOT DELETE the share: {len(blocking):,} claimed rung(s) are not "
-            f"safely in the container."
-        )
-        return
-    print("\nEvery rung any manifest CLAIMS is in the container and opens.")
+
+    # TWO DELETIONS, TWO ANSWERS. They are gated on different things and
+    # merging them is how a gate says no to the safe one and yes to the other.
+    print()
+    blocks_share = payload.missing + payload.unreadable
+    if blocks_share:
+        print(f"SHARE: DO NOT DELETE -- {len(blocks_share):,} rung(s) it holds are not in the")
+        print("       container, or are there and will not open.")
+    else:
+        print("SHARE: every rung it holds is in the container and opens.")
+    if payload.recoverable:
+        print(f"TARS:  DO NOT DELETE -- {len(payload.recoverable):,} rung(s) exist ONLY as a tar.")
+        print("       Run --recover-tars first; nothing else can read them.")
+    else:
+        print("TARS:  every rung that only a tar held has been converted.")
 
 
 COMMAND = Command(
