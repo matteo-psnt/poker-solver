@@ -10,7 +10,7 @@ panel is more useful than one that dies.
 The blueprint is supplied as a factory rather than loaded here, so a test can
 serve a four-iteration solver through the identical app the node serves a 30M
 one through. Loading takes ~1 minute and allocates the full table, so it happens
-once at construction and never changes: ONE run per process.
+once at construction.
 
 ONE RUN PER PROCESS, and that is the point rather than a limitation. The box this
 runs on holds a Chipzen ladder slot, so the strategy read here has to be the one
