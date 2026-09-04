@@ -44,6 +44,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=0,
         help="Stop after this many rungs. Useful for a first, small, provable sweep.",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Upload nothing; report which published rungs the container lacks.",
+    )
     parser.add_argument("--pool", default=None, help="Pool to run on (default: the training pool).")
     parser.add_argument("--timeout", default=MIGRATE_TIMEOUT, help="Wall-clock ceiling.")
 
@@ -57,6 +62,8 @@ def _flags(args: argparse.Namespace) -> tuple[str, ...]:
     success.
     """
     flags: list[str] = []
+    if args.verify:
+        flags.append("--verify")
     if args.limit:
         flags += ["--limit", str(args.limit)]
     if args.runs:
