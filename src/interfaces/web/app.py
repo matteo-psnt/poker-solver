@@ -61,7 +61,6 @@ from src.interfaces.commands import (
     runinfo,
     runs,
     score,
-    serve_box,
     submit,
     submit_precompute,
     tasks,
@@ -423,24 +422,6 @@ def create_app() -> FastAPI:
     # asking whether the box is up must not be answered from 15 seconds ago while
     # someone watches it boot.
     #
-    # WHICH box is the command's own answer, and these three used to ask it to
-    # repeat itself: `--resource-group`, `--vm` and `--subscription` were passed
-    # back at their parser defaults, so the VM's name lived here as well as in
-    # `serve_box.py`. `action` stays spelled out -- these differ in exactly one
-    # argument, and leaving it implicit on the one whose value is the default
-    # makes the set read as though it were doing something else.
-    @app.get("/api/box", response_model=contract.Box, responses=ERRORS)
-    def _box() -> JSONResponse:
-        return uncached(serve_box.COMMAND, action="status")
-
-    @app.post("/api/box/start", response_model=contract.Box, responses=ERRORS)
-    def _box_start() -> JSONResponse:
-        return uncached(serve_box.COMMAND, action="start")
-
-    @app.post("/api/box/stop", response_model=contract.Box, responses=ERRORS)
-    def _box_stop() -> JSONResponse:
-        return uncached(serve_box.COMMAND, action="stop")
-
     # Several commands fanned out concurrently and joined -- served through the
     # same memo and the same failure ladder as a single command, so a screen is
     # classified and recorded exactly like the panels it is made of.

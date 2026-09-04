@@ -82,7 +82,6 @@ export type Autoscale = S["AutoscalePayload"];
 export type Dispatched = S["SubmitPayload"] | S["ScorePayload"] | S["PrecomputeDispatchPayload"];
 export type PushedCode = S["PushedCodePayload"];
 export type Cancelled = S["CancelledPayload"];
-export type Box = S["BoxPayload"];
 
 /** The blueprint server's shapes, proxied through `/api/blueprint/*`. */
 export type BlueprintRun = S["BlueprintRun"];

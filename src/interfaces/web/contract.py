@@ -61,7 +61,6 @@ from src.interfaces.commands.runinfo import RunInfoPayload as RunInfo
 from src.interfaces.commands.runs import RunsPayload as Runs
 from src.interfaces.commands.runs import RunSummary
 from src.interfaces.commands.score import ScorePayload
-from src.interfaces.commands.serve_box import BoxPayload as Box
 from src.interfaces.commands.submit import SubmitPayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.tasks import TasksPayload as Tasks
@@ -77,7 +76,6 @@ __all__ = [
     "BatchTask",
     "Billed",
     "BlueprintRun",
-    "Box",
     "Bucket",
     "Cancelled",
     "Combos",

@@ -6,10 +6,9 @@ console still could not queue a board-free or a warm-started run, because
 `SubmitBody` was missing the seven flags those two features arrived as. The gap
 looked like a feature nobody had built rather than a field nobody had added.
 
-The other direction is the same mistake mirrored. `/api/box` handed `serve-box`
-its own `--resource-group`, `--vm` and `--subscription` defaults straight back,
-so the blueprint host's name was declared twice and renaming it in `serve_box.py`
-would have left this file pointing at a VM that no longer exists.
+The other direction is the same mistake mirrored: an endpoint that hands a
+command its own parser defaults straight back declares them twice, so renaming
+one leaves this file pointing at something that no longer exists.
 
 Read from the AST for the reason the coverage guard is: a mapping kept here is
 another thing that can be right about a file it does not read.
@@ -173,13 +172,7 @@ def _resolvable(node: ast.expr) -> tuple[bool, Any]:
 def test_no_endpoint_restates_a_parser_default():
     """`Command.invoke` fills every default from `add_arguments`, so re-passing
     one is a second declaration that can drift from the first.
-
-    `action="status"` on `/api/box` is the one declared exception: those three
-    endpoints differ in exactly one argument, and leaving it implicit on the one
-    whose value happens to be the default makes the set read as though it were
-    doing something else.
     """
-    allowed = {("serve-box", "action")}
     restated: list[str] = []
     for call in _answer_calls():
         command = _command_of(call)
@@ -191,7 +184,7 @@ def test_no_endpoint_restates_a_parser_default():
             if keyword.arg is None or keyword.arg not in defaults:
                 continue
             known, value = _resolvable(keyword.value)
-            if known and value == defaults[keyword.arg] and (command, keyword.arg) not in allowed:
+            if known and value == defaults[keyword.arg]:
                 restated.append(f"{command}({keyword.arg}={value!r})")
     assert not restated, (
         f"{sorted(restated)} pass a value equal to the command's own parser default. "

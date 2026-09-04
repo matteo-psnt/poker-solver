@@ -158,7 +158,7 @@ export function Charts() {
  * refusal does: those name a token and list what was on offer, and they mean a
  * bookmark that outlived its action model, which IS worth greying the panel for.
  *
- * Recognised by matching, as `BoxControl` does for "no blueprint host". Working out
+ * Recognised by matching the server's own sentence. Working out
  * client-side which street a line reaches is engine logic, and the console does not
  * get to hold a second copy of the rules.
  */

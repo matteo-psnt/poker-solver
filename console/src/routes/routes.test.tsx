@@ -140,9 +140,6 @@ describe("the container pages render", () => {
     await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
     const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
     expect(tabs).toEqual(["Chart", "Play"]);
-    // The run the host holds is named above the tabs, not inside one: both
-    // tabs read the same blueprint and a per-tab answer could disagree.
-    expect(screen.getByText(/serving/i)).toBeTruthy();
   });
 
   it("opens the blueprint page on the tab the URL names", async () => {
