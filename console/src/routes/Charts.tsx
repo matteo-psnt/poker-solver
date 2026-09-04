@@ -45,8 +45,8 @@ export function Charts() {
   const pinned = held?.spot === spot ? held.cell : null;
   const [hovered, setHovered] = useState<Cell | null>(null);
 
-  // What the box is actually holding, which `Loaded` can also change. Polled
-  // only while a swap is in flight — see `useBlueprintRun`.
+  // What the box is holding. Fetched once: it cannot change without a deploy,
+  // which restarts the server this tab is talking to.
   const run = useBlueprintRun();
   const combos = useCombos(!!run.data);
   const node = useSolverNode(path, board, average, !!run.data);

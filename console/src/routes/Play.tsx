@@ -37,23 +37,6 @@ export function Play() {
   const bigBlind = run.data?.big_blind ?? 0;
   const error = deal.error ?? act.error;
 
-  /**
-   * Drop the hand when the loaded run changes underneath it.
-   *
-   * The run-swap control lives in `Loaded`, ABOVE the tabs, so it is clickable
-   * while this tab is mounted. `hand` is local state and used not to notice:
-   * `bigBlind` tracked the new run while the chips stayed the old run's, so
-   * `inBlinds()` and `label()` divided one run's chips by another's blind and
-   * every figure on the table -- pot, both stacks, every action, the payoff --
-   * silently restated itself in the wrong denomination. The session belongs to
-   * the run that dealt it, so there is nothing to carry across.
-   */
-  const loadedRun = run.data?.run ?? null;
-  const dealtUnder = useRef<string | null>(null);
-  useEffect(() => {
-    if (hand && dealtUnder.current !== loadedRun) setHand(null);
-    if (!hand) dealtUnder.current = loadedRun;
-  }, [hand, loadedRun]);
   const busy = deal.isPending || act.isPending;
   const canAct = Boolean(hand && !hand.over) && !busy;
 

@@ -189,7 +189,8 @@ export const usePushCode = () =>
   });
 
 /**
- * The blueprint server. Polled ONLY while a swap is in flight.
+ * The blueprint server. Never polled: a host serves one run for the life of
+ * its process.
  *
  * A host serves ONE run for the life of its process, so there is no interval
  * here and no invalidation: the answer cannot change without a deploy, which
