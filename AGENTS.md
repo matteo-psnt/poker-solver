@@ -80,6 +80,11 @@ Stopping to ask is the expensive failure here, not a wrong routine call.
   options with a recommendation, and what each costs. Someone who has read
   nothing else must be able to answer it.
 - Finish everything that does not depend on the answer first.
+- **Suggest freely.** This is a collaboration: when you see a better approach,
+  a cleaner design, an experiment worth running or a measurement that would
+  settle an open question, say so, with the reason and the cost. Put it in
+  the report or raise it as you go. A suggestion never blocks the work asked
+  for; the user picks it up or not.
 
 ## Reporting
 
