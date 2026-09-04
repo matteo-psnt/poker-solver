@@ -58,7 +58,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "settled and BIGGER WINS: ~60k it/s at D16/15w, ~115k at D32/31w, ~152k at "
         "D64/63w, a ratio that RISES with run length, at 0.88 efficiency per billed "
         "vCPU -- so under 'wall-clock is the scarce thing' take the big box for a "
-        "long run. PCS is NOT settled: its RAM clamp leaves every D box at ~25-28% "
+        "long run. PCS is NOT settled: its RAM clamp leaves every D box at ~25-28%% "
         "of its cores, which predicts a wash per dollar, while task-level history "
         "says train is severalfold cheaper. Those disagree and the history is "
         "confounded by task length, so until a same-wave A/B settles it prefer "
