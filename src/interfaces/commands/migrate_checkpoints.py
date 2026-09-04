@@ -165,13 +165,8 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 if args.verify:
                     payload.missing.append(f"{run_dir.name}/{snapshot}")
                     continue
-                at = time.monotonic()
-                size = blobstore.put_rung(sas, run_dir.name, snapshot, run_dir / snapshot)
-                payload.bytes_uploaded += size
-                print(
-                    f"  {snapshot}: {size / 1024**2:.0f} MiB in {time.monotonic() - at:.1f}s",
-                    flush=True,
-                )
+                print(f"  {snapshot}: uploading...", flush=True)
+                payload.bytes_uploaded += _upload(sas, run_dir, snapshot, work)
             except Exception as error:  # noqa: BLE001 -- one bad rung must not end the sweep
                 payload.failures.append(f"{run_dir.name}/{snapshot}: {type(error).__name__}")
                 continue
