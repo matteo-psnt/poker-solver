@@ -1,4 +1,4 @@
-"""`ledger` and `curve` answer from either store, and must answer the same.
+"""`ledger`, `curve` and `arms` answer from either store, and must answer the same.
 
 Compared across the whole record before the flip: 2,238 eval rows both ways,
 none on one side only, all 2,238 IDENTICAL -- but only after two defects that
@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from src.interfaces.commands import _base, curve, ledger
+from src.interfaces.commands import _base, arms, curve, ledger
 from src.pipeline.evaluation import ledger as eval_ledger
 
 DOCUMENT: dict[str, Any] = {
@@ -89,3 +89,15 @@ def test_curve_takes_its_ladder_from_the_claimed_rungs(monkeypatch):
     monkeypatch.setattr(curve, "eval_index_rows", lambda _e, run_id=None: [])
     payload = curve.run(argparse.Namespace(run="run-a", tier=0))
     assert payload.retained_iterations == [1000, 2000]
+
+
+def test_arms_reads_the_database_when_one_is_configured(monkeypatch):
+    """It rebuilt its index from the share's eval DOCUMENTS, which stopped being
+    written on 09-03 -- so `--experiment` answered with a world that ended that
+    day, and an arm scored since looked exactly like an arm never scored."""
+    row = eval_ledger.ledger_row({**DOCUMENT, "experiment_id": "e1", "arm": "a1"})
+    monkeypatch.setattr(arms.connect, "engine_from_environment", lambda: object())
+    monkeypatch.setattr(arms, "eval_index_rows", lambda _e: [row])
+    payload = arms.run(argparse.Namespace(experiment="e1", control=None))
+    assert payload.ledger == "database"
+    assert [a for tier in payload.result.tiers for a in tier.arms] == ["a1"]
