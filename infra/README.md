@@ -348,13 +348,20 @@ re-copy ~1.6 GB on each cold start, so the one property that would justify the
 extra machinery (a container image, a registry) is the property this workload
 cannot use.
 
-**It wakes on demand and switches itself off.** The console has a start/stop
-button (`poker-solver serve-box`), and the server exits after
-`idle_timeout_seconds` with no request — which its systemd unit escalates into
-deallocating the whole VM, using the box's own managed identity. A deallocated VM
+**It stays up, and nothing switches it off on its own.** It also holds the
+Chipzen ladder slot (`chipzen-seat.service`), and a seat is only worth having if
+it is there when a match is dispatched — so the reader beside it is
+`Restart=always` and there is no idle timer. Stopping it is a deliberate act:
+the console's button, or `poker-solver serve-box --action stop`. A deallocated VM
 costs nothing but its disks (~$15/mo), and because the run lives on a **managed**
 data disk that survives deallocation, waking is a boot plus a checkpoint load
 (~2 min) rather than re-copying ~1.6 GB.
+
+**One run per host, and the deploy decides which.** `just serve-deploy <run>`
+stages the checkpoint, rewrites both units' environment and restarts them, so the
+strategy the chart reads is the one the seat is playing. There is no switching it
+from the console: a page that could change the loaded run is a page that can make
+the chart and the seat disagree about what "Blueprint" means.
 
 **Two ports, asymmetric on purpose.** 443 is open to the world, and what answers
 is Caddy: it terminates TLS and checks a bearer token, returning a bare **404** —
@@ -364,9 +371,8 @@ add it; that would publish an unauthenticated read interface to a trained run.
 
 ```bash
 just serve-create                 # once
-just serve-ssh                    # point it at a run: edit RUN= in /etc/blueprint.env
-eval "$(just serve-env)"          # URL + token into this shell
-uv run poker-solver serve         # console; Solver and Play now have a host
+just serve-deploy <run>           # stage a run and start serving it
+uv run poker-solver serve         # console; Chart and Play find the host themselves
 ```
 
 `just serve-start` / `just serve-stop` do from a terminal what the console's

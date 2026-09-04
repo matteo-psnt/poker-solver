@@ -1,0 +1,32 @@
+[Unit]
+Description=Blueprint server (reads one trained run)
+After=network-online.target mnt-work.mount
+Wants=network-online.target
+# NO OnFailure, and no rate limiter -- the same contract as chipzen-seat.service
+# beside it, for the same reason. This box holds a ladder slot and stays up, so
+# there is nothing for a failure here to escalate to: giving up would leave the
+# box billing with no reader on it, which is the outcome the old escalation was
+# built to avoid and now the only one it could produce.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=solver
+EnvironmentFile=/etc/blueprint.env
+Environment=POKER_SOLVER_CACHE=/mnt/work/cache
+WorkingDirectory=/mnt/work/code
+# $READER_EXTRA is the UNQUOTED form on purpose: systemd word-splits it and an
+# empty one expands to no arguments at all. It carries `--at <rung>`, so the
+# chart reads the rung the seat is actually playing rather than whatever the
+# manifest calls the head.
+ExecStart=/home/solver/.local/bin/uv run poker-solver blueprint-serve \
+  --run ${RUN} --runs-dir ${RUNS_DIR} $READER_EXTRA
+# ALWAYS, not on-failure. The reader exits for one reason now -- something went
+# wrong -- and a box kept up by the seat must not sit there without one.
+Restart=always
+# Loading a production run is ~7 s, so this is a pause between attempts rather
+# than a throttle.
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

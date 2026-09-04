@@ -4,10 +4,11 @@ import { cn } from "@/lib/utils";
 /**
  * The host's power state, and the button that changes it.
  *
- * The box wakes on demand and switches itself off when idle, so this is the
- * first thing on both pages that use it: without it, a stopped box looks
- * identical to a broken one, and the page below would just say "no server
- * configured" while the fix was one click away.
+ * Nothing switches this box off on its own -- it holds a Chipzen ladder slot --
+ * so these two buttons are the whole story, and they are the first thing on the
+ * page that uses them: without it, a stopped box looks identical to a broken
+ * one, and the page below would just say "no server" while the fix was a click
+ * away.
  *
  * Waking takes about two minutes. That is stated rather than hidden behind a
  * spinner — a spinner with no duration reads as a hang at about the thirty

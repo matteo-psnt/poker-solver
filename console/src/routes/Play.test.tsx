@@ -22,8 +22,6 @@ const RUN = {
   small_blind: 1,
   big_blind: 2,
   combos: 1326,
-  loading: null,
-  can_switch: true,
 };
 
 const HAND = {

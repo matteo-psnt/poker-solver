@@ -9,10 +9,11 @@ UI from growing a second read path.
 
 Where the blueprint server is
 -----------------------------
-``POKER_SOLVER_BLUEPRINT_URL``. Unset means the feature is off, and every
-endpoint says so in a sentence rather than failing as a connection error -- "not
-configured" and "configured but unreachable" are different problems with
-different fixes, and a bare `ConnectionRefused` conflates them.
+``POKER_SOLVER_BLUEPRINT_URL``, which `create_app` fills in from the serve
+state at startup. Unset therefore means there is no applied serve state at all,
+and every endpoint says so in a sentence rather than failing as a connection
+error -- "no host" and "host unreachable" are different problems with different
+fixes, and a bare `ConnectionRefused` conflates them.
 """
 
 from __future__ import annotations
@@ -23,13 +24,11 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from fastapi.responses import JSONResponse
 
+from src.interfaces.cloud.config import BLUEPRINT_TOKEN_ENV, BLUEPRINT_URL_ENV
 from src.interfaces.web import contract
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
-
-BLUEPRINT_URL_ENV = "POKER_SOLVER_BLUEPRINT_URL"
-BLUEPRINT_TOKEN_ENV = "POKER_SOLVER_BLUEPRINT_TOKEN"
 
 # Generous: a node read crosses a tunnel, and the grid is a real computation on
 # the far side. Short enough that a dead server is reported rather than hung on.
@@ -37,7 +36,7 @@ TIMEOUT_SECONDS = 30.0
 
 
 def blueprint_url() -> str | None:
-    """The configured server, or ``None`` when the feature is not turned on."""
+    """The server's address, or ``None`` when nothing has told us one."""
     url = os.environ.get(BLUEPRINT_URL_ENV, "").strip()
     return url.rstrip("/") or None
 
@@ -71,8 +70,8 @@ def forward(
     if base is None:
         return JSONResponse(
             {
-                "error": "No blueprint server is configured. Point "
-                f"{BLUEPRINT_URL_ENV} at one to browse a run's strategy."
+                "error": "No blueprint host is deployed. `just serve-create` makes "
+                f"one, or point {BLUEPRINT_URL_ENV} at a server you are running."
             },
             status_code=503,
         )
@@ -127,14 +126,6 @@ def mount(app: FastAPI) -> None:
     @app.get("/api/blueprint/combos", response_model=contract.Combos)
     def _combos() -> JSONResponse:
         return forward("/api/combos", {})
-
-    # The one WRITE here, and the reason the console can change which run it is
-    # charting at all. It returns immediately with a 202 and the far side loads
-    # on its own thread, so nothing here needs a longer timeout than any other
-    # call: the client watches `/api/blueprint/run` for the swap to land.
-    @app.post("/api/blueprint/load", response_model=contract.BlueprintLoad)
-    def _load(body: dict[str, Any]) -> JSONResponse:
-        return forward("/api/load", method="POST", json=body)
 
     @app.get("/api/blueprint/node", response_model=contract.SolverNode)
     def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:

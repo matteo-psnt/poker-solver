@@ -27,7 +27,6 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 from src.interfaces.blueprint.app import (
-    BlueprintLoad,
     BlueprintRun,
     Bucket,
     Combos,
@@ -77,7 +76,6 @@ __all__ = [
     "Autoscale",
     "BatchTask",
     "Billed",
-    "BlueprintLoad",
     "BlueprintRun",
     "Box",
     "Bucket",

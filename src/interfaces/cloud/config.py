@@ -1,10 +1,11 @@
 """Where the deployed infrastructure lives, asked of the thing that built it.
 
 Terraform owns what exists, so Terraform is the authority on its coordinates.
-This module is the single place that asks. Two states are read, and the split
+This module is the single place that asks. Three states are read, and the split
 is deliberate: ``infra/`` holds the Batch account and pool, ``infra/store/``
-holds the durable share in its own resource group, so ``just destroy`` can tear
-down compute without being able to reach the experiment record.
+holds the durable share in its own resource group, and ``infra/serve/`` the
+blueprint host -- so ``just destroy`` can tear down compute without being able to
+reach the experiment record or the box that reads it.
 
 ``terraform output -json`` is shelled rather than reading a generated outputs
 file, and the answer is kept under the cache root for an hour. The shell-out
@@ -33,11 +34,18 @@ from src.shared import cache
 
 INFRA_DIR = Path("infra")
 STORE_DIR = Path("infra/store")
+SERVE_DIR = Path("infra/serve")
 
 # The one environment variable a task carries: the node has no Terraform, so
 # dispatch seals the resolved DSN into the task under this name, and a reader
 # on the laptop may set it to point elsewhere (a restored server, a test).
 RECORD_DSN_ENV = "POKER_SOLVER_RECORD_DSN"
+
+# How the console reaches the blueprint host. Resolved from `infra/serve/` like
+# every other coordinate here; the variables exist so a developer can point the
+# console at a server on their own machine instead.
+BLUEPRINT_URL_ENV = "POKER_SOLVER_BLUEPRINT_URL"
+BLUEPRINT_TOKEN_ENV = "POKER_SOLVER_BLUEPRINT_TOKEN"
 
 # Guards the cold-cache computation in `_outputs`, not the cache itself.
 _OUTPUTS_LOCK = threading.Lock()
@@ -179,6 +187,26 @@ def export_record_dsn() -> None:
         os.environ[RECORD_DSN_ENV] = record_dsn()
     except CloudConfigError:
         return
+
+
+def export_blueprint_address() -> None:
+    """Put the blueprint host's URL and token into this process's environment.
+
+    The console used to need ``eval "$(just serve-env)"`` before it could chart
+    anything, so the strategy page was blank on every shell that had forgotten
+    it -- an env dance for coordinates Terraform already knows. Best effort, like
+    the DSN beside it: with no applied serve state the proxy says so in a
+    sentence.
+    """
+    if os.environ.get(BLUEPRINT_URL_ENV, "").strip():
+        return
+    try:
+        url = _value(str(SERVE_DIR), "url")
+        token = _value(str(SERVE_DIR), "api_token")
+    except CloudConfigError:
+        return
+    os.environ[BLUEPRINT_URL_ENV] = url
+    os.environ[BLUEPRINT_TOKEN_ENV] = token
 
 
 @dataclass(frozen=True)

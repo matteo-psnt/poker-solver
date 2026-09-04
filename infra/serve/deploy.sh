@@ -39,7 +39,6 @@ if [ -z "$RUN" ] || [ -z "$RECORD_DSN" ] || [ -z "$STORE_ACCOUNT" ]; then
 fi
 
 WORK=/mnt/work
-IDLE="${IDLE_TIMEOUT:-1800}"
 
 # NO SHARE. It is empty and nothing writes to it: a run is its manifest, its
 # loose metadata and one object per rung, all under `<run>/` in the
@@ -48,9 +47,9 @@ IDLE="${IDLE_TIMEOUT:-1800}"
 # removed, and deriving a store's name from a filesystem that is going away is
 # the same mistake as reading the run from it.
 #
-# The box reads Blob as ITSELF, the managed identity it already logs in with to
-# deallocate, so nothing here needs an account key. (It needs Storage Blob Data
-# Reader on the account.) That is also why this stays `az` rather than the
+# The box reads Blob as ITSELF, its managed identity, so nothing here needs an
+# account key. (It needs Storage Blob Data Reader on the account, which is now the
+# only thing that identity is for -- nothing on this box stops it any more.) That is also why this stays `az` rather than the
 # project's own `blob.py`: `CloudConfig.load()` wants Terraform, which the box
 # does not have -- the same reason the record DSN is passed in.
 az login --identity --output none
@@ -332,66 +331,37 @@ cd "$WORK/code"
 # --------------------------------------------------------------------------- #
 # Rewritten whole rather than patched line by line, so the file cannot drift into
 # a shape the unit reads differently from what is here.
+#
+# $READER_EXTRA carries $AT through, so the chart reads the SAME rung the seat
+# plays. Before it, the reader's arguments were baked into cloud-init with no
+# `--at` and the two could silently disagree about what "Blueprint" means.
 sudo tee /etc/blueprint.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
-IDLE_TIMEOUT=$IDLE
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
+READER_EXTRA=${AT:+--at $AT}
 EOF
 # The DSN carries a password; the unit runs as root and is the only reader.
 sudo chmod 600 /etc/blueprint.env
 
-# The shutdown half of the unit, rewritten on every deploy.
+# THE UNIT ITSELF, from the tree just extracted -- not from cloud-init.
 #
-# It ships in cloud-init `write_files`, which runs ONCE at first boot -- so
-# before this block, the only way to correct it was to recreate the box. That is
-# how a box spent 62 hours idling out every 30 minutes and restarting itself:
-# the bug was one line in a file no deploy could reach.
-#
-# Only the two pieces that encode the shutdown contract are written here. The
-# rest of the unit is first-boot territory and does not change.
-sudo install -m 0755 "$WORK/code/infra/serve/box-may-sleep" /usr/local/bin/
-sudo tee /usr/local/bin/deallocate-if-idle >/dev/null <<'EOF'
-#!/bin/bash
-# 42 is IDLE_EXIT_CODE: nobody was here, switch the box off. NOT 0 (a deliberate
-# stop) and NOT 143 (SIGTERM -- `systemctl stop`, and the restart below).
-if [ "${EXIT_STATUS:-1}" != "42" ]; then
-  echo "blueprint exited ${EXIT_STATUS} -- not deallocating"
-  exit 0
-fi
-/usr/local/bin/box-may-sleep || exit 0
-exec /usr/local/bin/deallocate-box
-EOF
-sudo chmod 0755 /usr/local/bin/deallocate-if-idle
-
-# The OTHER route to the same deallocate. `OnFailure=blueprint-deallocate` runs
-# `deallocate-box` directly and has never consulted `deallocate-if-idle` -- this
-# file says so eleven lines up, about a bug that switched the box off after every
-# deploy. An ExecCondition rather than a wrapper: a refused condition SKIPS the
-# unit instead of failing it, so a seated box does not accumulate failed units.
-sudo mkdir -p /etc/systemd/system/blueprint-deallocate.service.d
-sudo tee /etc/systemd/system/blueprint-deallocate.service.d/seat-guard.conf >/dev/null <<'EOF'
-[Service]
-ExecCondition=/usr/local/bin/box-may-sleep
-EOF
-
-# `SuccessExitStatus=42` as a drop-in, so the idle exit is not read as a failure
-# and restarted before the deallocate lands. A drop-in rather than a rewrite of
-# the unit: everything else in it is first-boot configuration this script has no
-# business restating.
-#
-# 143 is in there for a bug this script caused to ITSELF. 143 is SIGTERM, which
-# is what `systemctl restart` sends -- the restart four lines below. Without it
-# systemd read the deploy's own restart as a failure and fired
-# `OnFailure=blueprint-deallocate`, so every deploy switched the box off a
-# minute after reporting success. `deallocate-if-idle` already refused that exit
-# ("blueprint exited 143 -- not deallocating"), but `OnFailure` is a SECOND and
-# independent path to the same deallocate and never consulted it.
-sudo mkdir -p /etc/systemd/system/blueprint.service.d
-sudo tee /etc/systemd/system/blueprint.service.d/idle-exit.conf >/dev/null <<'EOF'
-[Service]
-SuccessExitStatus=42 143
-EOF
+# It lived in `write_files`, which runs ONCE at first boot, so the only way to
+# correct a line in it was to recreate the machine. That is how a box spent
+# 62 hours idling out every 30 minutes and waking itself back up, and how the
+# reader then spent two days dead on a box that was up: an idle exit systemd
+# read as success, so `Restart=on-failure` never fired and `box-may-sleep`
+# (rightly) refused to deallocate. Both bugs were one line in a file no deploy
+# could reach. Now a deploy ships the unit, exactly as it ships the seat's.
+sudo install -m 0644 "$WORK/code/infra/serve/blueprint.service" /etc/systemd/system/
+# The idle era's leftovers, which an `install` does not remove: a drop-in saying
+# exit 42 is a success, and the deallocate this unit no longer calls. Left in
+# place they would outlive every trace of the feature in the repo.
+sudo rm -rf /etc/systemd/system/blueprint.service.d \
+    /etc/systemd/system/blueprint-deallocate.service.d \
+    /etc/systemd/system/blueprint-deallocate.service \
+    /usr/local/bin/deallocate-if-idle /usr/local/bin/box-may-sleep \
+    /usr/local/bin/deallocate-box
 
 # --------------------------------------------------------------------------- #
 # the chipzen seat

@@ -159,19 +159,13 @@ class TestTheCommandLinePutsTheExitBack:
             headless.main(["progress", "--run", "r"])
 
 
-# Where ending the process IS the answer. Naming the two sites here rather than
+# Where ending the process IS the answer. Naming the site here rather than
 # widening the guard keeps the next one a decision.
 EXITS_ON_PURPOSE: dict[str, str] = {
     "interfaces/cli/headless.py": (
         "The `__main__` guard. This is the one place a refusal becomes an exit "
         "code, which is the whole point of the seam -- everything above it "
         "returns an int."
-    ),
-    "interfaces/commands/blueprint_serve.py": (
-        "Not a refusal: the exit CODE is how the server tells its systemd unit "
-        "why it stopped. Idle expiry must switch the box off and every other "
-        "stop must not, and they are indistinguishable by then. Cost 62 hours "
-        "of a box restarting itself -- see `idle.IDLE_EXIT_CODE`."
     ),
 }
 

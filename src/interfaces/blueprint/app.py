@@ -10,30 +10,24 @@ panel is more useful than one that dies.
 The blueprint is supplied as a factory rather than loaded here, so a test can
 serve a four-iteration solver through the identical app the node serves a 30M
 one through. Loading takes ~1 minute and allocates the full table, so it happens
-once at construction -- but the app can be asked to REPLACE it, which is what
-``/api/load`` is for.
+once at construction and never changes: ONE run per process.
 
-Switching used to mean a new process, and in practice a new deploy: an SSH
-script that re-synced the code, re-ran ``uv sync``, rewrote the unit's
-environment and restarted it, about three minutes. None of that has anything to
-do with which run is loaded. Everything a swap actually needs is already on the
-box -- the share is mounted, the runs directory is known -- so it is done in
-process here, and the deploy script goes back to being for deploys.
+ONE RUN PER PROCESS, and that is the point rather than a limitation. The box this
+runs on holds a Chipzen ladder slot, so the strategy read here has to be the one
+being fielded -- which makes the deploy that stages and seats a run the only
+thing allowed to decide what is loaded, not a browser tab.
 """
 
 from __future__ import annotations
 
-import threading
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.core.game.state import Card
 from src.engine.search.range_inference import ALL_COMBOS
-from src.interfaces.blueprint.idle import IdleWatch
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from src.pipeline.blueprint.grid import StrategyGrid, strategy_grid
 from src.pipeline.blueprint.paths import PathError, encode_action, match_action, replay
@@ -184,17 +178,6 @@ class BlueprintRun(BaseModel):
     small_blind: int
     big_blind: int
     combos: int
-    """The run being swapped in, while one is. Null when nothing is loading."""
-    loading: str | None
-    """False on a server handed a blueprint directly -- a laptop, a test."""
-    can_switch: bool = False
-
-
-class BlueprintLoad(BaseModel):
-    """The 202 from asking for a swap. The work outlives the request."""
-
-    run: str
-    loading: bool
 
 
 class Combos(BaseModel):
@@ -248,13 +231,6 @@ class SubmitAction(BaseModel):
     """The human's move, as the same token the tree browser speaks."""
 
     token: str
-
-
-class LoadRun(BaseModel):
-    """Which run to serve instead, and optionally which checkpoint of it."""
-
-    run: str
-    at: int | None = None
 
 
 _GONE = (
@@ -325,203 +301,43 @@ def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
     )
 
 
-class _Held:
-    """The one run this server is currently answering for.
-
-    A mutable holder rather than three closure variables, because ``/api/load``
-    replaces all three together and a handler must never see a blueprint from
-    one run beside sessions from another.
-    """
-
-    def __init__(self, blueprint: ScorableBlueprint, run_id: str) -> None:
-        self.blueprint = blueprint
-        self.run_id = run_id
-        self.sessions = Sessions(blueprint)
-        #: Set while a swap is in flight, so every reader can say so.
-        self.loading: str | None = None
-        #: Why the last swap failed, kept until the next one is attempted.
-        self.error: str | None = None
-
-
 def create_app(
     load_blueprint: Callable[[], ScorableBlueprint],
     *,
     run_id: str = "unknown",
-    idle_timeout_seconds: float = 0.0,
-    load_run: Callable[[str, int | None], tuple[ScorableBlueprint, str]] | None = None,
 ) -> FastAPI:
-    """Build the app around one blueprint, loaded now.
+    """Build the app around one blueprint, loaded now and never replaced.
 
     Eagerly, not lazily: a server that loads on first request answers its
     readiness check before it can serve anything, and the first caller pays a
-    minute with no way to tell that from a hang.
-
-    ``idle_timeout_seconds`` of 0 means stay up, which is what a laptop and a
-    test want. On the hosted box it is what turns "nobody is here" into a
-    stopped VM, via the systemd unit that escalates this process exiting.
-
-    ``load_run`` is what makes ``/api/load`` possible: given a run id it stages
-    and builds that run, returning the blueprint and the id it resolved to.
-    OPTIONAL on purpose -- a test and a laptop serve a solver they built
-    themselves and have no share to stage from, and for them the endpoint
-    refuses with a sentence rather than 404ing as though it did not exist.
+    minute with no way to tell that from a hang. Which is also what makes
+    reaching this server at all the readiness signal the deploy waits on.
     """
-    held = _Held(load_blueprint(), run_id)
-    idle = IdleWatch(idle_timeout_seconds)
-    # One swap at a time. A second caller is told the server is busy rather than
-    # queued behind a minute of loading it cannot see.
-    swapping = threading.Lock()
-
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI):
-        # Started here, not at construction: loading takes ~1 minute on a
-        # production run, and a clock started before it would spend most of the
-        # timeout waiting for the server to become able to answer at all.
-        idle.touch()
-        idle.start()
-        yield
-        idle.stop()
-
-    app = FastAPI(title=f"blueprint server — {run_id}", docs_url="/api/docs", lifespan=lifespan)
-    # Exposed so the caller can tell WHY the server stopped once uvicorn returns.
-    # Idle expiry has to exit with its own code -- see `idle.IDLE_EXIT_CODE` --
-    # and a SIGTERM is indistinguishable from `systemctl stop` by then.
-    app.state.idle = idle
-
-    @app.middleware("http")
-    async def _touch(request: Request, call_next):
-        """Every request counts as someone being here.
-
-        Deliberately BEFORE the handler and unconditional -- a request that
-        404s or 422s is still a person at the keyboard, and only counting
-        successes would let a session spent hitting a stale link time out
-        underneath them.
-        """
-        idle.touch()
-        return await call_next(request)
+    blueprint = load_blueprint()
+    sessions = Sessions(blueprint)
+    app = FastAPI(title=f"blueprint server — {run_id}", docs_url="/api/docs")
 
     @app.get("/api/health")
     def _health() -> JSONResponse:
-        """What is loaded, and how close this box is to switching itself off.
+        """That this process is up, and what it is holding.
 
-        The console polls this to decide whether it can show anything at all, so
-        it must be the cheapest endpoint here -- no table reads, no session walk.
+        The deploy polls this to know the load finished, so it must be the
+        cheapest endpoint here -- no table reads, no session walk.
         """
-        return JSONResponse(
-            {
-                "run": held.run_id,
-                "ready": held.loading is None,
-                "loading": held.loading,
-                "can_switch": load_run is not None,
-                "last_error": held.error,
-                "idle_seconds": round(idle.idle_seconds(), 1),
-                "idle_timeout_seconds": idle.timeout_seconds,
-                "sessions": len(held.sessions),
-            }
-        )
+        return JSONResponse({"run": run_id, "sessions": len(sessions)})
 
     @app.get("/api/run")
     def _run() -> JSONResponse:
-        """What is loaded here, so a client can label what it is looking at.
-
-        Answers throughout a swap, describing the run STILL loaded and naming
-        the one coming. It needs no guard now that the new blueprint is built
-        before the old is released -- but it is worth saying why it once did:
-        this is the endpoint a client polls to watch a load, so a null blueprint
-        during one turned every switch into a stream of 500s on the page
-        watching it.
-        """
-        config = held.blueprint.config
+        """What is loaded here, so a client can label what it is looking at."""
+        config = blueprint.config
         return JSONResponse(
             BlueprintRun(
-                run=held.run_id,
+                run=run_id,
                 starting_stack=config.game.starting_stack,
                 small_blind=config.game.small_blind,
                 big_blind=config.game.big_blind,
                 combos=len(_COMBO_LABELS),
-                loading=held.loading,
-                can_switch=load_run is not None,
             ).model_dump()
-        )
-
-    def _swap(
-        resolve: Callable[[str, int | None], tuple[ScorableBlueprint, str]],
-        run: str,
-        at_iteration: int | None,
-    ) -> None:
-        """Do the load. Runs on its own thread; never raises to the caller.
-
-        Takes the resolver rather than closing over it: `/api/load` refuses
-        before starting this thread when the server has none, and passing it in
-        is what makes that refusal the only way in. Closed over, the guarantee
-        was a `# type: ignore` on a call that is None on a server started with a
-        blueprint handed to it directly.
-
-        The new blueprint is BUILT before the old one is let go, so this server
-        keeps answering from the run it already has for the whole minute-plus a
-        load takes -- including the staging copy, which is thousands of small
-        files off an SMB share and by far the longest part.
-
-        The first version dropped the old one first, to avoid holding two tables
-        at once. That was reasoning from a memory limit that does not exist here:
-        the static table is allocated at full size and is FLAT IN ITERATION
-        COUNT, so a 150M-iteration run costs exactly what a 30M one does, and the
-        box idles at 14 of 15 GB free with one loaded. What it bought instead was
-        a window where `held.blueprint` was None while `/api/run` -- the endpoint
-        a client polls to WATCH the swap -- read straight through it.
-        """
-        try:
-            blueprint, resolved = resolve(run, at_iteration)
-            # Sessions die with the blueprint they were dealt from. Carrying one
-            # across would leave a half-played hand whose next bot action comes
-            # from a different run -- silently, and mid-hand.
-            held.sessions.clear()
-            held.blueprint = blueprint
-            held.run_id = resolved
-            held.sessions = Sessions(blueprint)
-        except Exception as error:  # noqa: BLE001 -- reported, not swallowed
-            held.error = f"{type(error).__name__}: {error}"
-        finally:
-            # Released only once the swap is fully installed, so a second caller
-            # can never interleave with a half-applied one.
-            held.loading = None
-            swapping.release()
-
-    @app.post("/api/load")
-    def _load(request: LoadRun) -> JSONResponse:
-        """Start replacing the loaded run, and return at once.
-
-        202, not 200: the work takes about a minute and this answers in
-        milliseconds. Holding the request open for the whole load would put a
-        60-second HTTP call behind Caddy, the console's proxy and a browser tab,
-        each with its own timeout and none of them 60 seconds -- so the load
-        would keep succeeding while the caller saw a failure. Progress is on
-        ``/api/health``, which is why that endpoint stays cheap and answering
-        throughout.
-        """
-        if load_run is None:
-            return JSONResponse(
-                {
-                    "error": "This server cannot switch runs: it was started with a "
-                    "blueprint handed to it directly rather than a way to resolve one."
-                },
-                status_code=422,
-            )
-        if not swapping.acquire(blocking=False):
-            return JSONResponse({"error": f"Already loading {held.loading}."}, status_code=409)
-
-        held.loading = request.run
-        held.error = None
-        # `daemon`, so an idle expiry or a Ctrl-C during a load does not hang the
-        # process waiting for a minute of numpy to finish.
-        threading.Thread(
-            target=_swap,
-            args=(load_run, request.run, request.at),
-            name="blueprint-swap",
-            daemon=True,
-        ).start()
-        return JSONResponse(
-            BlueprintLoad(run=request.run, loading=True).model_dump(), status_code=202
         )
 
     @app.get("/api/combos")
@@ -534,7 +350,7 @@ def create_app(
         """The strategy at one spot, for every combo the board allows."""
         try:
             cards = parse_board(board)
-            node = replay(held.blueprint, path, cards)
+            node = replay(blueprint, path, cards)
             if node.actor is None:
                 return JSONResponse(
                     SolverNode(
@@ -544,7 +360,7 @@ def create_app(
                         grid=None,
                     ).model_dump()
                 )
-            grid = strategy_grid(held.blueprint, node, use_average=average)
+            grid = strategy_grid(blueprint, node, use_average=average)
             return JSONResponse(
                 SolverNode(
                     path=path,
@@ -571,7 +387,7 @@ def create_app(
     def _start(request: StartPlay) -> JSONResponse:
         """Deal a hand. The button alternates unless the caller pins it."""
         try:
-            session_id, hand = held.sessions.start(
+            session_id, hand = sessions.start(
                 human_seat=request.human_seat, button=request.button, seed=request.seed
             )
         except ValueError as error:
@@ -581,9 +397,7 @@ def create_app(
     @app.get("/api/play/{session_id}")
     def _hand(session_id: str) -> JSONResponse:
         try:
-            return JSONResponse(
-                hand_payload(held.sessions.get(session_id), session_id).model_dump()
-            )
+            return JSONResponse(hand_payload(sessions.get(session_id), session_id).model_dump())
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
 
@@ -591,7 +405,7 @@ def create_app(
     def _act(session_id: str, request: SubmitAction) -> JSONResponse:
         """Take the human's action, then auto-play to their next turn."""
         try:
-            hand = held.sessions.get(session_id)
+            hand = sessions.get(session_id)
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
         legal = hand.legal_actions()
@@ -605,7 +419,7 @@ def create_app(
 
     @app.delete("/api/play/{session_id}")
     def _leave(session_id: str) -> JSONResponse:
-        held.sessions.drop(session_id)
+        sessions.drop(session_id)
         return JSONResponse(LeftSession(session=session_id, dropped=True).model_dump())
 
     return app

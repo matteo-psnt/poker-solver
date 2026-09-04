@@ -149,127 +149,14 @@ locals {
           }
 
       # Which run this box serves. An env file rather than a baked-in argument,
-      # because the run changes far more often than the box does -- edit this and
-      # `systemctl restart blueprint`.
+      # because the run changes far more often than the box does -- `deploy.sh`
+      # rewrites it, along with the unit that reads it.
       - path: /etc/blueprint.env
         permissions: "0644"
         content: |
           RUN=
           RUNS_DIR=/mnt/work/runs
-          IDLE_TIMEOUT=${var.idle_timeout_seconds}
-
-      # The unit, and the whole on-demand story.
-      #
-      # `ExecStopPost` is the hinge: the server exits when it has been idle, and
-      # THAT is what deallocates the box. The guard fires only on the IDLE exit
-      # code (42), so a crash restarts the service rather than switching off a
-      # box that might just have lost a race with its mounts -- and a manual
-      # `systemctl stop`, or the `restart` in deploy.sh, does not switch it off
-      # at all.
-      #
-      # THE 62-HOUR BUG, measured 2026-08-10. The guard used to accept only a
-      # CLEAN exit, status 0. But idle expiry was "SIGTERM myself", and a
-      # process that takes SIGTERM exits 143 -- so every expiry was refused
-      # ("blueprint exited 143 -- not deallocating") and systemd, also reading
-      # 143 as failure, restarted it. One boot's journal: 120 idle shutdowns,
-      # 121 refusals, 0 deallocations. The box idled out every 30 minutes and
-      # woke itself straight back up, around the clock.
-      #
-      # `SuccessExitStatus=42` is the second half: without it systemd treats the
-      # idle exit as a failure and `Restart=on-failure` starts the server again
-      # before the deallocate lands. The bounded-restart backstop below could
-      # not save it either -- 30 minutes apart, the restarts never came close to
-      # 3-inside-300s, so `OnFailure=` never fired.
-      #
-      # But a service that can never start -- an unset RUN, a run that is not on
-      # this disk, a broken deploy -- would then restart every 10s forever, and
-      # the box would bill all weekend having never served a request. That is the
-      # expensive failure, so the restart is BOUNDED: three tries in five
-      # minutes, after which systemd gives up, the unit enters `failed`, and
-      # `OnFailure` deallocates. A misconfigured box costs nothing.
-      - path: /etc/systemd/system/blueprint.service
-        permissions: "0644"
-        content: |
-          [Unit]
-          Description=Blueprint server
-          After=network-online.target mnt-work.mount mnt-shared.mount
-          Wants=network-online.target
-          OnFailure=blueprint-deallocate.service
-          StartLimitIntervalSec=300
-          StartLimitBurst=3
-
-          [Service]
-          Type=simple
-          User=${var.admin_username}
-          EnvironmentFile=/etc/blueprint.env
-          Environment=POKER_SOLVER_CACHE=/mnt/work/cache
-          WorkingDirectory=/mnt/work/code
-          ExecStart=/home/${var.admin_username}/.local/bin/uv run poker-solver blueprint-serve \
-            --run ${"$"}{RUN} --runs-dir ${"$"}{RUNS_DIR} --idle-timeout ${"$"}{IDLE_TIMEOUT}
-          ExecStopPost=/usr/local/bin/deallocate-if-idle
-          # 143 is SIGTERM: `systemctl stop`, and the `restart` every deploy
-          # runs. Without it here, systemd calls a deliberate stop a failure and
-          # `OnFailure=` above deallocates the box -- so a deploy switched the
-          # machine off a minute after reporting success. `deallocate-if-idle`
-          # refused that exit already; `OnFailure` is a second path that never
-          # asked it. Kept in step with the drop-in `deploy.sh` writes, which is
-          # what reaches a box that already exists.
-          SuccessExitStatus=42 143
-          Restart=on-failure
-          RestartSec=10
-
-          [Install]
-          WantedBy=multi-user.target
-
-      # The other half of the bound above: reached when the service has given up
-      # restarting, so the box switches off instead of looping.
-      - path: /etc/systemd/system/blueprint-deallocate.service
-        permissions: "0644"
-        content: |
-          [Unit]
-          Description=Deallocate this box after the blueprint server gave up
-
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/bin/deallocate-box
-
-      # Only on the IDLE exit code, and only via the VM's own managed identity
-      # -- there are no credentials on this box to steal, and the identity's
-      # role is scoped to this resource group and nothing else.
-      #
-      # 42 and nothing else, deliberately. 0 is a deliberate stop; 143 is
-      # SIGTERM, which is what `systemctl stop` and deploy.sh's `restart`
-      # produce -- deallocating the box mid-deploy is the same bug as never
-      # deallocating it, wearing the other shoe. The number is
-      # `idle.IDLE_EXIT_CODE`, and a test pins this file against it.
-      - path: /usr/local/bin/deallocate-if-idle
-        permissions: "0755"
-        content: |
-          #!/bin/bash
-          if [ "${"$"}{EXIT_STATUS:-1}" != "42" ]; then
-            echo "blueprint exited ${"$"}{EXIT_STATUS} -- not deallocating"
-            exit 0
-          fi
-          exec /usr/local/bin/deallocate-box
-
-      - path: /usr/local/bin/deallocate-box
-        permissions: "0755"
-        content: |
-          #!/bin/bash
-          # The VM's own id from the instance metadata service, NOT from
-          # Terraform: interpolating it here would make custom_data depend on
-          # the machine custom_data configures, which is a cycle.
-          ID=${"$"}(curl -s -H Metadata:true --noproxy "*" \
-            "http://169.254.169.254/metadata/instance/compute/resourceId?api-version=2021-02-01&format=text")
-          # Loudly. `az login --identity || exit 0` swallowed the one failure
-          # that costs money: a box that cannot log in never switches off, and
-          # said nothing about it in the journal.
-          if ! az login --identity >/dev/null 2>&1; then
-            echo "deallocate-box: managed-identity login FAILED -- this box will keep billing" >&2
-            exit 1
-          fi
-          az vm deallocate --ids "${"$"}ID" --no-wait \
-            || echo "deallocate-box: deallocate call FAILED -- this box will keep billing" >&2
+          READER_EXTRA=
 
       # Provisioning, as ONE script with a real shebang.
       #
@@ -378,18 +265,11 @@ locals {
           echo 'export POKER_SOLVER_CACHE=/mnt/work/cache' >> /home/${var.admin_username}/.bashrc
 
           # -- the service -----------------------------------------------------
-          # `enable`, not `enable --now`: RUN is empty until a deploy sets it, and
-          # starting now would fail three times and deallocate a box someone is
-          # still setting up. From the next boot on it starts by itself, which is
-          # what makes waking the box equivalent to starting the server.
-          systemctl daemon-reload
-          systemctl enable blueprint
-
-          # The passwordless sudo the deploy script needs, and nothing wider: it
-          # rewrites /etc/blueprint.env and restarts one unit.
-          echo '${var.admin_username} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/blueprint.env, /usr/bin/systemctl restart blueprint, /usr/bin/systemctl enable blueprint, /usr/bin/systemctl daemon-reload, /usr/bin/journalctl -u blueprint *' \
-            > /etc/sudoers.d/blueprint
-          chmod 0440 /etc/sudoers.d/blueprint
+          # NOT enabled here, because the unit is not here: `deploy.sh` installs
+          # it from the tree it extracts and enables it there. A first boot has no
+          # run staged, so there is nothing for a server to serve until a deploy
+          # has run anyway -- and a unit written at first boot is one no deploy
+          # can correct, which cost 62 hours once.
 
     runcmd:
       - /usr/local/bin/blueprint-provision
@@ -547,15 +427,6 @@ resource "azurerm_linux_virtual_machine" "serve" {
     # the copied run for no gain. Change it deliberately, by tainting.
     ignore_changes = [custom_data]
   }
-}
-
-# Scoped to this resource group and no wider. "Virtual Machine Contributor"
-# rather than "Contributor" for the same reason: the box needs to stop itself and
-# nothing else, and a compromised reader should not be able to reach the store.
-resource "azurerm_role_assignment" "self_deallocate" {
-  scope                = azurerm_resource_group.serve.id
-  role_definition_name = "Virtual Machine Contributor"
-  principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
 }
 
 # The code snapshot is fetched from the store's `code` container as this VM's

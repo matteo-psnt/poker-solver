@@ -79,17 +79,19 @@ serve-create:
     {{tfv}} apply -input=false -auto-approve
     just _forget-coordinates
     @echo ""
-    @echo "  next:  just serve-ssh to point it at a run, then eval \"$(just serve-env)\""
+    @echo "  next:  just serve-deploy <run>"
 
 # Show what the serving box would change, without changing it.
 serve-plan:
     {{tfv}} init -input=false
     {{tfv}} plan
 
-# The two variables the console needs to reach the box. Eval it:
+# The box's address and token, for reaching it from a SHELL -- a curl, a probe.
+# The console no longer needs this: `create_app` resolves both from this state at
+# startup, the same way it resolves the record DSN. Printed rather than written
+# to a file: the token is a secret, and a dotfile is the kind of thing that gets
+# committed once and then lives in history forever.
 #   eval "$(just serve-env)"
-# Printed rather than written to a file: the token is a secret, and a dotfile is
-# the kind of thing that gets committed once and then lives in history forever.
 serve-env:
     @echo "export POKER_SOLVER_BLUEPRINT_URL=$({{tfv}} output -raw url)"
     @echo "export POKER_SOLVER_BLUEPRINT_TOKEN=$({{tfv}} output -raw api_token)"

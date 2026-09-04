@@ -11,6 +11,10 @@ It keeps `--runs-dir` because it reads a checkpoint and the card abstraction fro
 LOCAL disk. Not a preference: a checkpoint is ~5,500 small files that the read
 path mmaps, and over SMB every page fault becomes a network round trip.
 
+It serves ONE run until it is stopped. The box also holds a Chipzen ladder slot,
+so the run to read is whichever the deploy seated -- the same deploy, staging it
+once for both.
+
 Loopback only, and not configurable -- same rule as `serve`. There is no
 authentication here, so binding anywhere reachable would publish a run to
 whoever finds the port. Reaching it from elsewhere is a tunnel's job, which
@@ -46,13 +50,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT})."
     )
     parser.add_argument(
-        "--idle-timeout",
-        type=int,
-        default=0,
-        help="Exit after this many seconds with no request. 0 stays up. On the "
-        "hosted box the systemd unit turns this exit into a deallocate.",
-    )
-    parser.add_argument(
         "--at",
         type=int,
         default=None,
@@ -66,11 +63,7 @@ class BlueprintServePayload(BaseModel):
     op: Literal["blueprint-serve"] = "blueprint-serve"
     run: str
     run_dir: str
-    """Kept so the server can stage a DIFFERENT run beside this one when asked
-    to switch, rather than only ever knowing the one it started on."""
-    runs_dir: str
     at_iteration: int | None = None
-    idle_timeout: int = 0
     url: str
     host: str
     port: int
@@ -90,9 +83,7 @@ def run(args: argparse.Namespace) -> BlueprintServePayload:
     return BlueprintServePayload(
         run=run_dir.name,
         run_dir=str(run_dir),
-        runs_dir=args.runs_dir,
         at_iteration=args.at,
-        idle_timeout=args.idle_timeout,
         url=f"http://{HOST}:{args.port}",
         host=HOST,
         port=args.port,
@@ -110,15 +101,12 @@ def render(payload: BlueprintServePayload) -> None:
 
     from src.adapters.postgres import connect  # noqa: PLC0415 -- see above
     from src.interfaces.blueprint.app import create_app  # noqa: PLC0415 -- see above
-    from src.interfaces.blueprint.idle import IDLE_EXIT_CODE  # noqa: PLC0415 -- see above
-    from src.interfaces.blueprint.staging import stage_run  # noqa: PLC0415 -- see above
     from src.pipeline.services.scoring._shared import (  # noqa: PLC0415 -- see above
         build_blueprint_for,
     )
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
     run_dir = Path(payload.run_dir)
-    runs_dir = Path(payload.runs_dir)
     # The serving box needs the DSN in its environment once the log stops
     # being published; without one this falls back to the file, as before.
     source = connect.record_source_from_environment()
@@ -138,51 +126,16 @@ def render(payload: BlueprintServePayload) -> None:
         """Load once, at app construction."""
         return _build(run_dir, payload.at_iteration)
 
-    def _load_run(run: str, at_iteration: int | None):
-        """Serve a DIFFERENT run, staging it from the share if it is not local.
-
-        Handed to the app rather than reached for by it: `interfaces.blueprint`
-        is transport, and resolving a run id against a share is this command's
-        job -- the same job it already does once for `--run`.
-        """
-        # `at_iteration` reaches staging as well as the build: it decides WHICH
-        # rung is copied, and copying the whole ladder to read one of them is
-        # the difference between five minutes and six hours.
-        directory = stage_run(run, runs_dir=runs_dir, at_iteration=at_iteration)
-        return _build(directory, at_iteration), directory.name
-
     print(f"Loading {payload.run} …")
-    app = create_app(
-        _load,
-        run_id=payload.run,
-        idle_timeout_seconds=payload.idle_timeout,
-        load_run=_load_run,
-    )
+    app = create_app(_load, run_id=payload.run)
     print(f"Blueprint server on {payload.url}   (Ctrl-C to stop)")
 
-    # An explicit Server rather than `uvicorn.run(...)`, so idle expiry can ask
-    # it to stop instead of signalling the process. MEASURED: uvicorn re-raises
-    # the captured signal after restoring the default handler, so on the SIGTERM
-    # path `run()` never returns and the process is 143 no matter what this
-    # function would rather exit with. `should_exit` returns control here.
-    server = uvicorn.Server(
-        uvicorn.Config(app, host=payload.host, port=payload.port, log_level="warning")
-    )
-    app.state.idle.expire_with(lambda: setattr(server, "should_exit", True))
-
     try:
-        server.run()
+        uvicorn.run(app, host=payload.host, port=payload.port, log_level="warning")
     except KeyboardInterrupt:
+        # The documented way to stop it, so it exits like one rather than
+        # unwinding a traceback through `headless.main`.
         print()
-        return
-
-    # WHY the server stopped, as an exit code, because that is all the systemd
-    # unit can read. Idle expiry means "switch the box off"; every other way of
-    # stopping -- Ctrl-C, `systemctl stop`, the `restart` in deploy.sh -- must
-    # NOT, and they all look identical by this point. See `idle.IDLE_EXIT_CODE`
-    # for the 62 hours this cost.
-    if app.state.idle.fired:
-        raise SystemExit(IDLE_EXIT_CODE)
 
 
 COMMAND = Command(

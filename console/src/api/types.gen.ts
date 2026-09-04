@@ -38,23 +38,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/blueprint/load": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Load */
-        post: operations["_load_api_blueprint_load_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/blueprint/node": {
         parameters: {
             query?: never;
@@ -802,31 +785,14 @@ export interface components {
             total: number;
         };
         /**
-         * BlueprintLoad
-         * @description The 202 from asking for a swap. The work outlives the request.
-         */
-        BlueprintLoad: {
-            /** Loading */
-            loading: boolean;
-            /** Run */
-            run: string;
-        };
-        /**
          * BlueprintRun
          * @description What is loaded here, so a client can label what it is looking at.
          */
         BlueprintRun: {
             /** Big Blind */
             big_blind: number;
-            /**
-             * Can Switch
-             * @default false
-             */
-            can_switch: boolean;
             /** Combos */
             combos: number;
-            /** Loading */
-            loading: string | null;
             /** Run */
             run: string;
             /** Small Blind */
@@ -2399,41 +2365,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Combos"];
-                };
-            };
-        };
-    };
-    _load_api_blueprint_load_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BlueprintLoad"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

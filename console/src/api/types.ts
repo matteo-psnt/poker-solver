@@ -86,7 +86,6 @@ export type Box = S["BoxPayload"];
 
 /** The blueprint server's shapes, proxied through `/api/blueprint/*`. */
 export type BlueprintRun = S["BlueprintRun"];
-export type BlueprintLoad = S["BlueprintLoad"];
 export type Combos = S["Combos"];
 export type SolverNode = S["SolverNode"];
 export type NodeGrid = S["NodeGrid"];

@@ -506,25 +506,6 @@
         "title": "BilledPayload",
         "type": "object"
       },
-      "BlueprintLoad": {
-        "description": "The 202 from asking for a swap. The work outlives the request.",
-        "properties": {
-          "loading": {
-            "title": "Loading",
-            "type": "boolean"
-          },
-          "run": {
-            "title": "Run",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run",
-          "loading"
-        ],
-        "title": "BlueprintLoad",
-        "type": "object"
-      },
       "BlueprintRun": {
         "description": "What is loaded here, so a client can label what it is looking at.",
         "properties": {
@@ -532,25 +513,9 @@
             "title": "Big Blind",
             "type": "integer"
           },
-          "can_switch": {
-            "default": false,
-            "title": "Can Switch",
-            "type": "boolean"
-          },
           "combos": {
             "title": "Combos",
             "type": "integer"
-          },
-          "loading": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Loading"
           },
           "run": {
             "title": "Run",
@@ -570,8 +535,7 @@
           "starting_stack",
           "small_blind",
           "big_blind",
-          "combos",
-          "loading"
+          "combos"
         ],
         "title": "BlueprintRun",
         "type": "object"
@@ -4037,46 +4001,6 @@
           }
         },
         "summary": " Combos"
-      }
-    },
-    "/api/blueprint/load": {
-      "post": {
-        "operationId": "_load_api_blueprint_load_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Body",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BlueprintLoad"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": " Load"
       }
     },
     "/api/blueprint/node": {

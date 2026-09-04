@@ -2,10 +2,6 @@
 Description=Chipzen external-API seat (Blueprint)
 After=network-online.target mnt-work.mount
 Wants=network-online.target
-# NO OnFailure=blueprint-deallocate.service, and no ExecStopPost. The reader
-# server going idle means switch the box off; the seat going quiet means the
-# opposite -- it is waiting for a match and must still be there when one lands.
-#
 # The rate limiter is DISABLED rather than tuned. Its whole job is to stop
 # retrying eventually, and a seat that stops retrying is the 26-hour outage of
 # 08-25 all over again. Chipzen being down for an hour must not cost the ladder

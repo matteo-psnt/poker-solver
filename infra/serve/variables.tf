@@ -98,20 +98,6 @@ variable "dns_label" {
   default     = "poker-blueprint"
 }
 
-variable "idle_timeout_seconds" {
-  description = <<-EOT
-    How long the server waits with no request before exiting -- which the
-    systemd unit escalates into deallocating the whole box.
-
-    30 minutes is long enough to read a chart, think, and come back; short
-    enough that a forgotten tab costs about a pound. It is the backstop, not the
-    primary control: the console has a stop button, and this is what catches the
-    times you close the laptop instead of pressing it.
-  EOT
-  type        = number
-  default     = 1800
-}
-
 variable "ssh_source_address" {
   description = <<-EOT
     The ONLY address allowed to reach port 22, and the only inbound rule at all.

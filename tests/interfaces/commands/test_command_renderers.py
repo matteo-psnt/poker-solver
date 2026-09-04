@@ -259,12 +259,7 @@ PAYLOADS: dict[str, Any] = {
     "blueprint-serve": BlueprintServePayload(
         run="run-production-025433-1095",
         run_dir="/mnt/work/runs/run-production-025433-1095",
-        # `runs_dir` was absent while this was a literal, and `render` reads it:
-        # nothing noticed, because this command is in SIDE_EFFECTING and its
-        # renderer was never called.
-        runs_dir="/mnt/work/runs",
         at_iteration=None,
-        idle_timeout=1800,
         url="http://127.0.0.1:8790",
         host="127.0.0.1",
         port=8790,
