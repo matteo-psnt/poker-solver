@@ -745,8 +745,6 @@ export interface components {
          * @description What `arms` answers. The console can read this unchanged.
          */
         ArmsPayload: {
-            /** Ledger */
-            ledger: string;
             /**
              * Op
              * @default arms
@@ -1437,8 +1435,6 @@ export interface components {
          * @description Recorded evaluations, derived from the published per-run documents.
          */
         LedgerPayload: {
-            /** Ledger */
-            ledger: string;
             /** Matched */
             matched: number;
             /**
@@ -1865,12 +1861,6 @@ export interface components {
             schema_version_max: number;
             /** Schema Version Min */
             schema_version_min: number;
-            /**
-             * Source
-             * @default share
-             * @enum {string}
-             */
-            source: "database" | "share";
             /** Total Rows */
             total_rows: number;
         };
@@ -2133,12 +2123,6 @@ export interface components {
              * @default []
              */
             runs: components["schemas"]["RunSummary"][];
-            /**
-             * Source
-             * @default share
-             * @enum {string}
-             */
-            source: "database" | "share";
         };
         /**
          * RunsView

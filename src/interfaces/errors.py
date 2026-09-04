@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Literal
 
+from src.adapters.postgres.connect import NoRecordError, unreachable_hint
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -88,9 +90,14 @@ def attempt[T](call: Callable[[], T]) -> tuple[T | None, Failure | None]:
     auth, http = _azure_failures()
     try:
         return call(), None
-    except CommandError as error:
+    except (CommandError, NoRecordError) as error:
         return None, Failure("refusal", str(error))
     except auth:
         return None, Failure("unavailable", "Azure rejected the credential — try `az login`.")
     except http as error:
         return None, Failure("unavailable", f"Azure did not answer: {error}")
+    except Exception as error:
+        hint = unreachable_hint(error)
+        if hint is None:
+            raise
+        return None, Failure("unavailable", hint)

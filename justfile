@@ -84,24 +84,6 @@ serve-env:
     @echo "export POKER_SOLVER_BLUEPRINT_URL=$({{tfv}} output -raw url)"
     @echo "export POKER_SOLVER_BLUEPRINT_TOKEN=$({{tfv}} output -raw api_token)"
 
-# The one variable every command that touches the run record needs. Eval it:
-#   eval "$(just record-env)"
-#
-# It RESHAPES rather than passes through, which is why it is here at all: the
-# DSN lives in Terraform's state and nothing else can produce it, and the cost
-# of not having it exported is silent. `TaskSpec.record_dsn` is read from this
-# shell AT DISPATCH and sealed into the task for its whole life, so a submit
-# without it queues tasks that write files only -- two runs finished while the
-# database still called them running at 0 iterations. `submit` now says which
-# mode it sealed; this is how you get the other one.
-#
-# Printed, not written, for the same reason as `serve-env`: it carries a
-# password, and a dotfile is the kind of thing that gets committed once and then
-# lives in history forever.
-[doc("Print the run-record DSN export. Eval it BEFORE submitting: eval \"$(just record-env)\"")]
-record-env:
-    @echo "export POKER_SOLVER_RECORD_DSN=$({{tfs}} output -raw postgres_dsn)"
-
 # A shell on the serving box, for pointing it at a run.
 serve-ssh:
     @sh -c "$({{tfv}} output -raw ssh)"
@@ -109,8 +91,10 @@ serve-ssh:
 # Put code, the abstraction and one run on the box, and start serving it.
 # The script is PIPED over ssh rather than installed, so the box always runs the
 # version in this repo and keeps none of it. Args: run (id or fragment)
+# The record's address rides along: the box reads the run from Postgres and
+# has no Terraform of its own to ask.
 serve-deploy run:
-    ssh solver@$({{tfv}} output -raw public_ip) 'bash -s' -- {{run}} < infra/serve/deploy.sh
+    ssh solver@$({{tfv}} output -raw public_ip) 'bash -s' -- {{run}} "$({{tfs}} output -raw postgres_dsn)" < infra/serve/deploy.sh
 
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.

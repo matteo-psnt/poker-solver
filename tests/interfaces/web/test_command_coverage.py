@@ -80,6 +80,12 @@ EXTERNAL: dict[str, str] = {
 }
 
 DIAGNOSTIC: dict[str, str] = {
+    "record-admit": "it changes the record server's FIREWALL to admit the machine running "
+    "the command; the console runs on that machine and could not reach the server to "
+    "show the button in the first place",
+    "record-migrate": "it changes the record's SCHEMA, once per code change, from the "
+    "checkout that carries the migration; a button would apply whatever the server "
+    "process happened to be running",
     "submit-net-probe": "it answers a question about the POOL, not about the record, and its whole output is a task log the console already renders. A button would be a "
     "permanent fixture for a question asked during a migration",
 }

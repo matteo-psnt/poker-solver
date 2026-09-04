@@ -47,6 +47,21 @@ def _plan(published, **kwargs):
     return prune_checkpoints.COMMAND.invoke(price=False, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _record(monkeypatch):
+    """A record that names nothing scored; a test that needs rows overrides.
+    The store's coordinates are stubbed too: `run` reads them unconditionally,
+    and a unit test must not depend on this laptop's Terraform state."""
+    from src.interfaces.cloud import config as cloud_config
+    from src.interfaces.cloud.store import share
+
+    monkeypatch.setattr(cloud_config.CloudConfig, "load", staticmethod(lambda: _Config()))
+    monkeypatch.setattr(share, "share_client", lambda _c: object())
+    monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: object())
+    monkeypatch.setattr(prune_checkpoints.connect, "record_source_from_environment", lambda: None)
+    monkeypatch.setattr(prune_checkpoints.queries, "scored_rungs", lambda _: {})
+
+
 class TestWhatItDrops:
     def test_keeps_the_newest_rungs_and_drops_the_rest(self, published):
         _run(published, "run-a", rungs=[100, 200, 300, 400, 500])
@@ -82,14 +97,6 @@ class TestWhatItDrops:
         entry = next(e for e in plan.plan if e["run"] == "run-a")
         assert entry["drop"] == [300]
         assert entry["scored_kept"] == [100, 200]
-
-    def test_apply_without_a_record_is_refused(self, published, monkeypatch):
-        """The record is the only place a score names its rung now, so applying
-        without one deletes blind rather than protecting."""
-        monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: None)
-        _run(published, "run-a", rungs=[100, 200, 300])
-        with pytest.raises(CommandError, match="POKER_SOLVER_RECORD_DSN"):
-            _plan(published, keep=2, apply=True)
 
     def test_the_latest_rung_survives_keep_of_one(self, published):
         _run(published, "run-a", rungs=[100, 200, 300])

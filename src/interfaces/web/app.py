@@ -40,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.interfaces import telemetry
+from src.interfaces.cloud.config import export_record_dsn
 from src.interfaces.cloud.store import workspace
 from src.interfaces.commands import (
     Command,
@@ -278,6 +279,7 @@ def create_app() -> FastAPI:
     one: the cache is built here and closed over, so nothing survives between
     two applications in the same process.
     """
+    export_record_dsn()
     app = FastAPI(title="poker-solver console", docs_url="/api/docs", lifespan=_lifespan)
     cache = TtlCache(CACHE_TTL_SECONDS)
 

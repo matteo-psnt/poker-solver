@@ -158,35 +158,6 @@ class TestEstimatorNamesAgree:
             build_parser().parse_args(["score", "--run", "r", "--method", "rollout"])
 
 
-class TestReportedLedgerPath:
-    """`ledger` must name the file it actually read.
-
-    The index is DERIVED into a temp tree on every read, so a payload that
-    echoed a configured path would have an empty result blaming a file nothing
-    had opened. There is no configured path any more, which makes reporting the
-    real one the only option -- pinned so it stays that way.
-    """
-
-    def test_it_names_the_derived_path(self, tmp_path, published, monkeypatch):
-        import argparse
-
-        from src.interfaces.commands import ledger as ledger_cmd
-
-        derived = tmp_path / "derived.jsonl"
-        derived.write_text("")
-        monkeypatch.setattr(ledger_cmd, "ledger_for", lambda root: derived)
-        args = argparse.Namespace(
-            run=None,
-            experiment=None,
-            method=None,
-            since=None,
-            limit=25,
-            migrate=False,
-            rebuild=False,
-        )
-        assert ledger_cmd.run(args).ledger == str(derived)
-
-
 class TestAJobListingExplainsHowATaskDied:
     """`jobs` printed a bare exit code, and the code is the half nobody recalls.
 

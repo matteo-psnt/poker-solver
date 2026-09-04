@@ -16,6 +16,8 @@ import threading
 import time
 from typing import Any
 
+import pytest
+
 from src.adapters.postgres import connect
 
 
@@ -63,10 +65,10 @@ def test_a_lossy_drain_is_logged_not_raised(monkeypatch, caplog):
     assert "behind the share" in caplog.text
 
 
-def test_no_dsn_is_no_sink_and_no_drain(monkeypatch):
-    monkeypatch.setattr(connect, "sink_from_environment", lambda: None)
-    with connect.record_sink() as sink:
-        assert sink is None
+def test_no_dsn_refuses_before_any_work(monkeypatch):
+    monkeypatch.delenv(connect.DSN_ENV, raising=False)
+    with pytest.raises(connect.NoRecordError), connect.record_sink():
+        pass
 
 
 def test_every_trainer_goes_through_it():

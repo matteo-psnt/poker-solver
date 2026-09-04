@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -27,6 +28,11 @@ from src.interfaces.errors import CommandError
 
 INFRA_DIR = Path("infra")
 STORE_DIR = Path("infra/store")
+
+# The one environment variable a task carries: the node has no Terraform, so
+# dispatch seals the resolved DSN into the task under this name, and a reader
+# on the laptop may set it to point elsewhere (a restored server, a test).
+RECORD_DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
 # Guards the cold-cache computation in `_outputs`, not the cache itself.
 _OUTPUTS_LOCK = threading.Lock()
@@ -117,6 +123,41 @@ def _optional_value(chdir: str, name: str) -> str:
         return ""
 
 
+def store_value(name: str) -> str:
+    """One output of the store state, for the commands that act on the record
+    server itself and need none of the compute coordinates."""
+    return _value(str(STORE_DIR), name)
+
+
+def record_dsn() -> str:
+    """The record database's DSN: the environment if set, else the store state.
+
+    Terraform is the authority, the same way it is for every other coordinate
+    here. The environment wins only so a sealed task and a deliberate override
+    can point elsewhere; nothing falls back to "no record" -- a reader with no
+    database answers nothing, and says so.
+    """
+    override = os.environ.get(RECORD_DSN_ENV, "").strip()
+    if override:
+        return override
+    return _value(str(STORE_DIR), "postgres_dsn")
+
+
+def export_record_dsn() -> None:
+    """Put the resolved DSN into this process's environment, once, at startup.
+
+    Best effort on purpose: on a node there is no Terraform and the variable is
+    already sealed; on a laptop with no applied store state the readers raise
+    their own, specific refusal when they find nothing.
+    """
+    if os.environ.get(RECORD_DSN_ENV, "").strip():
+        return
+    try:
+        os.environ[RECORD_DSN_ENV] = record_dsn()
+    except CloudConfigError:
+        return
+
+
 @dataclass(frozen=True)
 class CloudConfig:
     """Everything the control plane needs to talk to Azure.
@@ -136,6 +177,7 @@ class CloudConfig:
     storage_account: str
     share_name: str
     share_key: str
+    code_container: str
     hourly_cost: str
     pool_big_hourly_cost: str
     pool_huge_hourly_cost: str
@@ -157,6 +199,7 @@ class CloudConfig:
             storage_account=_value(str(STORE_DIR), "storage_account"),
             share_name=_value(str(STORE_DIR), "share_name"),
             share_key=_value(str(STORE_DIR), "access_key"),
+            code_container=_value(str(STORE_DIR), "code_container_name"),
             hourly_cost=_value(str(INFRA_DIR), "hourly_cost"),
             pool_big_hourly_cost=_optional_value(str(INFRA_DIR), "pool_big_hourly_cost"),
             pool_huge_hourly_cost=_optional_value(str(INFRA_DIR), "pool_huge_hourly_cost"),

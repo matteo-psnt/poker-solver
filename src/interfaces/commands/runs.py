@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel
 
 from src.adapters.postgres import connect, queries
-from src.interfaces.commands._base import Command, records_root
+from src.interfaces.commands._base import Command
 from src.pipeline import services
 from src.pipeline.services.runs import RunSummary
 from src.shared.gitinfo import commits_ahead_of
@@ -46,33 +46,16 @@ class RunsPayload(BaseModel):
 
     op: Literal["runs"] = "runs"
     runs: list[services.RunSummary] = []
-    # WHICH STORE ANSWERED. A silent fallback would let a reader mistake a
-    # stale answer for a fresh one, and during dual write the two can honestly
-    # differ -- the database is ahead for a live run, behind for one whose task
-    # predates the sink. Saying so costs one field.
-    source: Literal["database", "share"] = "share"
 
 
 def run(args: argparse.Namespace) -> RunsPayload:
-    """Summarise every published run, newest first.
-
-    From the database when one is configured, and from the share otherwise.
-    The DSN is the same switch that turns on dual write, so a machine that
-    writes rows reads them, and one that does not behaves exactly as before.
-    """
-    engine = connect.engine_from_environment()
-    if engine is not None:
-        summaries = _from_database(engine)
-        source: Literal["database", "share"] = "database"
-    else:
-        with records_root(args) as root:
-            summaries = services.describe_runs(root)
-        source = "share"
+    """Summarise every published run, newest first."""
+    summaries = _from_database(connect.engine_from_environment())
     if args.loadable_only:
         summaries = [summary for summary in summaries if summary.loadable]
     if args.limit > 0:
         summaries = summaries[: args.limit]
-    return RunsPayload(runs=summaries, source=source)
+    return RunsPayload(runs=summaries)
 
 
 def _distances(commits: set[str | None]) -> dict[str | None, int | None]:

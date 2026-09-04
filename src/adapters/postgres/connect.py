@@ -23,6 +23,20 @@ log = logging.getLogger(__name__)
 DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
 
+class NoRecordError(RuntimeError):
+    """The record database is not configured, and nothing here guesses.
+
+    A plain `RuntimeError` because `adapters` may not import the command
+    layer's `CommandError`; both surfaces classify this one by name.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"No record database: {DSN_ENV} is unset and the store state could not "
+            "be read. Apply infra/store, or export the DSN of the server to read."
+        )
+
+
 # A console view fans out over its panels at `max_workers=len(parts)`, so the
 # pool has to be at least as wide as the widest screen or the fan-out serialises
 # at one round trip each -- the exact failure `_compose.compose` warns about,
@@ -45,6 +59,9 @@ def _engine(dsn: str, pre_ping: bool, pool_size: int) -> Any:
         pool_size=pool_size,
         max_overflow=pool_size,
         pool_pre_ping=pre_ping,
+        # A firewall that drops the SYN looks like a hang without this; with it,
+        # an unreachable server is a ten-second refusal `unreachable_hint` names.
+        connect_args={"connect_timeout": 10},
         # Well inside Azure's idle timeout. A trainer holds this open for hours
         # between bursts, and a stale connection surfaces as a lost batch rather
         # than an error anyone sees.
@@ -52,8 +69,32 @@ def _engine(dsn: str, pre_ping: bool, pool_size: int) -> Any:
     )
 
 
-def engine_from_environment(*, pre_ping: bool = False) -> Any | None:
-    """An engine when a DSN is set, `None` when it is not.
+def unreachable_hint(error: BaseException) -> str | None:
+    """The one connection failure with a known cause, named for the operator.
+
+    Checked by name so the surfaces that render it need not import the driver:
+    a connect timeout against this server has meant, every time so far, that
+    the laptop's address rotated out of the firewall rule.
+    """
+    if type(error).__name__ != "OperationalError":
+        return None
+    text = str(error).lower()
+    if "timeout" not in text and "timed out" not in text:
+        return None
+    return (
+        "The record database did not answer. Most likely this machine's public IP "
+        "rotated out of its firewall rule: `poker-solver record-admit` re-admits it."
+    )
+
+
+def engine_for(dsn: str) -> Any:
+    """A reader's engine for an explicit DSN -- the migration path, which runs
+    before the environment is trusted."""
+    return _engine(dsn, False, READER_POOL)
+
+
+def engine_from_environment(*, pre_ping: bool = False) -> Any:
+    """The record engine, or `NoRecordError`. Never a silent second answer.
 
     One answer to "is there a database", and one place that knows how to reach
     it -- but TWO engines, because the halves want opposite things. A reader
@@ -66,43 +107,34 @@ def engine_from_environment(*, pre_ping: bool = False) -> Any | None:
     """
     dsn = os.environ.get(DSN_ENV, "").strip()
     if not dsn:
-        return None
+        raise NoRecordError
     return _engine(dsn, pre_ping, 1 if pre_ping else READER_POOL)
 
 
-def sink_from_environment() -> RecordSink | None:
-    """A sink when a DSN is set, `None` when it is not.
-
-    `None` IS THE ROLLOUT. A task dispatched from a machine with no DSN, or one
-    running a code snapshot from before this existed, writes files and nothing
-    else -- exactly what every task did before the database. Dual-write is
-    opt-in by setting one variable, and opting out is unsetting it.
-
-    A DSN that is set but unusable is a different case and is NOT swallowed
-    here: it means someone intended dual-write and it is not happening, which
-    they need to be told at dispatch rather than discover in a query later.
-    """
+def sink_from_environment() -> RecordSink:
+    """The writer's sink. A DSN that is set but unusable is NOT swallowed: it
+    means someone intended to record and is not, which they need to be told at
+    dispatch rather than discover in a query later."""
     engine = engine_from_environment(pre_ping=True)
-    if engine is None:
-        return None
 
+    from src.adapters.postgres import schema  # noqa: PLC0415 -- alembic, only for a writer
     from src.adapters.postgres.sink import PostgresSink  # noqa: PLC0415
+
+    schema.assert_current(engine)
 
     log.info("record sink attached")
     return PostgresSink(engine)
 
 
-def eval_sink_from_environment() -> EvalSink | None:
-    """An eval sink when a DSN is set, `None` when it is not.
-
-    Reuses the SINK engine, not the reader's: one connection with a pre-ping,
-    which is what a process that scores for hours and then writes once needs.
-    """
+def eval_sink_from_environment() -> EvalSink:
+    """Reuses the SINK engine, not the reader's: one connection with a pre-ping,
+    which is what a process that scores for hours and then writes once needs."""
     engine = engine_from_environment(pre_ping=True)
-    if engine is None:
-        return None
 
+    from src.adapters.postgres import schema  # noqa: PLC0415 -- alembic, only for a writer
     from src.adapters.postgres.evals import PostgresEvalSink  # noqa: PLC0415
+
+    schema.assert_current(engine)
 
     return PostgresEvalSink(engine)
 
@@ -113,7 +145,7 @@ FLUSH_TIMEOUT_SECONDS = 30.0
 
 
 @contextlib.contextmanager
-def record_sink() -> Iterator[RecordSink | None]:
+def record_sink() -> Iterator[RecordSink]:
     """A sink for the duration, DRAINED on the way out.
 
     The drain is the point. `emit` queues and a background thread writes, and
@@ -132,20 +164,15 @@ def record_sink() -> Iterator[RecordSink | None]:
     try:
         yield sink
     finally:
-        if sink is not None and not sink.flush(FLUSH_TIMEOUT_SECONDS):
+        if not sink.flush(FLUSH_TIMEOUT_SECONDS):
             log.warning("record sink dropped events; the database is behind the share")
 
 
-def record_source_from_environment() -> RecordSource | None:
-    """A read side when a DSN is set, `None` when it is not.
-
-    The READER'S engine, not the sink's: this answers one question at the start
-    of a task and wants the pool the readers use, not the single pre-pinged
-    connection a writer holds open for hours.
-    """
+def record_source_from_environment() -> RecordSource:
+    """The READER'S engine, not the sink's: this answers one question at the
+    start of a task and wants the pool the readers use, not the single
+    pre-pinged connection a writer holds open for hours."""
     engine = engine_from_environment()
-    if engine is None:
-        return None
 
     from src.adapters.postgres.source import PostgresRecordSource  # noqa: PLC0415
 
