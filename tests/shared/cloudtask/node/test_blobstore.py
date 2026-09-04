@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import email.message
 import io
-import tarfile
 import urllib.error
 
 import pytest
@@ -45,32 +44,38 @@ class TestTheObjectItAddresses:
         """The one place this is easy to get wrong. Appended after the query,
         every request would address the container with a junk parameter and
         authorise against a signature covering a different path."""
-        url = blobstore.rung_uri(SAS, "run-a", "static-100.zarr")
+        url = blobstore.rung_uri(SAS, "run-a", "static-100.ckpt.zst")
         assert url == (
             "https://acct.blob.core.windows.net/checkpoints/"
-            "run-a/static-100.zarr.tar?sv=2021&sig=abc%3D"
+            "run-a/static-100.ckpt.zst?sv=2021&sig=abc%3D"
+        )
+
+    def test_the_object_name_is_the_file_name(self):
+        """One naming convention, not a stored name and a derived one that can
+        drift: the object is called what the snapshot is called."""
+        assert (
+            blobstore.rung_uri(SAS, "r", "static-5.ckpt.zst")
+            .partition("?")[0]
+            .endswith("/r/static-5.ckpt.zst")
         )
 
     def test_a_sas_without_a_query_still_addresses(self):
         assert blobstore.rung_uri(
-            "https://acct.blob.core.windows.net/checkpoints", "r", "s.zarr"
-        ).endswith("/r/s.zarr.tar")
+            "https://acct.blob.core.windows.net/checkpoints", "r", "s.ckpt.zst"
+        ).endswith("/r/s.ckpt.zst")
 
     def test_the_name_is_escaped(self):
         """A run id is generated, but the record has held one with a bare
         number and one with characters nobody planned for."""
-        assert "%20" in blobstore.rung_uri(SAS, "run a", "s.zarr")
+        assert "%20" in blobstore.rung_uri(SAS, "run a", "s.ckpt.zst")
 
 
 class TestARungIsOneObject:
-    def test_it_round_trips_through_a_tar(self, tmp_path, monkeypatch):
-        """What the loader gets back must be the directory it expects -- the tar
-        is transport, and nothing downstream should be able to tell."""
-        rung = tmp_path / "static-100.zarr"
-        (rung / "c").mkdir(parents=True)
-        (rung / ".zarray").write_text('{"shape": [4]}')
-        (rung / "c" / "0").write_bytes(b"\x01\x02\x03")
-
+    def test_it_round_trips_as_one_file(self, tmp_path, monkeypatch):
+        """The rung is the `.ckpt.zst` the trainer wrote, uploaded verbatim --
+        no repacking, so what comes back is byte-for-byte what went up."""
+        rung = tmp_path / "static-100.ckpt.zst"
+        rung.write_bytes(b"\x28\xb5\x2f\xfd" + bytes(range(256)) * 40)
         sent: dict[str, bytes] = {}
 
         def _urlopen(request, timeout=None):
@@ -80,34 +85,29 @@ class TestARungIsOneObject:
             return _Response(sent["body"])
 
         monkeypatch.setattr(blobstore.urllib.request, "urlopen", _urlopen)
-        size = blobstore.put_rung(SAS, "run-a", "static-100.zarr", rung)
-        assert size > 0
+        size = blobstore.put_rung(SAS, "run-a", "static-100.ckpt.zst", rung)
+        assert size == rung.stat().st_size
 
         back = tmp_path / "fetched"
-        assert blobstore.get_rung(SAS, "run-a", "static-100.zarr", back) is True
-        assert (back / "static-100.zarr" / ".zarray").read_text() == '{"shape": [4]}'
-        assert (back / "static-100.zarr" / "c" / "0").read_bytes() == b"\x01\x02\x03"
+        assert blobstore.get_rung(SAS, "run-a", "static-100.ckpt.zst", back) is True
+        assert (back / "static-100.ckpt.zst").read_bytes() == rung.read_bytes()
 
-    def test_the_tar_holds_the_snapshot_directory_not_an_absolute_path(self, tmp_path, monkeypatch):
-        """`arcname` is the snapshot. A tar of absolute paths unpacks somewhere
-        nobody asked for, and `filter="data"` would then refuse it outright."""
-        rung = tmp_path / "static-200.zarr"
-        rung.mkdir()
-        (rung / ".zarray").write_text("{}")
-        sent: dict[str, bytes] = {}
+    def test_the_upload_declares_its_length(self, tmp_path, monkeypatch):
+        """Azure Blob refuses a chunked body on Put Blob, and urllib sends one
+        for a file object unless Content-Length is set."""
+        rung = tmp_path / "static-1.ckpt.zst"
+        rung.write_bytes(b"x" * 5000)
+        seen: dict[str, str] = {}
 
-        monkeypatch.setattr(
-            blobstore.urllib.request,
-            "urlopen",
-            lambda request, timeout=None: (
-                sent.__setitem__("body", request.data.read()) or _Response(b"")
-            ),
-        )
-        blobstore.put_rung(SAS, "run-a", "static-200.zarr", rung)
-        with tarfile.open(fileobj=io.BytesIO(sent["body"])) as archive:
-            names = archive.getnames()
-        assert all(not n.startswith("/") for n in names), names
-        assert any(n.startswith("static-200.zarr") for n in names), names
+        def _urlopen(request, timeout=None):
+            seen.update({k.lower(): v for k, v in request.header_items()})
+            request.data.read()
+            return _Response(b"")
+
+        monkeypatch.setattr(blobstore.urllib.request, "urlopen", _urlopen)
+        blobstore.put_rung(SAS, "run-a", "static-1.ckpt.zst", rung)
+        assert seen["content-length"] == "5000"
+        assert seen["x-ms-blob-type"] == "BlockBlob"
 
 
 class TestAbsenceIsNotAnError:
@@ -120,8 +120,8 @@ class TestAbsenceIsNotAnError:
             "urlopen",
             lambda *_a, **_k: (_ for _ in ()).throw(self._http_error(404)),
         )
-        assert blobstore.exists(SAS, "run-a", "s.zarr") is False
-        assert blobstore.get_rung(SAS, "run-a", "s.zarr", tmp_path) is False
+        assert blobstore.exists(SAS, "run-a", "s.ckpt.zst") is False
+        assert blobstore.get_rung(SAS, "run-a", "s.ckpt.zst", tmp_path) is False
 
     def test_any_other_failure_raises(self, monkeypatch, tmp_path):
         """A 403 is an expired SAS and a 500 is the service. Reading either as
@@ -134,9 +134,9 @@ class TestAbsenceIsNotAnError:
                 lambda *_a, code=code, **_k: (_ for _ in ()).throw(self._http_error(code)),
             )
             with pytest.raises(urllib.error.HTTPError):
-                blobstore.exists(SAS, "run-a", "s.zarr")
+                blobstore.exists(SAS, "run-a", "s.ckpt.zst")
             with pytest.raises(urllib.error.HTTPError):
-                blobstore.get_rung(SAS, "run-a", "s.zarr", tmp_path)
+                blobstore.get_rung(SAS, "run-a", "s.ckpt.zst", tmp_path)
 
 
 def test_it_asks_for_an_api_version_that_allows_a_big_single_put():

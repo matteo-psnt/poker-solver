@@ -135,7 +135,7 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 return payload
             try:
                 at = time.monotonic()
-                present = blobstore.exists(sas, run_dir.name, snapshot)
+                present = blobstore.exists(sas, run_dir.name, _converted_name(snapshot))
                 print(
                     f"  {snapshot}: HEAD {time.monotonic() - at:.1f}s -> "
                     f"{'present' if present else 'absent'}",
@@ -166,8 +166,9 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 if args.verify:
                     payload.missing.append(f"{run_dir.name}/{snapshot}")
                     continue
-                print(f"  {snapshot}: uploading...", flush=True)
-                payload.bytes_uploaded += _upload(sas, run_dir, snapshot, work)
+                print(f"  {snapshot}: converting...", flush=True)
+                _name, uploaded = _upload(sas, run_dir, snapshot, work)
+                payload.bytes_uploaded += uploaded
             except Exception as error:  # noqa: BLE001 -- one bad rung must not end the sweep
                 # THE MESSAGE, AND IMMEDIATELY. Recording only the exception
                 # CLASS threw away the one thing that identifies the fault, and
@@ -188,40 +189,71 @@ def run(args: argparse.Namespace) -> MigratedPayload:
     return payload
 
 
-def _upload(sas: str, run_dir: Path, snapshot: str, work: Path) -> int:
-    """Stage the rung to LOCAL DISK, then tar and upload it from there.
+def _upload(sas: str, run_dir: Path, snapshot: str, work: Path) -> tuple[str, int]:
+    """CONVERT one zarr rung to `.ckpt.zst` and upload it. Returns (name, bytes).
 
-    THE WHOLE COST IS PER-FILE LATENCY, not bytes. A rung is ~4,200 zarr chunk
-    files and `tarfile.add` walks them SERIALLY: over SMB that is minutes per
-    rung, and the first sweep spent its entire 30-minute budget without
-    finishing one. Across ~1,200 rungs it is five million round trips.
+    Not a copy. The share holds zarr directories and the container holds the
+    format that replaced them, so migrating means reading the arrays and
+    re-encoding -- which is also why this runs here rather than in the node
+    wrapper: `zarr` is a dependency the wrapper may not import.
 
-    `archive.copy_tree` already solves this -- it is the parallel copier the
-    publish path uses, with up to 64 workers -- so the fix is to pay the SMB
-    cost once, concurrently, and let tar read a local disk.
+    STAGED TO LOCAL DISK FIRST, and that is the whole cost. A legacy rung is
+    ~5,500 chunk files and reading them one at a time over SMB took more than
+    eight minutes; `archive.copy_tree` is the parallel copier the publish path
+    already uses, and it turns that into ~8 seconds.
     """
     import shutil  # noqa: PLC0415 -- node-only
     import time  # noqa: PLC0415 -- node-only
 
+    from src.engine.solver.storage import snapshot_format  # noqa: PLC0415 -- node-only
     from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- node-only
 
     staged = work / snapshot
     shutil.rmtree(staged, ignore_errors=True)
     at = time.monotonic()
     copied = archive.copy_tree(run_dir / snapshot, staged, update=False)
-    fetched = time.monotonic() - at
-    print(f"    staged {copied / 1024**2:.0f} MiB in {fetched:.1f}s", flush=True)
+    staged_in = time.monotonic() - at
+
+    at = time.monotonic()
+    arrays, attrs = _read_zarr(staged)
+    converted = work / _converted_name(snapshot)
+    size = snapshot_format.write_snapshot(converted, arrays, attrs)
+    encoded_in = time.monotonic() - at
+    del arrays
+
     at = time.monotonic()
     try:
-        size = blobstore.put_rung(sas, run_dir.name, snapshot, staged)
+        blobstore.put_rung(sas, run_dir.name, converted.name, converted)
     finally:
         shutil.rmtree(staged, ignore_errors=True)
+        converted.unlink(missing_ok=True)
     print(
-        f"  {snapshot}: staged {copied / 1024**2:.0f} MiB in {fetched:.1f}s, "
-        f"uploaded {size / 1024**2:.0f} MiB in {time.monotonic() - at:.1f}s",
+        f"    staged {copied / 1024**2:.0f} MiB in {staged_in:.1f}s, "
+        f"encoded to {size / 1024**2:.0f} MiB in {encoded_in:.1f}s, "
+        f"uploaded in {time.monotonic() - at:.1f}s",
         flush=True,
     )
-    return size
+    return converted.name, size
+
+
+def _read_zarr(path: Path) -> tuple[dict, dict]:
+    """A legacy rung's arrays and attrs. The only zarr read left in the sweep."""
+    import zarr  # noqa: PLC0415 -- the format being migrated away from
+
+    root = zarr.open(zarr.DirectoryStore(path), mode="r")
+    return {name: root[name][:] for name in root.array_keys()}, dict(root.attrs)
+
+
+def _converted_name(snapshot: str) -> str:
+    """`static-100.zarr` -> `static-100.ckpt.zst`.
+
+    The object is named for what it IS, not for what it was migrated from: a
+    reader asks the manifest for a name and gets this one once the manifest is
+    rewritten, and nothing has to know a conversion happened.
+    """
+    from src.engine.solver.storage import snapshot_format  # noqa: PLC0415 -- node-only
+
+    return snapshot.removesuffix(".zarr") + snapshot_format.SUFFIX
 
 
 def _snapshots(run_dir: Path) -> list[str]:
