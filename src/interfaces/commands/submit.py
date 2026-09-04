@@ -80,11 +80,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--kernel",
-        choices=("scalar", "pcs"),
-        default="scalar",
-        help="pcs = the hand-space vector kernel on one freshly sampled board per "
-        "iteration (train-pcs): exact cards, the real chance layer, every hand at "
-        "once, and the trainer every blueprint since 08-25 has come from. "
+        choices=("pcs", "scalar"),
+        default="pcs",
+        help="pcs (default) = the hand-space vector kernel on one freshly sampled "
+        "board per iteration (train-pcs): exact cards, the real chance layer, every "
+        "hand at once, and the trainer every blueprint since 08-25 has come from. "
         "scalar = external-sampling MCCFR over the real game (train-static); it "
         "lost to pcs on the same budget and survives as the cheap smoke test for "
         "infra changes and as the lineage of the frozen baselines.",
