@@ -1039,7 +1039,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numba" },
-    { name = "numcodecs" },
     { name = "numpy" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },

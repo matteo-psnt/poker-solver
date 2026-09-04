@@ -21,6 +21,7 @@ from src.core.game.rules import GameRules
 from src.core.game.state import Street
 from src.engine.solver.betting_tree import BettingTree
 from src.engine.solver.numba_ops import average_strategy, regret_matching
+from src.engine.solver.storage import snapshot_format
 from src.engine.solver.storage.policy_assembly import (
     WINDOW_SHRINKAGE,
     _window_coefficients,
@@ -196,18 +197,31 @@ def test_a_window_reads_a_node_major_rung_in_the_new_order(tree, tmp_path):
     two different orderings and the task died on the fingerprint instead."""
     early, late, _ = _ladder(tree, tmp_path)
     row_source, slot_source = _legacy_index_maps(tree)
-    for rung in (100, 200):
-        root = zarr.open(zarr.DirectoryStore(str(tmp_path / f"static-{rung}.zarr")), mode="r+")
-        for name in _ARRAYS:
-            gather = slot_source if name in ("regrets", "strategy_sum") else row_source
-            current = root[name][:]
-            scattered = np.empty_like(current)
-            scattered[gather] = current
-            root[name][:] = scattered
-        root.attrs["fingerprint"] = tree.legacy_fingerprint()
+    # REWRITTEN AS ZARR, which is what a published rung is: the ladder the
+    # window reads across is entirely v1 snapshots, and the permutation is what
+    # this test exists to hold. `save_checkpoint` writes one zstd object now,
+    # so the legacy rung has to be built rather than mutated in place.
     manifest = tmp_path / "STATIC_CHECKPOINT.json"
     raw = json.loads(manifest.read_text())
+    for rung in (100, 200):
+        arrays, _attrs = snapshot_format.read_snapshot(
+            tmp_path / f"static-{rung}{snapshot_format.SUFFIX}"
+        )
+        scattered = {}
+        for name in _ARRAYS:
+            gather = slot_source if name in ("regrets", "strategy_sum") else row_source
+            out = np.empty_like(arrays[name])
+            out[gather] = arrays[name]
+            scattered[name] = out
+        (tmp_path / f"static-{rung}{snapshot_format.SUFFIX}").unlink()
+        _write_legacy_zarr(
+            tmp_path / f"static-{rung}.zarr",
+            scattered,
+            {"iteration": rung, "fingerprint": tree.legacy_fingerprint()},
+        )
     raw["fingerprint"] = tree.legacy_fingerprint()
+    raw["zarr"] = "static-200.zarr"
+    raw["retained"] = [{"iteration": r, "zarr": f"static-{r}.zarr"} for r in (100, 200)]
     manifest.write_text(json.dumps(raw))
 
     storage = StaticArrayStorage(tree)
@@ -395,3 +409,13 @@ def test_mixing_runs_that_never_recorded_an_abstraction_is_allowed(tree, tmp_pat
     assert record["mix_run"] == "b"
     expected = 0.5 * a / a.sum(dtype=np.float64) + 0.5 * b / b.sum(dtype=np.float64)
     np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-12)
+
+
+def _write_legacy_zarr(path, arrays, attrs):
+    """A pre-`.ckpt.zst` snapshot, as every published rung still is."""
+
+    root = zarr.open(zarr.DirectoryStore(str(path)), mode="w")
+    for name, array in arrays.items():
+        root.create_dataset(name, data=np.asarray(array), dtype=array.dtype)
+    for key, value in attrs.items():
+        root.attrs[key] = value
