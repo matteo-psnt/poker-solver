@@ -17,7 +17,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from src.shared import records
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, profile, progress
@@ -316,15 +315,8 @@ def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str])
 
 
 def _retained_ladder(destination: Path) -> list[int]:
-    """Every rung the run's manifest still points at. Parsed, not imported:
-    the storage layer that owns this manifest is not on the node's stdlib-only
-    import path."""
-    raw = archive.read_manifest(destination / records.STATIC_CHECKPOINT)
-    if not raw:
-        return []
-    return sorted(
-        {int(entry["iteration"]) for entry in raw.get("retained", [])} | {int(raw["iteration"])}
-    )
+    """Every rung the run's manifest still points at."""
+    return [iteration for iteration, _name in archive.manifest_entries(destination)]
 
 
 def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:

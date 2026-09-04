@@ -549,3 +549,74 @@ class TestTheManifestNamesTheRung:
 
         assert archive.fetch_for_evaluation(share, node, ["9999"], lines.append) == []
         assert any("9999" in line and "manifest names no snapshot" in line for line in lines)
+
+
+class TestTheContainerIsActuallyReached:
+    """The manifest names `static-N.zarr`; the container holds
+    `static-N.ckpt.zst`. Every lookup passed the manifest's spelling straight
+    through, so all 1,081 migrated objects 404ed and the fetch fell back to the
+    share -- which worked, right up until the share was deleted.
+    """
+
+    def _share(self, tmp_path):
+        share = tmp_path / "archive" / "run-a"
+        share.mkdir(parents=True)
+        _manifest(share, "static-1000.zarr", iteration=1000)
+        return share
+
+    def test_the_object_name_is_what_is_asked_for(self, tmp_path, monkeypatch):
+        asked: list[str] = []
+        monkeypatch.setattr(
+            archive.blobstore, "exists", lambda _s, _r, name: (asked.append(name), True)[1]
+        )
+        archive.require_complete(self._share(tmp_path), "static-1000.zarr", "sas")
+        assert asked == ["static-1000.ckpt.zst"]
+
+    def test_a_rung_in_the_container_needs_no_share_copy(self, tmp_path, monkeypatch):
+        """The share holds no directory at all here; existence in the container
+        IS completeness, which is the whole point of the flip."""
+        monkeypatch.setattr(archive.blobstore, "exists", lambda *_a: True)
+        archive.require_complete(self._share(tmp_path), "static-1000.zarr", "sas")
+
+    def test_the_fetch_pulls_the_object_and_lands_it_under_that_name(self, tmp_path, monkeypatch):
+        share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
+
+        def _get(_s, _r, name, destination):
+            (destination / name).write_text("the object")
+            return True
+
+        monkeypatch.setattr(archive.blobstore, "get_rung", _get)
+        archive.fetch_snapshot(share, node, "static-1000.zarr", "sas")
+
+        assert (node / "static-1000.ckpt.zst").read_text() == "the object"
+
+    def test_a_stale_copy_of_the_other_spelling_is_cleared(self, tmp_path, monkeypatch):
+        """A cancelled task leaves a partial rung under whichever name it was
+        fetching. Removing only the name asked for leaves the other beside the
+        one that just landed, and the loader's fallback picks it up."""
+        share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
+        (node / "static-1000.zarr").mkdir(parents=True)
+        (node / "static-1000.zarr" / "chunk").write_text("from a dead attempt")
+
+        monkeypatch.setattr(
+            archive.blobstore,
+            "get_rung",
+            lambda _s, _r, name, destination: ((destination / name).write_text("fresh"), True)[1],
+        )
+        archive.fetch_snapshot(share, node, "static-1000.zarr", "sas")
+
+        assert not (node / "static-1000.zarr").exists()
+        assert (node / "static-1000.ckpt.zst").read_text() == "fresh"
+
+    def test_a_file_snapshot_on_the_share_is_fetched_as_a_file(self, tmp_path):
+        """Published without a SAS, a rung lands on the share as one FILE.
+        `is_dir()` refused it and `copy_tree` could not have copied it."""
+        share, node = self._share(tmp_path), tmp_path / "runs" / "run-a"
+        name = f"static-1000{records.SNAPSHOT_SUFFIX}"
+        (share / name).write_text("one object")
+        (share / archive.marker_for(name)).write_text("")
+
+        archive.require_complete(share, name)
+        archive.fetch_snapshot(share, node, name)
+
+        assert (node / name).read_text() == "one object"
