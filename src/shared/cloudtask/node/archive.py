@@ -552,6 +552,25 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
     return current
 
 
+def _ladder_names(source: Path) -> dict[str, str]:
+    """Iteration (as a string) -> the snapshot name the manifest gives it.
+
+    Keyed on the string because that is what a `--at` flag carries; an int key
+    would make every caller convert, and one of them would forget.
+    """
+    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
+    if not manifest:
+        return {}
+    entries = [*manifest.get("retained", [])]
+    if manifest.get("zarr"):
+        entries.append({"iteration": manifest.get("iteration"), "zarr": manifest["zarr"]})
+    return {
+        str(entry["iteration"]): str(entry["zarr"])
+        for entry in entries
+        if entry.get("iteration") is not None and entry.get("zarr")
+    }
+
+
 def fetch_for_evaluation(
     source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet, sas: str = ""
 ) -> list[str]:
@@ -560,11 +579,24 @@ def fetch_for_evaluation(
     Selective because the whole ladder is thirty ~540 MB rungs, ~16 GB, to
     score three of them. A rung that cannot be fetched is skipped and named
     rather than fatal: a partial curve beats none.
+
+    THE MANIFEST NAMES THE RUNG, and this used to build `static-<rung>.zarr` by
+    hand instead. That is a second opinion about a name the manifest already
+    holds, and it survives only as long as every snapshot is a zarr directory:
+    a run whose manifest was repointed to the new format would have every rung
+    "missing" here while sitting on the share untouched.
     """
     fetch_metadata(source, destination)
+    ladder = _ladder_names(source)
     fetched = []
     for rung in rungs:
-        name = f"static-{rung}.zarr"
+        name = ladder.get(str(rung), "")
+        if not name:
+            # Skipped rather than guessed. There is no name to try: the manifest
+            # is what says a rung was published, so a rung it does not name has
+            # no bytes to fetch under any spelling.
+            log(f"  WARN rung {rung}: the manifest names no snapshot at that iteration")
+            continue
         try:
             require_complete(source, name, sas)
         except FetchRefusedError as refusal:

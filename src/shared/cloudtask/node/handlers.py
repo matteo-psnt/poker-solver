@@ -240,14 +240,19 @@ def _fetch_rungs(
         log(f"FATAL {plan.run_id} has no published checkpoint to score")
         return None
     destination = paths.runs / plan.run_id
-    fetched = archive.fetch_for_evaluation(published, destination, requested, log)
+    fetched = archive.fetch_for_evaluation(
+        published, destination, requested, log, plan.checkpoint_sas
+    )
     if not fetched:
         log("FATAL none of the requested rungs could be fetched")
         return None
     support = _support_rungs(plan.eval_flags, destination, fetched)
     if support:
         log(f"eval also READS {len(support)} more rung(s): {', '.join(support)}")
-        if len(archive.fetch_for_evaluation(published, destination, support, log)) != len(support):
+        support_fetched = archive.fetch_for_evaluation(
+            published, destination, support, log, plan.checkpoint_sas
+        )
+        if len(support_fetched) != len(support):
             log("FATAL a rung the reassembled average reads is missing")
             return None
     return fetched

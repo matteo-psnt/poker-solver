@@ -368,6 +368,9 @@ class TestFetchForEvaluation:
             (share / name / "chunk").write_text(name)
             if rung not in unmarked:
                 (share / archive.marker_for(name)).write_text("")
+        # The manifest is what NAMES each rung; without one there is nothing to
+        # resolve an iteration to a file, which is the point of the lookup.
+        _manifest(share, f"static-{rungs[-1]}.zarr", retained=rungs, iteration=rungs[-1])
         return share
 
     def test_only_the_named_rungs_come_down(self, tmp_path):
@@ -510,3 +513,39 @@ class TestLooseFilesPublishAtomically:
 
         assert archive.publish_run(run_dir, destination)
         assert (destination / "run.jsonl").read_text() == "restored events\n"
+
+
+class TestTheManifestNamesTheRung:
+    """`fetch_for_evaluation` built `static-<rung>.zarr` by hand.
+
+    That is a second opinion about a name the manifest already holds, and it
+    holds only while every snapshot is a zarr directory. A run repointed to the
+    new format would have reported every rung missing while its bytes sat on
+    the share untouched.
+    """
+
+    def _published(self, tmp_path, name: str):
+        share = tmp_path / "archive" / "run-a"
+        share.mkdir(parents=True)
+        (share / name).mkdir()
+        (share / name / "chunk").write_text(name)
+        (share / archive.marker_for(name)).write_text("")
+        _manifest(share, name, iteration=1000)
+        return share
+
+    def test_a_repointed_manifest_still_resolves_its_rung(self, tmp_path):
+        share = self._published(tmp_path, f"static-1000{records.SNAPSHOT_SUFFIX}")
+        node = tmp_path / "runs" / "run-a"
+
+        assert archive.fetch_for_evaluation(share, node, ["1000"]) == ["1000"]
+        assert (node / f"static-1000{records.SNAPSHOT_SUFFIX}" / "chunk").exists()
+
+    def test_a_rung_the_manifest_does_not_name_is_skipped_and_said_so(self, tmp_path):
+        """Not guessed at. A rung outside the manifest has no published bytes
+        under any spelling, so inventing one only moves the failure later."""
+        share = self._published(tmp_path, "static-1000.zarr")
+        node = tmp_path / "runs" / "run-a"
+        lines: list[str] = []
+
+        assert archive.fetch_for_evaluation(share, node, ["9999"], lines.append) == []
+        assert any("9999" in line and "manifest names no snapshot" in line for line in lines)

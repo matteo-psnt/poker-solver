@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
+from src.shared import records
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
@@ -135,7 +136,7 @@ def run(args: argparse.Namespace) -> MigratedPayload:
                 return payload
             try:
                 at = time.monotonic()
-                present = blobstore.exists(sas, run_dir.name, _converted_name(snapshot))
+                present = blobstore.exists(sas, run_dir.name, records.object_name(snapshot))
                 print(
                     f"  {snapshot}: HEAD {time.monotonic() - at:.1f}s -> "
                     f"{'present' if present else 'absent'}",
@@ -216,7 +217,7 @@ def _upload(sas: str, run_dir: Path, snapshot: str, work: Path) -> tuple[str, in
 
     at = time.monotonic()
     arrays, attrs = _read_zarr(staged)
-    converted = work / _converted_name(snapshot)
+    converted = work / records.object_name(snapshot)
     size = snapshot_format.write_snapshot(converted, arrays, attrs)
     encoded_in = time.monotonic() - at
     del arrays
@@ -242,18 +243,6 @@ def _read_zarr(path: Path) -> tuple[dict, dict]:
 
     root = zarr.open(zarr.DirectoryStore(path), mode="r")
     return {name: root[name][:] for name in root.array_keys()}, dict(root.attrs)
-
-
-def _converted_name(snapshot: str) -> str:
-    """`static-100.zarr` -> `static-100.ckpt.zst`.
-
-    The object is named for what it IS, not for what it was migrated from: a
-    reader asks the manifest for a name and gets this one once the manifest is
-    rewritten, and nothing has to know a conversion happened.
-    """
-    from src.engine.solver.storage import snapshot_format  # noqa: PLC0415 -- node-only
-
-    return snapshot.removesuffix(".zarr") + snapshot_format.SUFFIX
 
 
 def _snapshots(run_dir: Path) -> list[str]:
