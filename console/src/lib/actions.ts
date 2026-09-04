@@ -29,7 +29,7 @@ const WORDS: Record<string, string> = {
 };
 
 /** `4` chips at a big blind of `2` → `"2"`; `9` → `"4.5"`. */
-function inBlinds(chips: number, bigBlind: number): string {
+export function inBlinds(chips: number, bigBlind: number): string {
   if (!bigBlind) return String(chips);
   const bb = chips / bigBlind;
   // Whole numbers read better without a trailing ".0", and half-blind sizes are

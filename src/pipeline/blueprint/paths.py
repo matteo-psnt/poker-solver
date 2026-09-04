@@ -62,6 +62,55 @@ class PathError(ValueError):
 
 
 @dataclass(frozen=True)
+class Decision:
+    """One spot the line passed through, and the whole menu it chose from.
+
+    The menu, not only the choice: a surface that lets you step back into this
+    spot has to offer what was on offer there, and asking again per step is a
+    round trip each to re-derive what this walk already had.
+    """
+
+    street: str
+    actor: int
+    chosen: str
+    options: tuple[Action, ...]
+    #: The pot before this action, and what the actor had left to put in it.
+    pot: float
+    stack: float
+
+
+@dataclass(frozen=True)
+class Deal:
+    """The cards a street turned over, as the line crossed into it."""
+
+    street: str
+    cards: tuple[Card, ...]
+    #: What the previous street left in the middle.
+    pot: float
+
+
+Step = Decision | Deal
+"""One column of a line: somebody acted, or the board grew."""
+
+
+class NeedsBoardError(PathError):
+    """The line reaches a street the given board cannot deal.
+
+    A :class:`PathError` still, so every caller that only wants the sentence
+    keeps the behaviour it had. It carries the walk as well, because a surface
+    that ASKS for the cards has to draw the line leading up to the question --
+    and re-walking it to find out would be a second copy of the rules.
+    """
+
+    def __init__(self, message: str, street: str, needed: int, have: int, line: tuple[Step, ...]):
+        super().__init__(message)
+        self.street = street
+        self.needed = needed
+        self.have = have
+        self.line = line
+
+
+@dataclass(frozen=True)
 class ReplayedNode:
     """Where a path led, and what is true there.
 
@@ -73,6 +122,10 @@ class ReplayedNode:
     actor: int | None
     legal_actions: tuple[Action, ...]
     board_consumed: int
+    #: Every spot and every deal between the start of the hand and here.
+    line: tuple[Step, ...] = ()
+    #: Which seat had the button. A seat index cannot be NAMED without it.
+    button: int = 0
 
 
 def encode_action(action: Action) -> str:
@@ -164,9 +217,10 @@ def replay(
     reaches is allowed and the surplus is ignored -- that is what lets a caller
     hold one runout fixed while walking back and forth along a line.
 
-    Raises :class:`PathError` for a token that is not on offer, and for a board
-    too short to reach the street the path asks for. Both are the caller's to
-    fix, and both are silent corruption if answered with a default instead.
+    Raises :class:`PathError` for a token that is not on offer, and
+    :class:`NeedsBoardError` -- which is one -- for a board too short to reach
+    the street the path asks for. Both are the caller's to fix, and both are
+    silent corruption if answered with a default instead.
     """
     rules: GameRules = blueprint.rules
     state = rules.create_initial_state(
@@ -176,14 +230,25 @@ def replay(
     )
 
     consumed = 0
+    line: list[Step] = []
     for token in parse_path(path):
-        state, consumed = advance_chance(state, board, consumed)
+        state, consumed = advance_chance(state, board, consumed, line)
         if state.is_terminal:
             raise PathError(f"'{token}' comes after the hand has already ended.")
         legal = rules.get_legal_actions(state, action_model=blueprint.action_model)
+        line.append(
+            Decision(
+                street=str(state.street),
+                actor=state.current_player,
+                chosen=token,
+                options=legal,
+                pot=state.pot,
+                stack=state.stacks[state.current_player],
+            )
+        )
         state = state.apply_action(match_action(token, legal), rules)
 
-    state, consumed = advance_chance(state, board, consumed)
+    state, consumed = advance_chance(state, board, consumed, line)
     terminal = state.is_terminal
     return ReplayedNode(
         state=state,
@@ -192,21 +257,36 @@ def replay(
             () if terminal else rules.get_legal_actions(state, action_model=blueprint.action_model)
         ),
         board_consumed=consumed,
+        line=tuple(line),
+        button=button,
     )
 
 
 def advance_chance(
-    state: GameState, board: tuple[Card, ...], consumed: int
+    state: GameState,
+    board: tuple[Card, ...],
+    consumed: int,
+    line: list[Step] | None = None,
 ) -> tuple[GameState, int]:
-    """Deal from ``board`` for as long as the state is waiting on cards."""
+    """Deal from ``board`` for as long as the state is waiting on cards.
+
+    ``line`` records each deal as it happens, so a caller that wants to draw the
+    line does not walk it a second time to find the street boundaries.
+    """
     while not state.is_terminal and is_chance_node(state):
         needed = state.street.board_card_count - len(state.board)
         if consumed + needed > len(board):
-            raise PathError(
+            raise NeedsBoardError(
                 f"This line reaches {state.street} and needs "
-                f"{consumed + needed} board cards, but {len(board)} were given."
+                f"{consumed + needed} board cards, but {len(board)} were given.",
+                street=str(state.street),
+                needed=consumed + needed,
+                have=len(board),
+                line=tuple(line or ()),
             )
         dealt = board[consumed : consumed + needed]
         consumed += needed
+        if line is not None:
+            line.append(Deal(street=str(state.street), cards=dealt, pot=state.pot))
         state = begin_street(state, dealt)
     return state, consumed

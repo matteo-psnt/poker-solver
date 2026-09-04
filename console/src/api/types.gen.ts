@@ -987,6 +987,24 @@ export interface components {
             std_error_mbb: number;
         };
         /**
+         * Dealt
+         * @description The cards a street turned over, as the line crossed into it.
+         */
+        Dealt: {
+            /** Cards */
+            cards: string[];
+            /**
+             * Kind
+             * @default dealt
+             * @constant
+             */
+            kind: "dealt";
+            /** Pot */
+            pot: number;
+            /** Street */
+            street: string;
+        };
+        /**
          * Edge
          * @description One action on the menu: its path token, its type, and what it costs.
          */
@@ -1182,6 +1200,23 @@ export interface components {
             op: "logs";
             /** Task */
             task?: string | null;
+        };
+        /**
+         * NeedsCards
+         * @description The line has reached a street and stopped, waiting to be dealt.
+         *
+         *     An answer rather than a refusal, because the caller is not wrong: a line
+         *     that crosses to the flop HAS no strategy until someone says which flop, and
+         *     a client that is about to ask for three cards needs the line leading up to
+         *     the question drawn first.
+         */
+        NeedsCards: {
+            /** Have */
+            have: number;
+            /** Needed */
+            needed: number;
+            /** Street */
+            street: string;
         };
         /**
          * NodeGrid
@@ -1897,18 +1932,64 @@ export interface components {
         };
         /**
          * SolverNode
-         * @description One spot in the tree. `grid` is null exactly when `terminal`.
+         * @description One spot in the tree.
+         *
+         *     `grid` is null when the hand is over (`terminal`) and when the board is
+         *     short of what the line needs (`pending`) -- two different silences, which is
+         *     why they are two fields rather than one null.
          */
         SolverNode: {
             /** Board */
             board: string[];
+            /**
+             * Button
+             * @default 0
+             */
+            button: number;
             /** Children */
             children?: components["schemas"]["Edge"][];
             grid: components["schemas"]["NodeGrid"] | null;
+            /** Line */
+            line?: (components["schemas"]["Spot"] | components["schemas"]["Dealt"])[];
             /** Path */
             path: string;
+            pending?: components["schemas"]["NeedsCards"] | null;
+            /**
+             * Pot
+             * @default 0
+             */
+            pot: number;
+            /** Stack */
+            stack?: number | null;
             /** Terminal */
             terminal: boolean;
+        };
+        /**
+         * Spot
+         * @description One column of a line: somebody acted, and what else they could have.
+         *
+         *     `options` carries the whole menu, not only what was taken, so a client can
+         *     offer the alternatives at a past spot without a round trip per column.
+         */
+        Spot: {
+            /** Actor */
+            actor: number;
+            /** Chosen */
+            chosen: string;
+            /**
+             * Kind
+             * @default spot
+             * @constant
+             */
+            kind: "spot";
+            /** Options */
+            options: components["schemas"]["Edge"][];
+            /** Pot */
+            pot: number;
+            /** Stack */
+            stack: number;
+            /** Street */
+            street: string;
         };
         /** StandingCharge */
         StandingCharge: {

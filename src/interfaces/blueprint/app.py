@@ -20,7 +20,7 @@ thing allowed to decide what is loaded, not a browser tab.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -30,7 +30,15 @@ from src.core.game.state import Card
 from src.engine.search.range_inference import ALL_COMBOS
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from src.pipeline.blueprint.grid import StrategyGrid, strategy_grid
-from src.pipeline.blueprint.paths import PathError, encode_action, match_action, replay
+from src.pipeline.blueprint.paths import (
+    Decision,
+    NeedsBoardError,
+    PathError,
+    Step,
+    encode_action,
+    match_action,
+    replay,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,14 +125,69 @@ class Edge(BaseModel):
     amount: float
 
 
+class Spot(BaseModel):
+    """One column of a line: somebody acted, and what else they could have.
+
+    `options` carries the whole menu, not only what was taken, so a client can
+    offer the alternatives at a past spot without a round trip per column.
+    """
+
+    kind: Literal["spot"] = "spot"
+    street: str
+    actor: int
+    chosen: str
+    options: list[Edge]
+    pot: float
+    stack: float
+
+
+class Dealt(BaseModel):
+    """The cards a street turned over, as the line crossed into it."""
+
+    kind: Literal["dealt"] = "dealt"
+    street: str
+    cards: list[str]
+    pot: float
+
+
+class NeedsCards(BaseModel):
+    """The line has reached a street and stopped, waiting to be dealt.
+
+    An answer rather than a refusal, because the caller is not wrong: a line
+    that crosses to the flop HAS no strategy until someone says which flop, and
+    a client that is about to ask for three cards needs the line leading up to
+    the question drawn first.
+    """
+
+    street: str
+    #: Board cards the line needs in total by this street, and how many it has.
+    needed: int
+    have: int
+
+
 class SolverNode(BaseModel):
-    """One spot in the tree. `grid` is null exactly when `terminal`."""
+    """One spot in the tree.
+
+    `grid` is null when the hand is over (`terminal`) and when the board is
+    short of what the line needs (`pending`) -- two different silences, which is
+    why they are two fields rather than one null.
+    """
 
     path: str
     terminal: bool
     board: list[str]
     grid: NodeGrid | None
     children: list[Edge] = Field(default_factory=list)
+    """Which seat holds the button, so a client can NAME the seats rather than
+    number them: replay pins it, and a seat index alone cannot be labelled."""
+    button: int = 0
+    """What is in the middle here, and what the player to act has left -- so a
+    client can label this spot the way it labels every past one."""
+    pot: float = 0.0
+    stack: float | None = None
+    """Every spot and deal between the start of the hand and here."""
+    line: list[Spot | Dealt] = Field(default_factory=list)
+    pending: NeedsCards | None = None
 
 
 class HandEvent(BaseModel):
@@ -217,6 +280,32 @@ def grid_payload(grid: StrategyGrid) -> NodeGrid:
             for bucket, entry in grid.buckets.items()
         },
     )
+
+
+def _edge(action) -> Edge:
+    """One action on the wire."""
+    return Edge(token=encode_action(action), type=str(action.type), amount=action.amount)
+
+
+def _line_payload(line: tuple[Step, ...]) -> list[Spot | Dealt]:
+    """The walk, as the columns a client draws it in."""
+    return [
+        Spot(
+            street=step.street,
+            actor=step.actor,
+            chosen=step.chosen,
+            options=[_edge(action) for action in step.options],
+            pot=step.pot,
+            stack=step.stack,
+        )
+        if isinstance(step, Decision)
+        else Dealt(
+            street=step.street,
+            cards=[_card_text(card) for card in step.cards],
+            pot=step.pot,
+        )
+        for step in line
+    ]
 
 
 class StartPlay(BaseModel):
@@ -351,37 +440,52 @@ def create_app(
         try:
             cards = parse_board(board)
             node = replay(blueprint, path, cards)
-            if node.actor is None:
-                return JSONResponse(
-                    SolverNode(
-                        path=path,
-                        terminal=True,
-                        board=[_card_text(card) for card in node.state.board],
-                        grid=None,
-                    ).model_dump()
-                )
-            grid = strategy_grid(blueprint, node, use_average=average)
+        except NeedsBoardError as stopped:
+            # Not a refusal: a line that crosses to the flop has no strategy
+            # until someone says which flop. The walk so far comes back so the
+            # client can draw the line leading up to the question it must ask.
             return JSONResponse(
                 SolverNode(
                     path=path,
                     terminal=False,
-                    board=[_card_text(card) for card in node.state.board],
-                    grid=grid_payload(grid),
-                    # The children are here so a client can walk the tree without
-                    # guessing which sizes are legal: the menu is a function of
-                    # the chip configuration, not of the action model alone.
-                    children=[
-                        Edge(
-                            token=encode_action(action),
-                            type=str(action.type),
-                            amount=action.amount,
-                        )
-                        for action in node.legal_actions
-                    ],
+                    board=[_card_text(card) for card in cards],
+                    grid=None,
+                    line=_line_payload(stopped.line),
+                    pending=NeedsCards(
+                        street=stopped.street, needed=stopped.needed, have=stopped.have
+                    ),
                 ).model_dump()
             )
         except PathError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
+
+        if node.actor is None:
+            return JSONResponse(
+                SolverNode(
+                    path=path,
+                    terminal=True,
+                    board=[_card_text(card) for card in node.state.board],
+                    grid=None,
+                    line=_line_payload(node.line),
+                ).model_dump()
+            )
+        grid = strategy_grid(blueprint, node, use_average=average)
+        return JSONResponse(
+            SolverNode(
+                path=path,
+                terminal=False,
+                board=[_card_text(card) for card in node.state.board],
+                grid=grid_payload(grid),
+                # The children are here so a client can walk the tree without
+                # guessing which sizes are legal: the menu is a function of
+                # the chip configuration, not of the action model alone.
+                children=[_edge(action) for action in node.legal_actions],
+                line=_line_payload(node.line),
+                button=node.button,
+                pot=node.state.pot,
+                stack=node.state.stacks[node.actor],
+            ).model_dump()
+        )
 
     @app.post("/api/play")
     def _start(request: StartPlay) -> JSONResponse:

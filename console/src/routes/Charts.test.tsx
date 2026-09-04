@@ -5,19 +5,51 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routeTree } from "@/routes/tree";
 
 /**
- * The refusal that made postflop unusable.
+ * A line that has outrun its board is an ANSWER, not a refusal.
  *
- * Replay needs the runout — *"This line reaches Flop and needs 3 board cards,
- * but 0 were given."* — and that 422 was handed to `Panel`'s error slot, so the
- * ordinary act of stepping into a postflop line turned the page red and said
- * **unavailable**. It is not a fault; it is the page asking for a board, and it
- * is the reason the deck exists.
- *
- * Asserted against a REAL 422 through the client rather than a mocked hook,
- * because what is under test is the round trip: `ApiError` has to carry the
- * status and the server's sentence for `shortBoard` to recognise it at all.
+ * It was a 422 handed to `Panel`'s error slot, so the ordinary act of stepping
+ * into a postflop line turned the page red and said **unavailable**. The server
+ * now says what it is waiting for and sends the line leading up to the question,
+ * which is what lets the street appear as a column with empty cards in it.
  */
-const NEEDS_BOARD = "This line reaches Flop and needs 3 board cards, but 0 were given.";
+const PENDING = {
+  op: "solver-node",
+  path: "c/x",
+  terminal: false,
+  board: [],
+  grid: null,
+  children: [],
+  button: 0,
+  pot: 0,
+  stack: null,
+  pending: { street: "flop", needed: 3, have: 0 },
+  line: [
+    {
+      kind: "spot",
+      street: "preflop",
+      actor: 0,
+      chosen: "c",
+      pot: 3,
+      stack: 199,
+      options: [
+        { token: "f", type: "fold", amount: 0 },
+        { token: "c", type: "call", amount: 1 },
+      ],
+    },
+    {
+      kind: "spot",
+      street: "preflop",
+      actor: 1,
+      chosen: "x",
+      pot: 4,
+      stack: 198,
+      options: [
+        { token: "x", type: "check", amount: 0 },
+        { token: "b4", type: "bet", amount: 4 },
+      ],
+    },
+  ],
+};
 
 const RUN = {
   op: "blueprint-run",
@@ -58,6 +90,14 @@ const NODE = {
     { token: "f", type: "fold", amount: 0 },
     { token: "c", type: "call", amount: 2 },
   ],
+  button: 0,
+  pot: 4,
+  stack: 198,
+  pending: null,
+  // The line as columns: two preflop decisions, then the flop it dealt. The
+  // options are the whole menu at each past spot, which is what makes stepping
+  // back into one a click rather than a round trip.
+  line: [...PENDING.line, { kind: "dealt", street: "flop", cards: ["As", "Kd", "7c"], pot: 4 }],
 };
 
 /** What `/api/blueprint/node` answers. Set per-describe. */
@@ -71,17 +111,11 @@ function answer(url: string): Response {
   if (url.startsWith("/api/blueprint/combos")) {
     return new Response(JSON.stringify({ op: "combos", combos: COMBOS }), { status: 200 });
   }
-  // The page also mounts the box control and the run picker above the tabs.
-  // Neither is under test, but both have to be answerable or the render that
-  // is under test never happens.
-  if (url.startsWith("/api/runs")) {
-    return new Response(JSON.stringify({ op: "runs", runs: [] }), { status: 200 });
-  }
   return new Response("{}", { status: 200 });
 }
 
 beforeEach(() => {
-  node = () => new Response(JSON.stringify({ error: NEEDS_BOARD }), { status: 422 });
+  node = () => new Response(JSON.stringify(PENDING), { status: 200 });
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => answer(String(url))),
@@ -102,54 +136,107 @@ function mountAt(path: string) {
   );
 }
 
-describe("a line that needs a board it has not got", () => {
+describe("a line that has outrun its board", () => {
   const POSTFLOP = "/blueprint?tab=chart&path=c%2Fx";
 
-  it("shows the server's own sentence, which names the street and the count", async () => {
+  it("says what it is waiting for, in the street's own name", async () => {
     mountAt(POSTFLOP);
-    await waitFor(() => expect(screen.getByText(NEEDS_BOARD)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Deal 3 more cards/)).toBeTruthy());
   });
 
   it("does not file it as a panel fault", async () => {
     mountAt(POSTFLOP);
-    await waitFor(() => expect(screen.getByText(NEEDS_BOARD)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Deal 3 more cards/)).toBeTruthy());
     // `Panel` prefixes its error slot with "unavailable:" and turns the header
-    // rule red. That is what this line used to do to every postflop spot.
+    // rule red. That is what this used to do to every postflop spot.
     expect(screen.queryByText(/unavailable/i)).toBeNull();
   });
 
   it("opens the deck, so the answer is one click away", async () => {
     mountAt(POSTFLOP);
-    await waitFor(() => expect(screen.getByText(NEEDS_BOARD)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Deal 3 more cards/)).toBeTruthy());
     expect(screen.getByTitle("As")).toBeTruthy();
     expect(screen.getByTitle("2c")).toBeTruthy();
   });
 
-  it("still suppresses the empty menu, which is a consequence and not a fact", async () => {
+  it("puts the street in the line as a column of its own", async () => {
     mountAt(POSTFLOP);
-    await waitFor(() => expect(screen.getByText(NEEDS_BOARD)).toBeTruthy());
-    // There are actions from here; the server simply cannot say what they are
-    // until it has a board. "no actions from here" would be a lie.
-    expect(screen.queryByText(/no actions from here/)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/Deal 3 more cards/)).toBeTruthy());
+    // Named where it happens, between the preflop action and whatever follows —
+    // not in a bar above the page that is there whether the line reaches it or
+    // not. Two of them: the column header and the deck's own slot label.
+    expect(screen.getAllByText("flop").length).toBeGreaterThan(0);
   });
 
-  it("treats a mistyped board the same way, not as a fault", async () => {
-    // Reachable through the paste field, which is the text format this page was
-    // fixed for. Every board refusal names a card; no path refusal does.
-    const typo = "'Ax' is not a card.";
-    node = () => new Response(JSON.stringify({ error: typo }), { status: 422 });
-    mountAt("/blueprint?tab=chart&board=Ax");
-    await waitFor(() => expect(screen.getByText(typo)).toBeTruthy());
-    expect(screen.queryByText(/unavailable/i)).toBeNull();
-  });
-
-  it("still greys the panel for a line that does not exist", async () => {
-    // A bookmark that outlived its action model IS a fault, and naming a token
-    // rather than a card is what tells the two apart.
+  it("greys the panel for a line that does not exist", async () => {
+    // A bookmark that outlived its action model IS a fault, and unlike a short
+    // board there is nothing the page can ask for that would fix it.
     const stale = "'r5' is not available here. On offer: f, c, r6.";
     node = () => new Response(JSON.stringify({ error: stale }), { status: 422 });
     mountAt("/blueprint?tab=chart&path=r5");
     await waitFor(() => expect(screen.getByText(/unavailable/i)).toBeTruthy());
+  });
+
+  it("greys the panel for a mistyped board, which no deal can fix", async () => {
+    const typo = "'Ax' is not a card.";
+    node = () => new Response(JSON.stringify({ error: typo }), { status: 422 });
+    mountAt("/blueprint?tab=chart&board=Ax");
+    await waitFor(() => expect(screen.getByText(/unavailable/i)).toBeTruthy());
+  });
+});
+
+describe("the line, as columns", () => {
+  const SPOT = "/blueprint?tab=chart&path=c%2Fx&board=AsKd7c";
+
+  beforeEach(() => {
+    node = () => new Response(JSON.stringify(NODE), { status: 200 });
+  });
+
+  it("draws one column per thing that happened, the seats named not numbered", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    // Seat 0 holds the button, which the server says rather than the client
+    // assuming: BTN acted, BB acted, the flop came, BTN is to act.
+    expect(screen.getAllByText("BTN").length).toBe(2);
+    expect(screen.getAllByText("BB").length).toBe(1);
+  });
+
+  it("keeps every option a past spot had, so the other branch is one click", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    // `fold` was on offer at the first spot and was not taken. It is drawn
+    // anyway, and clicking it replays the line to there and folds instead.
+    const fold = screen.getAllByText("fold")[0];
+    expect(fold).toBeTruthy();
+    fireEvent.click(fold as HTMLElement);
+    // Replayed to that spot and folded instead: the new line is `f`, not
+    // `c/x/f`. A memory history has no `window.location`, so the round trip the
+    // click causes is what says where the page went.
+    await waitFor(() =>
+      expect(
+        (globalThis.fetch as unknown as { mock: { calls: string[][] } }).mock.calls.some(
+          ([url]) => String(url).includes("node") && String(url).includes("path=f&"),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("shows the flop's cards where the flop happened", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    // The board is in the line, not in a bar above it -- so a preflop spot has
+    // no flop column at all. See the root case below.
+    expect(screen.getAllByTitle("As").length).toBeGreaterThan(0);
+  });
+
+  it("has no street column at all at the preflop root", async () => {
+    node = () =>
+      new Response(JSON.stringify({ ...NODE, path: "", line: [], pending: null }), { status: 200 });
+    mountAt("/blueprint?tab=chart");
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    // The headline behaviour: you are not asked for a flop until the line
+    // reaches one. Nothing on the page names a street before then.
+    expect(screen.queryByText("flop")).toBeNull();
   });
 });
 
@@ -169,7 +256,7 @@ describe("the chart, drawn", () => {
 
   it("names the spot from the grid rather than from the path", async () => {
     mountAt(SPOT);
-    await waitFor(() => expect(screen.getByText(/Flop · seat 0 to act/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Flop · BTN to act/)).toBeTruthy());
   });
 
   it("totals the whole range, weighted by combos and net of the untrained", async () => {
@@ -221,7 +308,7 @@ describe("the chart, drawn", () => {
     await waitFor(() => expect(screen.getByText("pinned")).toBeTruthy());
 
     // Step into a different line: same page, different spot.
-    fireEvent.click(screen.getByText("preflop"));
+    fireEvent.click(screen.getByText("back to preflop"));
     await waitFor(() => expect(screen.getByText(/Hover a hand, or click to pin it/)).toBeTruthy());
     expect(screen.queryByText("pinned")).toBeNull();
   });

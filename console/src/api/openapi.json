@@ -1012,6 +1012,39 @@
         "title": "CurvePoint",
         "type": "object"
       },
+      "Dealt": {
+        "description": "The cards a street turned over, as the line crossed into it.",
+        "properties": {
+          "cards": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "kind": {
+            "const": "dealt",
+            "default": "dealt",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pot": {
+            "title": "Pot",
+            "type": "number"
+          },
+          "street": {
+            "title": "Street",
+            "type": "string"
+          }
+        },
+        "required": [
+          "street",
+          "cards",
+          "pot"
+        ],
+        "title": "Dealt",
+        "type": "object"
+      },
       "Edge": {
         "description": "One action on the menu: its path token, its type, and what it costs.",
         "properties": {
@@ -1449,6 +1482,30 @@
           }
         },
         "title": "LogsPayload",
+        "type": "object"
+      },
+      "NeedsCards": {
+        "description": "The line has reached a street and stopped, waiting to be dealt.\n\nAn answer rather than a refusal, because the caller is not wrong: a line\nthat crosses to the flop HAS no strategy until someone says which flop, and\na client that is about to ask for three cards needs the line leading up to\nthe question drawn first.",
+        "properties": {
+          "have": {
+            "title": "Have",
+            "type": "integer"
+          },
+          "needed": {
+            "title": "Needed",
+            "type": "integer"
+          },
+          "street": {
+            "title": "Street",
+            "type": "string"
+          }
+        },
+        "required": [
+          "street",
+          "needed",
+          "have"
+        ],
+        "title": "NeedsCards",
         "type": "object"
       },
       "NodeGrid": {
@@ -3209,7 +3266,7 @@
         "type": "object"
       },
       "SolverNode": {
-        "description": "One spot in the tree. `grid` is null exactly when `terminal`.",
+        "description": "One spot in the tree.\n\n`grid` is null when the hand is over (`terminal`) and when the board is\nshort of what the line needs (`pending`) -- two different silences, which is\nwhy they are two fields rather than one null.",
         "properties": {
           "board": {
             "items": {
@@ -3217,6 +3274,11 @@
             },
             "title": "Board",
             "type": "array"
+          },
+          "button": {
+            "default": 0,
+            "title": "Button",
+            "type": "integer"
           },
           "children": {
             "items": {
@@ -3235,9 +3297,49 @@
               }
             ]
           },
+          "line": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Spot"
+                },
+                {
+                  "$ref": "#/components/schemas/Dealt"
+                }
+              ]
+            },
+            "title": "Line",
+            "type": "array"
+          },
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NeedsCards"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pot": {
+            "default": 0.0,
+            "title": "Pot",
+            "type": "number"
+          },
+          "stack": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stack"
           },
           "terminal": {
             "title": "Terminal",
@@ -3251,6 +3353,54 @@
           "grid"
         ],
         "title": "SolverNode",
+        "type": "object"
+      },
+      "Spot": {
+        "description": "One column of a line: somebody acted, and what else they could have.\n\n`options` carries the whole menu, not only what was taken, so a client can\noffer the alternatives at a past spot without a round trip per column.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "integer"
+          },
+          "chosen": {
+            "title": "Chosen",
+            "type": "string"
+          },
+          "kind": {
+            "const": "spot",
+            "default": "spot",
+            "title": "Kind",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/Edge"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "pot": {
+            "title": "Pot",
+            "type": "number"
+          },
+          "stack": {
+            "title": "Stack",
+            "type": "number"
+          },
+          "street": {
+            "title": "Street",
+            "type": "string"
+          }
+        },
+        "required": [
+          "street",
+          "actor",
+          "chosen",
+          "options",
+          "pot",
+          "stack"
+        ],
+        "title": "Spot",
         "type": "object"
       },
       "StandingCharge": {

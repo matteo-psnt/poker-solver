@@ -1,27 +1,29 @@
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ApiError } from "@/api/client";
 import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
+import type { Edge, SolverNode, Spot } from "@/api/types";
 import { BoardPicker } from "@/components/BoardPicker";
 import { Panel } from "@/components/Panel";
+import { PlayingCard } from "@/components/PlayingCard";
 import { RangeGrid } from "@/components/RangeGrid";
-import { type ActionLabel, describeAction, describeActions } from "@/lib/actions";
+import { type ActionLabel, describeAction, describeActions, inBlinds } from "@/lib/actions";
 import { actionColours, aggregate, type Cell, type RangeSummary, summarise } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 const route = getRouteApi("/blueprint");
 
 /**
- * The chart, as the thing the page is FOR: the grid is the page, the line and the
- * board sit in one bar above it, everything else is a rail beside it.
+ * The chart: the line across the top, the grid under it, the mix beside it.
  *
  * **The spot is in the URL.** `path`, `board` and `average` are search params, not
  * `useState`, which is what makes a bookmarked spot the spot it was and lets you
  * send someone one.
  *
- * Every line past the preflop needs a board and replay refuses without one. That
- * refusal is not a fault -- it is the page asking a question, and it is shown as
- * one with the deck open under it.
+ * **A street appears when the line reaches it, and not before.** The board is not
+ * a thing you set up first; it is a column that arrives mid-line, the way cards
+ * arrive mid-hand. Walk into the flop and the flop column is there, empty, with
+ * the deck already open under it -- because a line that has crossed to the flop
+ * has no strategy at all until someone says which flop.
  */
 export function Charts() {
   const { path, board, average } = route.useSearch();
@@ -35,18 +37,15 @@ export function Charts() {
    * while the rail beside it still showed the preflop strategy and combo count,
    * under a label saying "pinned". Two contradictory answers to one question,
    * on screen together.
-   *
-   * Carrying the spot and comparing beats resetting in an effect: there is no
-   * frame where the stale pin is still rendered, and nothing to keep in step
-   * with the list of things that make a spot.
    */
   const spot = `${path}|${board}|${average}`;
   const [held, setHeld] = useState<{ spot: string; cell: Cell } | null>(null);
   const pinned = held?.spot === spot ? held.cell : null;
   const [hovered, setHovered] = useState<Cell | null>(null);
+  // Opening the deck by hand, for changing a street already dealt. A pending
+  // street opens it on its own and this never has to be true for that.
+  const [editing, setEditing] = useState(false);
 
-  // What the box is holding. Fetched once: it cannot change without a deploy,
-  // which restarts the server this tab is talking to.
   const run = useBlueprintRun();
   const combos = useCombos(!!run.data);
   const node = useSolverNode(path, board, average, !!run.data);
@@ -76,42 +75,63 @@ export function Charts() {
     [grid?.actions, bigBlind],
   );
 
-  const steps = path ? path.split("/") : [];
   const shown = pinned ?? hovered;
-  const needsBoard = boardRefusal(node.error);
+  const pending = node.data?.pending ?? null;
+  const deckOpen = editing || pending !== null;
 
   return (
     <div className="space-y-3">
+      <Sequence
+        node={node.data ?? null}
+        bigBlind={bigBlind}
+        onGo={(next) => {
+          setEditing(false);
+          set({ path: next });
+        }}
+        onEditBoard={() => setEditing((was) => !was)}
+        editing={editing}
+      />
+
+      {deckOpen && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3">
+          {pending && (
+            <p className="mb-2 text-[12px] text-[var(--fg-muted)]">
+              This line is on the <span className="text-[var(--fg)]">{pending.street}</span>. Deal{" "}
+              {pending.needed - pending.have} more card
+              {pending.needed - pending.have === 1 ? "" : "s"} to see the strategy here.
+            </p>
+          )}
+          <BoardPicker
+            board={board}
+            onChange={(next) => set({ board: next })}
+            live={node.data?.board.length ?? null}
+            forceOpen
+          />
+        </div>
+      )}
+
       <Panel
-        title={grid ? `${grid.street} · seat ${grid.actor} to act` : "chart"}
-        aside={<Line steps={steps} bigBlind={bigBlind} onJump={(p) => set({ path: p })} />}
-        // A short board is the page's own question, answered right below with
-        // the deck. Routing it here would grey the panel and file it as a fault.
-        // `combos` too: it is fetched once with staleTime Infinity and is not
-        // retried, so a 503 from the blueprint box would otherwise blank the
-        // grid for the life of the tab with no reason given anywhere.
+        title={
+          grid ? `${grid.street} · ${seatName(grid.actor, node.data?.button ?? 0)} to act` : "chart"
+        }
+        aside={<Average average={average} onSet={set} />}
+        // `combos` is fetched once with staleTime Infinity and is not retried,
+        // so a 503 from the blueprint box would otherwise blank the grid for the
+        // life of the tab with no reason given anywhere.
         error={
-          needsBoard
-            ? null
-            : (node.error && String(node.error.message)) ||
-              (combos.error && String(combos.error.message)) ||
-              null
+          (node.error && String(node.error.message)) ||
+          (combos.error && String(combos.error.message)) ||
+          null
         }
         loading={node.isFetching && !node.data}
-        empty={node.data?.terminal ? "Nobody acts here — the hand is already over." : null}
+        empty={
+          node.data?.terminal
+            ? "Nobody acts here — the hand is already over."
+            : pending
+              ? `Waiting on the ${pending.street}.`
+              : null
+        }
       >
-        <Controls
-          board={board}
-          average={average}
-          atRoot={steps.length === 0 && !board}
-          next={node.data?.children ?? []}
-          reached={node.data?.board.length ?? null}
-          needsBoard={needsBoard}
-          bigBlind={bigBlind}
-          onSet={set}
-          onStep={(token) => set({ path: path ? `${path}/${token}` : token })}
-        />
-
         {cells && grid ? (
           <div className="grid items-start gap-5 p-3 xl:grid-cols-[minmax(0,1fr)_16rem]">
             {/* Capped, not stretched: past ~44px a cell is empty space, and the
@@ -135,7 +155,7 @@ export function Charts() {
             </div>
 
             <aside className="space-y-3 text-[12px]">
-              <Summary summary={summary} labels={labels} />
+              <Actions summary={summary} labels={labels} />
               <Coverage grid={grid} />
               <HandDetail cell={shown} actions={labels} pinned={pinned !== null} />
             </aside>
@@ -146,147 +166,349 @@ export function Charts() {
   );
 }
 
-/**
- * A refusal about the BOARD, rather than a fault -- and the server's words for it.
- *
- * *"This line reaches Flop and needs 3 board cards, but 0 were given."* Both facts
- * a reader needs are in that sentence, so it is shown rather than paraphrased: a
- * copy here is a second thing to keep true when the streets or the wording move.
- *
- * The discriminator is that the message mentions a CARD. Every board refusal does
- * -- too few for the line, `'Ax' is not a card`, `repeats a card` -- and no path
- * refusal does: those name a token and list what was on offer, and they mean a
- * bookmark that outlived its action model, which IS worth greying the panel for.
- *
- * Recognised by matching the server's own sentence. Working out
- * client-side which street a line reaches is engine logic, and the console does not
- * get to hold a second copy of the rules.
- */
-function boardRefusal(error: unknown): string | null {
-  if (!(error instanceof ApiError) || error.status !== 422) return null;
-  return /card/i.test(error.message) ? error.message : null;
+/** Who a seat is, rather than which index it has. */
+function seatName(seat: number, button: number): string {
+  // Heads-up, the button posts the small blind — the same naming `Play` uses,
+  // and the server sends the button precisely so this is not a guess.
+  return seat === button ? "BTN" : "BB";
 }
 
-/** The line that reaches this spot, in poker rather than in tokens. */
-function Line({
-  steps,
+/**
+ * The line, as one column per thing that happened.
+ *
+ * Read left to right it is the hand: someone acted, someone acted, the flop came,
+ * someone acted. Every past column keeps the WHOLE menu that was on offer there,
+ * so stepping back into a spot and taking the other branch is one click and no
+ * round trip — the server sent the options with the line for that reason.
+ *
+ * The last column is where you are, and it is the only one with nothing chosen
+ * in it yet.
+ */
+function Sequence({
+  node,
   bigBlind,
-  onJump,
+  onGo,
+  onEditBoard,
+  editing,
 }: {
-  steps: string[];
+  node: SolverNode | null;
   bigBlind: number;
-  onJump: (path: string) => void;
+  onGo: (path: string) => void;
+  onEditBoard: () => void;
+  editing: boolean;
 }) {
+  if (!node) {
+    return (
+      <div className="h-[5.5rem] rounded-md border border-[var(--border)] bg-[var(--panel)]" />
+    );
+  }
+
+  // A column's path is the tokens BEFORE it, so a click replays to this spot and
+  // then takes the branch you clicked. Deals carry no token, which is why this
+  // counts spots rather than using the column index.
+  const tokens: string[] = [];
+  const columns = (node.line ?? []).map((step) => {
+    const before = tokens.join("/");
+    if (step.kind === "spot") tokens.push(step.chosen);
+    return { step, before };
+  });
+
   return (
-    <span className="flex flex-wrap items-center gap-1">
-      <Crumb label="preflop" onClick={() => onJump("")} active={steps.length === 0} />
-      {steps.map((step, index) => (
-        <span key={`${index}-${step}`} className="flex items-center gap-1">
-          <span className="text-[var(--fg-faint)]">›</span>
-          <Crumb
-            label={describeAction(step, bigBlind).text}
-            onClick={() => onJump(steps.slice(0, index + 1).join("/"))}
-            active={index === steps.length - 1}
+    <div className="flex items-stretch overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)]">
+      {columns.map(({ step, before }, index) =>
+        step.kind === "spot" ? (
+          <SpotColumn
+            key={`${index}-${step.chosen}`}
+            spot={step}
+            button={node.button ?? 0}
+            bigBlind={bigBlind}
+            onPick={(token) => onGo(before ? `${before}/${token}` : token)}
           />
-        </span>
-      ))}
-    </span>
+        ) : (
+          <DealColumn
+            key={`${index}-${step.street}`}
+            street={step.street}
+            cards={step.cards}
+            pot={step.pot}
+            bigBlind={bigBlind}
+            onEdit={onEditBoard}
+            editing={editing}
+          />
+        ),
+      )}
+
+      {node.pending && (
+        <DealColumn
+          street={node.pending.street}
+          cards={[]}
+          slots={node.pending.needed - node.pending.have}
+          pot={null}
+          bigBlind={bigBlind}
+          onEdit={onEditBoard}
+          editing
+        />
+      )}
+
+      {!node.pending && !node.terminal && node.grid && (
+        <HereColumn
+          actor={node.grid.actor}
+          button={node.button ?? 0}
+          pot={node.pot ?? 0}
+          stack={node.stack ?? null}
+          bigBlind={bigBlind}
+          options={node.children ?? []}
+          onPick={(token) => onGo(node.path ? `${node.path}/${token}` : token)}
+        />
+      )}
+
+      {node.terminal && (
+        <div className="flex min-w-[8rem] flex-col justify-center px-3 py-2 text-[11px] text-[var(--fg-faint)]">
+          hand over
+        </div>
+      )}
+
+      {node.path !== "" && (
+        <button
+          type="button"
+          onClick={() => onGo("")}
+          className="ml-auto shrink-0 self-start px-3 py-2 text-[11px] text-[var(--fg-faint)] underline-offset-2 hover:text-[var(--fg)] hover:underline"
+        >
+          back to preflop
+        </button>
+      )}
+    </div>
   );
 }
 
-/** The bar above the grid: where to go next, and which board to go there on. */
-function Controls({
-  board,
-  average,
-  atRoot,
-  next,
-  reached,
-  needsBoard,
+/** One past decision: who, with how much, and every action they had. */
+function SpotColumn({
+  spot,
+  button,
   bigBlind,
-  onSet,
-  onStep,
+  onPick,
 }: {
-  board: string;
-  average: boolean;
-  atRoot: boolean;
-  /** The actions available FROM this spot — not React children. */
-  next: { token: string }[];
-  /** Board cards this line consumes, once it is answerable. */
-  reached: number | null;
-  /** The server's refusal when the board is short, or null. */
-  needsBoard: string | null;
+  spot: Spot;
+  button: number;
   bigBlind: number;
-  onSet: (next: Partial<{ path: string; board: string; average: boolean }>) => void;
-  onStep: (token: string) => void;
+  onPick: (token: string) => void;
+}) {
+  const colours = actionColours(spot.options.map((option) => option.token));
+  return (
+    <Column label={seatName(spot.actor, button)} note={`${inBlinds(spot.stack, bigBlind)}`}>
+      {spot.options.map((option, index) => (
+        <ActionRow
+          key={option.token}
+          label={describeAction(option.token, bigBlind).text}
+          colour={colours[index] ?? "transparent"}
+          chosen={option.token === spot.chosen}
+          onClick={() => onPick(option.token)}
+        />
+      ))}
+    </Column>
+  );
+}
+
+/** Where you are: the same column shape, with nothing taken yet. */
+function HereColumn({
+  actor,
+  button,
+  pot,
+  stack,
+  bigBlind,
+  options,
+  onPick,
+}: {
+  actor: number;
+  button: number;
+  pot: number;
+  stack: number | null;
+  bigBlind: number;
+  options: Edge[];
+  onPick: (token: string) => void;
+}) {
+  const colours = actionColours(options.map((option) => option.token));
+  return (
+    <Column
+      label={seatName(actor, button)}
+      note={stack === null ? `${inBlinds(pot, bigBlind)} pot` : inBlinds(stack, bigBlind)}
+      here
+    >
+      {options.length === 0 && (
+        <span className="px-1.5 py-1 text-[11px] text-[var(--fg-faint)]">no actions</span>
+      )}
+      {options.map((option, index) => (
+        <ActionRow
+          key={option.token}
+          label={describeAction(option.token, bigBlind).text}
+          colour={colours[index] ?? "transparent"}
+          chosen={false}
+          live
+          onClick={() => onPick(option.token)}
+        />
+      ))}
+    </Column>
+  );
+}
+
+/**
+ * A street, where it happens in the line.
+ *
+ * `slots` draws the cards this street is still waiting for. That is the whole
+ * point of putting the board in the line rather than in a bar above it: at the
+ * preflop there is no flop column at all, and the moment a line crosses into the
+ * flop one appears with three empty frames in it.
+ */
+function DealColumn({
+  street,
+  cards,
+  slots = 0,
+  pot,
+  bigBlind,
+  onEdit,
+  editing,
+}: {
+  street: string;
+  cards: string[];
+  slots?: number;
+  pot: number | null;
+  bigBlind: number;
+  onEdit: () => void;
+  editing: boolean;
 }) {
   return (
-    <div className="space-y-3 border-b border-[var(--border)] px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {next.map((child) => (
-          <button
-            key={child.token}
-            type="button"
-            onClick={() => onStep(child.token)}
-            title={`token: ${child.token}`}
-            className="rounded border border-[var(--border)] px-2 py-1 font-mono text-[11px] text-[var(--fg-muted)] hover:border-[var(--fg-faint)] hover:text-[var(--fg)]"
-          >
-            {describeAction(child.token, bigBlind).text}
-          </button>
+    <Column
+      label={street}
+      note={pot === null ? "" : `${inBlinds(pot, bigBlind)} pot`}
+      here={editing}
+    >
+      <button
+        type="button"
+        onClick={onEdit}
+        title="change this street"
+        className="flex gap-1 rounded px-1 py-1 hover:bg-white/[0.06]"
+      >
+        {cards.map((card) => (
+          <PlayingCard key={card} card={card} size="sm" />
         ))}
-        {next.length === 0 && !needsBoard && (
-          <span className="text-[11px] text-[var(--fg-faint)]">no actions from here</span>
-        )}
-        {!atRoot && (
-          <button
-            type="button"
-            onClick={() => onSet({ path: "", board: "" })}
-            className="ml-auto text-[11px] text-[var(--fg-faint)] underline-offset-2 hover:text-[var(--fg)] hover:underline"
-          >
-            back to preflop
-          </button>
-        )}
-      </div>
+        {Array.from({ length: slots }, (_, index) => (
+          <PlayingCard key={`slot-${index}`} card={null} size="sm" />
+        ))}
+      </button>
+    </Column>
+  );
+}
 
-      {needsBoard && (
-        <p className="rounded border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-[12px] text-amber-300/90">
-          {needsBoard}
-        </p>
+/** The frame every column shares: a header, then rows. */
+function Column({
+  label,
+  note,
+  here = false,
+  children,
+}: {
+  label: string;
+  note: string;
+  /** This is the spot being read, or the street being dealt. */
+  here?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-[8.5rem] shrink-0 flex-col gap-1 border-r border-[var(--border)] px-1.5 py-1.5",
+        here && "bg-white/[0.04]",
       )}
-
-      <BoardPicker
-        board={board}
-        onChange={(next) => onSet({ board: next })}
-        live={reached}
-        forceOpen={needsBoard !== null}
-      />
-
-      <label className="flex items-center gap-2 text-[11px] text-[var(--fg-muted)]">
-        <input
-          type="checkbox"
-          checked={average}
-          onChange={(event) => onSet({ average: event.target.checked })}
-        />
-        average strategy
-        {/* Not a detail: the average is the blueprint and what converges;
-            the current strategy is regret-matching's latest guess, and on an
-            under-trained run they disagree sharply. */}
-        <span className="text-[var(--fg-faint)]">
-          {average ? "the blueprint proper" : "regret-matched current guess"}
+    >
+      <div className="flex items-baseline justify-between gap-2 px-1">
+        <span className="font-mono text-[11px] tracking-wider text-[var(--fg-muted)] uppercase">
+          {label}
         </span>
-      </label>
+        <span className="font-mono text-[11px] tabular-nums text-[var(--fg-faint)]">{note}</span>
+      </div>
+      {children}
     </div>
   );
 }
 
 /**
- * What the range does overall, above the per-hand detail.
+ * One action in a column.
+ *
+ * Three states, and the contrast is the information: what was TAKEN is filled,
+ * what is on offer HERE is legible because it is the move you are about to make,
+ * and the branches not taken further back are dim -- present, clickable, and not
+ * competing with the spot you are reading.
+ */
+function ActionRow({
+  label,
+  colour,
+  chosen,
+  live = false,
+  onClick,
+}: {
+  label: string;
+  colour: string;
+  chosen: boolean;
+  /** An action available from the spot being read, rather than a past branch. */
+  live?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 rounded-[3px] px-1.5 py-0.5 text-left text-[12px]",
+        chosen && "bg-white/[0.10] text-[var(--fg)]",
+        !chosen && live && "text-[var(--fg-muted)] hover:bg-white/[0.06] hover:text-[var(--fg)]",
+        !chosen && !live && "text-[var(--fg-faint)] hover:bg-white/[0.05] hover:text-[var(--fg)]",
+      )}
+    >
+      <span
+        className="h-3 w-[3px] shrink-0 rounded-full"
+        style={{ backgroundColor: chosen || live ? colour : "transparent" }}
+      />
+      {label}
+    </button>
+  );
+}
+
+/** The average/current toggle, which belongs to the numbers rather than the line. */
+function Average({
+  average,
+  onSet,
+}: {
+  average: boolean;
+  onSet: (next: { average: boolean }) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-[11px] text-[var(--fg-muted)]">
+      <input
+        type="checkbox"
+        checked={average}
+        onChange={(event) => onSet({ average: event.target.checked })}
+      />
+      average strategy
+      {/* Not a detail: the average is the blueprint and what converges; the
+          current strategy is regret-matching's latest guess, and on an
+          under-trained run they disagree sharply. */}
+      <span className="text-[var(--fg-faint)]">
+        {average ? "the blueprint proper" : "regret-matched current guess"}
+      </span>
+    </label>
+  );
+}
+
+/**
+ * What the range DOES, as one tile per action.
  *
  * First in the rail because it is the first question — "does this spot fold a
  * lot" — and the grid is bad at it: a class gets one square whether it holds 4
  * combos or 12, so an offsuit-heavy fold looks smaller than it is. See
  * `summarise`, which weights by combos for exactly that reason.
+ *
+ * Tiles rather than a legend, sized by the number they carry, because the
+ * frequency is the answer and a 4% action should not read the same as a 53% one.
  */
-function Summary({ summary, labels }: { summary: RangeSummary | null; labels: ActionLabel[] }) {
+function Actions({ summary, labels }: { summary: RangeSummary | null; labels: ActionLabel[] }) {
   if (!summary) {
     return (
       <div className="text-[var(--fg-faint)]">Nothing here was trained — no range to total.</div>
@@ -296,33 +518,36 @@ function Summary({ summary, labels }: { summary: RangeSummary | null; labels: Ac
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] tracking-wider text-[var(--fg-faint)] uppercase">whole range</div>
-      <span className="flex h-2.5 overflow-hidden rounded-[2px]">
-        {summary.strategy.map((weight, index) => (
-          <span
-            key={labels[index]?.token ?? index}
-            style={{ width: `${weight * 100}%`, backgroundColor: colours[index] }}
-          />
-        ))}
-      </span>
-      {labels.map((label, index) => (
-        <div key={label.token} className="flex items-center gap-2">
-          <span
-            className="size-2.5 shrink-0 rounded-[2px]"
-            style={{ backgroundColor: colours[index] }}
-          />
-          <span className="text-[var(--fg-muted)]">{label.text}</span>
-          <span className="ml-auto tabular-nums text-[var(--fg)]">
-            {((summary.strategy[index] ?? 0) * 100).toFixed(1)}%
-          </span>
-        </div>
-      ))}
-      {summary.untrained > 0 && (
-        // Travels with the number it qualifies, never below the fold: a total
-        // over a fifth of the range is not the range's strategy.
-        <div className="text-[11px] text-[var(--fg-faint)]">
-          over {summary.trained} combos; {summary.untrained} untrained and left out
-        </div>
-      )}
+      <div className="space-y-1">
+        {labels.map((label, index) => {
+          const weight = summary.strategy[index] ?? 0;
+          return (
+            <div
+              key={label.token}
+              className="relative overflow-hidden rounded-[3px] border border-[var(--border)] bg-[var(--bg)]"
+            >
+              {/* The bar IS the tile's fill, so the row reads as a quantity at a
+                  glance and the exact figure is there when you look. */}
+              <span
+                className="absolute inset-y-0 left-0"
+                style={{ width: `${weight * 100}%`, backgroundColor: colours[index], opacity: 0.9 }}
+              />
+              <div className="relative flex items-baseline justify-between gap-2 px-2 py-1">
+                <span className="text-[12px] text-[var(--fg)]">{label.text}</span>
+                <span className="font-mono text-[13px] tabular-nums text-[var(--fg)]">
+                  {(weight * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="text-[11px] text-[var(--fg-faint)]">
+        over {summary.trained} combos
+        {/* Travels with the number it qualifies, never below the fold: a total
+            over a fifth of the range is not the range's strategy. */}
+        {summary.untrained > 0 && `; ${summary.untrained} untrained and left out`}
+      </div>
     </div>
   );
 }
@@ -416,30 +641,5 @@ function HandDetail({
         </div>
       )}
     </div>
-  );
-}
-
-function Crumb({
-  label,
-  onClick,
-  active,
-}: {
-  label: string;
-  onClick: () => void;
-  active: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded px-1.5 py-0.5 font-mono text-[11px]",
-        active
-          ? "bg-white/[0.09] text-[var(--fg)]"
-          : "text-[var(--fg-muted)] hover:text-[var(--fg)]",
-      )}
-    >
-      {label}
-    </button>
   );
 }

@@ -104,18 +104,63 @@ class TestTheNodeEndpoint:
         assert body["children"] == []
 
 
+class TestALineThatOUTRUNSItsBoard:
+    """A line past the preflop with no cards is an ANSWER, not a refusal.
+
+    It is the state a client is in every time someone walks into the flop: the
+    strategy is undefined until a board is named, and the client has to draw the
+    line leading up to that question before it can ask it.
+    """
+
+    def test_it_says_what_it_is_waiting_for(self, client):
+        body = client.get("/api/node", params={"path": "c/x", "board": ""}).json()
+
+        assert body["pending"] == {"street": "flop", "needed": 3, "have": 0}
+        assert body["grid"] is None
+        assert body["terminal"] is False
+
+    def test_the_line_up_to_the_question_comes_back(self, client):
+        body = client.get("/api/node", params={"path": "c/x", "board": ""}).json()
+
+        assert [step["kind"] for step in body["line"]] == ["spot", "spot"]
+        assert [step["chosen"] for step in body["line"]] == ["c", "x"]
+        # The MENU at each past spot, not only what was taken -- stepping back
+        # into one must not cost a round trip per column. It always contains
+        # what was taken, which is what makes a column drawable at all.
+        for step in body["line"]:
+            assert step["chosen"] in [edge["token"] for edge in step["options"]]
+            assert len(step["options"]) > 1
+
+
+class TestTheLineIsDrawable:
+    def test_a_dealt_street_is_a_column_of_its_own(self, client):
+        body = client.get("/api/node", params={"path": "c/x", "board": "2c7d9h"}).json()
+
+        dealt = [step for step in body["line"] if step["kind"] == "dealt"]
+        assert len(dealt) == 1
+        assert dealt[0]["street"] == "flop"
+        assert dealt[0]["cards"] == ["2c", "7d", "9h"]
+        # The pot the previous street left, so a column can say what is at stake
+        # without the client adding up the line itself.
+        assert dealt[0]["pot"] > 0
+
+    def test_the_preflop_root_has_no_line_at_all(self, client):
+        assert client.get("/api/node").json()["line"] == []
+
+    def test_every_spot_names_its_street_and_actor(self, client):
+        body = client.get("/api/node", params={"path": "c/x", "board": "2c7d9h"}).json()
+
+        spots = [step for step in body["line"] if step["kind"] == "spot"]
+        assert [step["street"] for step in spots] == ["preflop", "preflop"]
+        assert {step["actor"] for step in spots} == {0, 1}
+
+
 class TestRefusalsSurviveTheWire:
     def test_an_impossible_action_is_a_422_with_a_sentence(self, client):
         response = client.get("/api/node", params={"path": "b999999"})
 
         assert response.status_code == 422
         assert "On offer" in response.json()["error"]
-
-    def test_a_short_board_is_a_422(self, client):
-        response = client.get("/api/node", params={"path": "c/x", "board": ""})
-
-        assert response.status_code == 422
-        assert "board cards" in response.json()["error"]
 
     def test_a_bad_card_is_a_422(self, client):
         response = client.get("/api/node", params={"board": "2x"})
