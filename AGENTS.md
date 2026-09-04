@@ -18,10 +18,11 @@ on Azure Batch; the laptop is for tests and dispatch.
 
 ## Architecture
 
-`src/` is layered: `interfaces/` → `pipeline/` → `engine/` → `core/`, with
-`shared/` importable by all. **The layering is hard-enforced by import-linter,
-and `.importlinter` is the documentation** — nine contracts, four of which state
-a rule the directory alone does not. Read it before moving anything.
+`src/` is five packages. `interfaces/` → `pipeline/` → `engine/` → `core/` is
+a strict layering; `adapters/` (Postgres) is reachable from `interfaces/` only
+and may not import the work it stores; `shared/` is importable by all.
+**import-linter enforces this with eleven contracts, and `.importlinter` is
+the documentation** — read it before moving anything.
 
 Subtree detail lives in `.claude/rules/`, path-scoped so it loads with a
 matching file: `commands.md`, `console.md`, `cloud.md`,
@@ -82,17 +83,24 @@ Stopping to ask is the expensive failure here, not a wrong routine call.
 
 ## Reporting
 
-A session ends when the loop closes — merged, worktree gone, memory written —
-or when it is blocked on the user. A long context or a finished sub-step ends
-nothing. Every hand-off, mid-task or final, is written for a reader who saw
-none of it:
+Every hand-off, mid-task or final, is written for a reader who saw none of it.
+The user runs several sessions and will not remember this one.
 
 - **Outcome first.** Merged, parked on a branch, or blocked — and on what.
-- **What changed**, in words: behaviour, files, and the numbers that justified
-  it, next to what was *not* verified.
+- **What changed**, in words: behaviour and files, next to what was *not*
+  verified.
 - **What is left**: leftovers still on the branch, follow-ups, the worktree.
 - **Decisions made** on the user's behalf, one line each.
-- **Last line**: `Session can close.` or `Waiting on: <the one thing>`.
+- **Whether the session can end.** Say so when the loop has closed — merged,
+  worktree removed, memory written — or when nothing more can happen without
+  the user. Otherwise keep working: a long context or a finished sub-step is
+  not a reason to stop.
+
+**A number never stands alone.** Every figure says what it measures, its unit,
+and what it is compared against — the control, the previous rung, the target —
+so the reader knows what to conclude. "940 mbb" tells them nothing; "940 mbb
+exploitable on the gate, 35% below PCS and still 1.9x the 500 target" does.
+The same for counts, durations and sizes.
 
 ## Cost & where work runs
 
@@ -100,11 +108,12 @@ none of it:
 seeds or more evaluation deals would land a result sooner or with tighter error
 bars, propose that. Never trade statistical power or wall-clock for dollars.
 
-**Real work runs in the cloud, not on the laptop.** Local is for tests, the
-pre-commit gate and seconds-long probes — no training, precompute or evaluation,
-not even a shrunken "sanity" version. For a fast signal, run a short one-node job
-on the pool. When the cloud path is awkward, **fix the infra instead of routing
-around it locally** — `src/interfaces/cloud/` and `infra/` are in scope.
+**Real work runs in the cloud, not on the laptop.** No training, precompute or
+evaluation locally, not even a shrunken version — a short one-node pool job is
+the fast signal. The laptop is for tests, the gate, one-off scripts and probes
+that finish in seconds to a few minutes; use judgment on anything in between.
+When the cloud path is awkward, **fix the infra instead of routing around it
+locally** — `src/interfaces/cloud/` and `infra/` are in scope.
 
 **Wall-clock is the scarce thing.** Probe short before committing long.
 
@@ -115,9 +124,10 @@ are **stdlib only**: the node imports them before `uv sync`. Ruff enforces
 formatting and import sorting. What tooling does not enforce:
 
 - **No backward compatibility.** Clean breaks over shims, aliases and legacy
-  import paths. Delete unused code on sight; vulture is a floor, not the bar.
-- **Refactor when the change makes it obvious**, and keep it simple: an
-  abstraction earns its place at the second real caller, not before.
+  import paths. Delete code that nothing calls, and the tests of it.
+- **Refactor when a change shows the need**: split what it coupled, extract
+  what it repeated. Do not add an abstraction for one caller, or for a caller
+  that does not exist yet. Simpler wins.
 - **A docstring says why the code has this shape, not what used to be there.**
   Deleted alternatives and the bug behind a fix belong in the commit message.
   Three lines is the budget; never restate a signature `ty` already checks.
@@ -130,5 +140,7 @@ formatting and import sorting. What tooling does not enforce:
 ## Commits
 
 Short, imperative messages with a Conventional prefix (`feat:`, `fix:`,
-`perf:`). Stage by path — a hook refuses `git add -A` because sessions share
-the primary checkout.
+`perf:`). Sessions share the primary checkout: stage by path (a hook refuses
+`git add -A`), leave other sessions' dirty files alone, and confirm each
+commit with `git show --stat HEAD` — a file can change under you between
+edit and stage.
