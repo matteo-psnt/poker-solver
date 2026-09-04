@@ -117,3 +117,24 @@ def get_rung(container_sas: str, run_id: str, snapshot: str, destination: Path) 
             return False
         raise
     return True
+
+
+def read_head(container_sas: str, run_id: str, snapshot: str, length: int) -> bytes | None:
+    """The first `length` bytes of a rung, or None when it is not there.
+
+    A HEAD proves an object exists; it cannot prove the object is a snapshot.
+    An upload that died mid-stream still answers 200, and the difference only
+    shows up when something tries to load it -- which for a migrated rung would
+    be after the share copy was deleted. A few hundred bytes read the format's
+    own header instead, so the check that gates a deletion actually opens what
+    it is about to make the only copy.
+    """
+    request = _request(rung_uri(container_sas, run_id, snapshot), "GET")
+    request.add_header("x-ms-range", f"bytes=0-{length - 1}")
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
