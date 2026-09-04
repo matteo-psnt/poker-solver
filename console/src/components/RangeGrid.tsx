@@ -78,12 +78,14 @@ export function RangeGrid({
             )}
             <span
               className={cn(
-                "absolute inset-0 flex items-center justify-center font-mono text-[9px] leading-none",
-                cell.combos === 0 ? "text-[var(--fg-faint)]" : "text-white mix-blend-luminosity",
+                "absolute inset-x-0 top-0 px-1.5 pt-1 font-mono text-[9px] leading-none",
+                cell.combos === 0 ? "text-[var(--fg-faint)]" : "text-white",
               )}
-              // The diagonal (pairs) and the two triangles are easier to keep
-              // oriented in with the label always legible over the bar.
-              style={{ textShadow: "0 1px 2px rgba(0,0,0,.65)" }}
+              // Top-left rather than centred, and solid white rather than
+              // `mix-blend-luminosity`: blending pulled the label toward the
+              // colour under it, so 169 labels read as grey smudges over red.
+              // In the corner it never sits on the boundary between two actions.
+              style={{ textShadow: "0 1px 2px rgba(0,0,0,.75)" }}
             >
               {cell.label}
             </span>

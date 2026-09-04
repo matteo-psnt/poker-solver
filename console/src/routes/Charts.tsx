@@ -214,7 +214,7 @@ function Sequence({
   });
 
   return (
-    <div className="flex items-stretch overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)]">
+    <div className="flex items-stretch gap-1.5 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] p-1.5">
       {columns.map(({ step, before }, index) =>
         step.kind === "spot" ? (
           <SpotColumn
@@ -262,7 +262,7 @@ function Sequence({
       )}
 
       {node.terminal && (
-        <div className="flex min-w-[8rem] flex-col justify-center px-3 py-2 text-[11px] text-[var(--fg-faint)]">
+        <div className="flex min-w-[8rem] items-center px-3 text-[11px] text-[var(--fg-faint)]">
           hand over
         </div>
       )}
@@ -271,7 +271,7 @@ function Sequence({
         <button
           type="button"
           onClick={() => onGo("")}
-          className="ml-auto shrink-0 self-start px-3 py-2 text-[11px] text-[var(--fg-faint)] underline-offset-2 hover:text-[var(--fg)] hover:underline"
+          className="ml-auto shrink-0 self-center rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-muted)] hover:border-[var(--fg-faint)] hover:text-[var(--fg)]"
         >
           back to preflop
         </button>
@@ -385,13 +385,19 @@ function DealColumn({
         type="button"
         onClick={onEdit}
         title="change this street"
-        className="flex gap-1 rounded px-1 py-1 hover:bg-white/[0.06]"
+        className="flex flex-1 items-center justify-center gap-1 rounded px-1 py-2 hover:bg-white/[0.06]"
       >
         {cards.map((card) => (
           <PlayingCard key={card} card={card} size="sm" />
         ))}
+        {/* Brighter than `PlayingCard`'s empty slot, which is a placeholder in
+            a row of real cards. These are a QUESTION -- three cards the line is
+            waiting on -- and have to read as one from across the page. */}
         {Array.from({ length: slots }, (_, index) => (
-          <PlayingCard key={`slot-${index}`} card={null} size="sm" />
+          <span
+            key={`slot-${index}`}
+            className="h-7 w-5 rounded-[3px] border border-dashed border-[var(--fg-faint)] bg-white/[0.03]"
+          />
         ))}
       </button>
     </Column>
@@ -414,17 +420,26 @@ function Column({
   return (
     <div
       className={cn(
-        "flex min-w-[8.5rem] shrink-0 flex-col gap-1 border-r border-[var(--border)] px-1.5 py-1.5",
-        here && "bg-white/[0.04]",
+        "flex min-w-[8.75rem] shrink-0 flex-col rounded-[4px] border",
+        // Every column is a card, so the line reads as columns rather than as
+        // one wide table; the spot being READ is the lit one among them.
+        here
+          ? "border-[var(--fg-faint)] bg-white/[0.05]"
+          : "border-[var(--border)] bg-white/[0.015]",
       )}
     >
-      <div className="flex items-baseline justify-between gap-2 px-1">
-        <span className="font-mono text-[11px] tracking-wider text-[var(--fg-muted)] uppercase">
+      <div className="flex items-baseline justify-between gap-2 border-b border-[var(--border)] px-2 py-1.5">
+        <span
+          className={cn(
+            "font-mono text-[11px] tracking-widest uppercase",
+            here ? "text-[var(--fg)]" : "text-[var(--fg-muted)]",
+          )}
+        >
           {label}
         </span>
         <span className="font-mono text-[11px] tabular-nums text-[var(--fg-faint)]">{note}</span>
       </div>
-      {children}
+      <div className="flex flex-1 flex-col gap-0.5 p-1">{children}</div>
     </div>
   );
 }
@@ -456,15 +471,22 @@ function ActionRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded-[3px] px-1.5 py-0.5 text-left text-[12px]",
-        chosen && "bg-white/[0.10] text-[var(--fg)]",
-        !chosen && live && "text-[var(--fg-muted)] hover:bg-white/[0.06] hover:text-[var(--fg)]",
-        !chosen && !live && "text-[var(--fg-faint)] hover:bg-white/[0.05] hover:text-[var(--fg)]",
+        "flex items-center gap-2 rounded-[3px] border-l-2 py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",
+        chosen && "font-medium text-[var(--fg)]",
+        !chosen && live && "border-l-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
+        !chosen && !live && "border-l-transparent text-[var(--fg-faint)] hover:text-[var(--fg)]",
+        !chosen && "hover:bg-white/[0.05]",
       )}
+      // The colour is the action's own, so a fold reads blue and a shove red
+      // here exactly as it does in the grid below and the rail beside it.
+      style={chosen ? { borderLeftColor: colour, backgroundColor: `${colour}26` } : undefined}
     >
+      {/* Always drawn, so every row's text starts at the same x whether or not
+          it carries a dot. Coloured only where it means something: a move you
+          can make from here. */}
       <span
-        className="h-3 w-[3px] shrink-0 rounded-full"
-        style={{ backgroundColor: chosen || live ? colour : "transparent" }}
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: live && !chosen ? colour : "transparent" }}
       />
       {label}
     </button>
@@ -516,28 +538,34 @@ function Actions({ summary, labels }: { summary: RangeSummary | null; labels: Ac
   }
   const colours = actionColours(labels.map((label) => label.token));
   return (
-    <div className="space-y-1.5">
-      <div className="text-[11px] tracking-wider text-[var(--fg-faint)] uppercase">whole range</div>
-      <div className="space-y-1">
+    <div className="space-y-2">
+      <div className="text-[11px] tracking-widest text-[var(--fg-faint)] uppercase">
+        whole range
+      </div>
+      <div className="space-y-2">
         {labels.map((label, index) => {
           const weight = summary.strategy[index] ?? 0;
           return (
-            <div
-              key={label.token}
-              className="relative overflow-hidden rounded-[3px] border border-[var(--border)] bg-[var(--bg)]"
-            >
-              {/* The bar IS the tile's fill, so the row reads as a quantity at a
-                  glance and the exact figure is there when you look. */}
-              <span
-                className="absolute inset-y-0 left-0"
-                style={{ width: `${weight * 100}%`, backgroundColor: colours[index], opacity: 0.9 }}
-              />
-              <div className="relative flex items-baseline justify-between gap-2 px-2 py-1">
-                <span className="text-[12px] text-[var(--fg)]">{label.text}</span>
-                <span className="font-mono text-[13px] tabular-nums text-[var(--fg)]">
+            <div key={label.token} className="space-y-1">
+              <div className="flex items-baseline gap-2">
+                <span
+                  className="size-2 shrink-0 rounded-[2px]"
+                  style={{ backgroundColor: colours[index] }}
+                />
+                <span className="truncate text-[12px] text-[var(--fg-muted)]">{label.text}</span>
+                <span className="ml-auto font-mono text-[13px] tabular-nums text-[var(--fg)]">
                   {(weight * 100).toFixed(1)}%
                 </span>
               </div>
+              {/* The bar sits UNDER the line rather than behind it. Behind it,
+                  the fill edge landed mid-word and the label had to be read
+                  through two different backgrounds. */}
+              <span className="block h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: `${weight * 100}%`, backgroundColor: colours[index] }}
+                />
+              </span>
             </div>
           );
         })}
