@@ -1,4 +1,4 @@
-"""The durable share: published runs, code snapshots, abstractions, task logs.
+"""The durable share: published runs, abstractions, task logs.
 
 The share is the experiment record. It lives in its own Terraform state and its
 own resource group precisely so tearing down compute cannot reach it, and every
@@ -21,8 +21,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import tarfile
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -34,34 +32,12 @@ from src.shared import records
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from datetime import datetime
 
     from src.interfaces.cloud.config import CloudConfig
 
 ARCHIVE_DIR = "archive"
-CODE_DIR = "code"
 LOGS_DIR = "logs"
 ABSTRACTION_DIR = "combo_abstraction"
-
-SNAPSHOT_EXCLUDES = frozenset(
-    {
-        ".git",
-        "data",
-        ".venv",
-        "__pycache__",
-        "node_modules",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".mypy_cache",
-        ".terraform",
-        ".claude",
-        ".uv-cache",
-        ".import_linter_cache",
-        ".idea",
-        ".vscode",
-        ".DS_Store",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -346,54 +322,3 @@ def upload_file(service: ShareServiceClient, share: str, path: str, source: Path
         ensure_directory(service, share, parent)
     with source.open("rb") as handle:
         service.get_share_client(share).get_file_client(path).upload_file(handle)
-
-
-def snapshot_name(now: datetime) -> str:
-    """The id of one immutable code snapshot."""
-    return f"code-{now:%Y%m%d_%H%M%S}"
-
-
-def _snapshot_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-    """Drop excluded directories, and strip ownership from what remains.
-
-    Ownership is cleared because the node extracts as an unprivileged task
-    user: a tarball carrying the laptop's uid/gid is one more thing for tar to
-    fail to restore. macOS xattrs and resource forks never enter the archive in
-    the first place -- ``tarfile`` does not write them, which is what the shell
-    version needed ``COPYFILE_DISABLE=1 --no-xattrs`` to achieve.
-    """
-    parts = Path(info.name).parts
-    if any(part in SNAPSHOT_EXCLUDES for part in parts):
-        return None
-    info.uid = info.gid = 0
-    info.uname = info.gname = ""
-    return info
-
-
-def build_code_snapshot(root: Path, destination: Path) -> None:
-    """Seal the working tree into one gzipped tarball.
-
-    ONE TARBALL, not a directory tree: Azure Files would otherwise need every
-    nested path pre-created and would cost a round trip per file. A sealed
-    archive is also atomic in the way that matters -- a half-uploaded tarball
-    is simply absent, rather than a partially-populated tree a node might run.
-    """
-    with tarfile.open(destination, "w:gz") as archive:
-        for entry in sorted(root.iterdir()):
-            archive.add(entry, arcname=entry.name, filter=_snapshot_filter)
-
-
-def publish_code_snapshot(
-    service: ShareServiceClient, share: str, root: Path, now: datetime
-) -> str:
-    """Build and upload an immutable snapshot of the tree; return its id.
-
-    Pinned per submission on purpose: a push while a job is running must not
-    change what that job is executing.
-    """
-    name = snapshot_name(now)
-    with tempfile.TemporaryDirectory() as workspace:
-        tarball = Path(workspace) / f"{name}.tar.gz"
-        build_code_snapshot(root, tarball)
-        upload_file(service, share, f"{CODE_DIR}/{name}.tar.gz", tarball)
-    return name

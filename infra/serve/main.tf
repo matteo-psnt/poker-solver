@@ -558,6 +558,14 @@ resource "azurerm_role_assignment" "self_deallocate" {
   principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
 }
 
+# The code snapshot is fetched from the store's `code` container as this VM's
+# identity (`deploy.sh`), so it needs to read blobs there -- and only read.
+resource "azurerm_role_assignment" "read_code_snapshots" {
+  scope                = data.azurerm_storage_account.store.id
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
+}
+
 resource "azurerm_managed_disk" "work" {
   name                 = "serve-work"
   location             = azurerm_resource_group.serve.location

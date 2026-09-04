@@ -111,6 +111,49 @@ class TestTheUrlItBuilds:
         assert "sig=" in query
 
 
+class TestTheCodeSnapshotUrl:
+    """The task command line holds this in its environment and `curl`s it.
+    One blob, read only: the line fetches a tarball and never lists, writes or
+    reads a sibling, so the credential says exactly that."""
+
+    def test_it_is_a_read_only_sas_on_the_single_blob(self):
+        query = _query(blob.code_snapshot_sas(ACCOUNT, KEY, "code", "code-20260904_120000"))
+        assert query["sp"] == "r"
+        # `sr=b`: a SERVICE SAS on one blob, not an account SAS.
+        assert query["sr"] == "b"
+        assert query["st"] < _now()
+
+    def test_it_addresses_the_tarball_the_dispatch_uploaded(self):
+        url = blob.code_snapshot_sas(ACCOUNT, KEY, "code", "code-20260904_120000")
+        head, _, query = url.partition("?")
+        assert head == "https://acct.blob.core.windows.net/code/code-20260904_120000.tar.gz"
+        assert "sig=" in query
+
+
+class TestTheSealedTree:
+    def test_the_tarball_carries_no_git_and_no_owner(self, tmp_path):
+        """`.git` is dropped so the node has no history to misreport, and
+        ownership is cleared because the node extracts as an unprivileged
+        user: a laptop uid in the archive is one more thing for tar to fail
+        to restore."""
+        import tarfile
+
+        root = tmp_path / "tree"
+        (root / ".git").mkdir(parents=True)
+        (root / ".git" / "HEAD").write_text("ref")
+        (root / "src").mkdir()
+        (root / "src" / "a.py").write_text("x = 1\n")
+        tarball = tmp_path / "snap.tar.gz"
+
+        blob.build_code_snapshot(root, tarball)
+
+        with tarfile.open(tarball) as archive:
+            names = archive.getnames()
+            assert "src/a.py" in names
+            assert not any(name.startswith(".git") for name in names)
+            assert all(m.uid == 0 and m.gid == 0 and m.uname == "" for m in archive.getmembers())
+
+
 def _query(url: str) -> dict[str, str]:
     import urllib.parse
 

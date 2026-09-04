@@ -511,7 +511,7 @@ def submit_task(
         job_id,
         BatchTaskCreateOptions(
             id=task_id,
-            command_line=f"/bin/bash -c '{task_command(spec.code_snapshot)}'",
+            command_line=f"/bin/bash -c '{task_command()}'",
             environment_settings=[
                 EnvironmentSetting(name=name, value=value)
                 for name, value in spec.environment().items()

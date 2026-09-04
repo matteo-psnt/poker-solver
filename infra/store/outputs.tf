@@ -27,6 +27,10 @@ output "smb_path" {
   value       = "//${azurerm_storage_account.store.name}.file.core.windows.net/${azurerm_storage_share.data.name}"
 }
 
+output "code_container_name" {
+  value = azurerm_storage_container.code.name
+}
+
 output "postgres_host" {
   value = azurerm_postgresql_flexible_server.record.fqdn
 }

@@ -29,6 +29,8 @@ provider "azurerm" {
   features {}
 }
 
+data "azurerm_client_config" "current" {}
+
 locals {
   tags = {
     project    = "poker-solver"
@@ -92,6 +94,21 @@ resource "azurerm_storage_container" "checkpoints" {
   }
 }
 
+# WHERE A DISPATCH SEALS THE TREE. One tarball per submission, fetched by the
+# task command line over HTTPS with a read-only SAS for that one blob -- so a
+# node needs no mount, no key and no SDK to get its code. On the share this
+# directory grew without bound (80 snapshots in 6 days); here the policy below
+# expires them.
+resource "azurerm_storage_container" "code" {
+  name                  = var.code_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # COLD, NOT ARCHIVE, and the distinction is operational rather than thrifty:
 # rehydrating an archived blob takes HOURS, and a rung is exactly the thing a
 # resume or a score reaches for without warning. Cold is milliseconds to read
@@ -117,6 +134,22 @@ resource "azurerm_storage_management_policy" "checkpoints" {
         # so a rung is never chilled while its own experiment is still reading it.
         tier_to_cool_after_days_since_modification_greater_than = 14
         tier_to_cold_after_days_since_modification_greater_than = 90
+      }
+    }
+  }
+
+  # A second RULE, not a second resource: Azure allows one policy per account.
+  rule {
+    name    = "expire-code-snapshots"
+    enabled = true
+    filters {
+      prefix_match = ["${var.code_container_name}/"]
+      blob_types   = ["blockBlob"]
+    }
+    actions {
+      base_blob {
+        # 14 days: a job's max wall clock is P2D and a task's P1D, so no task can still be extracting a snapshot older than that.
+        delete_after_days_since_modification_greater_than = 14
       }
     }
   }
@@ -146,4 +179,33 @@ resource "azurerm_storage_share" "data" {
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# TERRAFORM STATE for all three roots (`infra/`, `infra/store/`, `infra/serve/`),
+# one blob each. Here rather than in the compute account for the same reason
+# everything else here is: `just destroy` must not be able to reach the record
+# of what the compute IS. Contains resource detail, hence private, and the
+# backends authenticate with AAD rather than the account key.
+#
+# This root stores ITS OWN state in this container, so the container has to
+# exist before `backend.tf.disabled` is renamed -- see "State" in infra/README.md.
+resource "azurerm_storage_container" "tfstate" {
+  name                  = "tfstate"
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# The operator's blob rights on the account, ONE assignment. `use_azuread_auth`
+# on the state backends needs Storage Blob Data Contributor, and that role
+# already covers reading `checkpoints` -- a separate Storage Blob Data Reader
+# would grant nothing this one does not. Scoped to the account rather than the
+# `tfstate` container so it is that single grant and not one per container.
+resource "azurerm_role_assignment" "operator_blob_contributor" {
+  scope                = azurerm_storage_account.store.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
 }

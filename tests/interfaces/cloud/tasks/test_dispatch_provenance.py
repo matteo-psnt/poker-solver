@@ -1,6 +1,6 @@
 """Every submission carries the submitting machine's git provenance.
 
-A Batch node has no `.git` -- `share.SNAPSHOT_EXCLUDES` drops it from the code
+A Batch node has no `.git` -- `blob.SNAPSHOT_EXCLUDES` drops it from the code
 tarball -- so `gitinfo`'s `git rev-parse` has nothing to answer from there. The
 consequence went unnoticed for as long as training has been in the cloud:
 `train_git_commit` and `eval_git_commit` were NULL on every cloud row. Measured
@@ -239,13 +239,15 @@ class TestQueueLoop:
 
     @staticmethod
     def _stub(monkeypatch, calls):
-        config = SimpleNamespace(share_name="share", pool_id="pool")
+        config = SimpleNamespace(
+            storage_account="acct", share_key="k", code_container="code", pool_id="pool"
+        )
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
-        monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
-        monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
-        # The SAS is minted against the real SDK, which wants an account and a
-        # key. Faked at the MINTING seam rather than by inventing credentials,
-        # so these tests stay about queueing.
+        monkeypatch.setattr(dispatch.blob, "publish_code_snapshot", lambda *a: "snap-1")
+        # The SASes are minted against the real SDK, which wants an account and
+        # a key. Faked at the MINTING seams rather than by inventing
+        # credentials, so these tests stay about queueing.
+        monkeypatch.setattr(dispatch, "_with_code_access", lambda _c, specs, _s: list(specs))
         monkeypatch.setattr(dispatch, "_with_checkpoint_access", lambda _config, specs: list(specs))
         monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
         monkeypatch.setattr(dispatch.batch, "ensure_job", lambda *a: "poker-20260805")
@@ -296,11 +298,16 @@ class TestPoolBinding:
     @staticmethod
     def _stub(monkeypatch, calls, big="", huge=""):
         config = SimpleNamespace(
-            share_name="share", pool_id="pool", pool_big_id=big, pool_huge_id=huge
+            storage_account="acct",
+            share_key="k",
+            code_container="code",
+            pool_id="pool",
+            pool_big_id=big,
+            pool_huge_id=huge,
         )
         monkeypatch.setattr(dispatch.CloudConfig, "load", staticmethod(lambda: config))
-        monkeypatch.setattr(dispatch.share, "share_client", lambda _c: object())
-        monkeypatch.setattr(dispatch.share, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch.blob, "publish_code_snapshot", lambda *a: "snap-1")
+        monkeypatch.setattr(dispatch, "_with_code_access", lambda _c, specs, _s: list(specs))
         monkeypatch.setattr(dispatch, "_with_checkpoint_access", lambda _config, specs: list(specs))
         monkeypatch.setattr(dispatch.batch, "client", lambda _c: object())
         monkeypatch.setattr(
@@ -378,14 +385,14 @@ class TestATaskThatCannotRecordItselfIsNotQueued:
     """
 
     def test_no_dsn_refuses(self):
-        with pytest.raises(CommandError, match="record their progress nowhere"):
+        with pytest.raises(CommandError, match="store state could not be read"):
             dispatch._refuse_without_a_record([spec.TaskSpec(code_snapshot="s", record_dsn="")])
 
     def test_it_names_the_fix(self):
         """The warning was already there -- `submit` has printed `record: SHARE
         ONLY` since two runs finished while the database called them running --
         and tasks kept being queued without it."""
-        with pytest.raises(CommandError, match="just record-env"):
+        with pytest.raises(CommandError, match="export the DSN"):
             dispatch._refuse_without_a_record([spec.TaskSpec(code_snapshot="s", record_dsn="")])
 
     def test_a_dsn_passes(self):

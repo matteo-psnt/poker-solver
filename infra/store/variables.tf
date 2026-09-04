@@ -85,3 +85,9 @@ variable "checkpoints_container_name" {
   type        = string
   default     = "checkpoints"
 }
+
+variable "code_container_name" {
+  description = "Blob container holding one sealed code tarball per dispatch; expired by the lifecycle policy."
+  type        = string
+  default     = "code"
+}

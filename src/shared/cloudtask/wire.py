@@ -171,6 +171,11 @@ KEYS: tuple[Key, ...] = (
     #
     # EMPTY DISABLES IT: the task publishes to the share exactly as before.
     Key("POKER_SOLVER_CHECKPOINT_SAS", "checkpoint_sas", "checkpoint_sas"),
+    # The sealed tree, as a read-only SAS URL for that one blob. Consumed by the
+    # task COMMAND LINE (`curl | tar`) before any of this code exists on the
+    # node; carried here so it is declared beside the other two credentials
+    # and never appears in a Batch listing.
+    Key("POKER_SOLVER_CODE_URL", "code_url", "code_url"),
     Key("RUN_OP", "op", "op"),
     Key("RUN_CONFIG", "config", "config"),
     Key("RUN_TO", "to", "to", str, _int),
