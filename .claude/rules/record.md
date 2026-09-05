@@ -17,8 +17,9 @@ paths:
 
 # The record
 
-The experiment record is Postgres, behind `src/adapters/postgres/`. The share
-holds checkpoints, logs and legs; scores and run state do not live there.
+The experiment record is Postgres, behind `src/adapters/postgres/`. Rungs
+live in the `checkpoints` blob container; the share holds manifests, markers
+and task logs. Scores, run state and the task record do not live there.
 `models.py` is the schema, and the adapter's README says why it is declarative
 and not SQLAlchemy Core (`ty` checks `Eval.scor_mbb`; it cannot check
 `evals.c.scor_mbb`).

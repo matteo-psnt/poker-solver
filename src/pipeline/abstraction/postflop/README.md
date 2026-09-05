@@ -55,7 +55,7 @@ Precompute (per street)                       Runtime lookup
 ## Storage Format
 
 ```
-data/combo_abstraction/buckets-F50T100R200-rexact-{hash}/
+<share>/combo_abstraction/buckets-F50T100R200-rexact-{hash}/
 ├── metadata.json          # config, per-street stats + quality metrics
 ├── hand_id_to_col.npy     # canonical hand ID → matrix column (static)
 ├── flop_board_ids.npy     # sorted canonical board IDs (one row each)
@@ -91,14 +91,15 @@ from src.core.game.state import Card, Street
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
 
-# Precompute (also available via CLI: "Combo Abstraction Tools")
+# Precompute: `poker-solver submit-precompute --config <name>` builds one on a
+# node and publishes it to `<share>/combo_abstraction/`. In code:
 config = PrecomputeConfig.from_yaml("default")
 precomputer = PostflopPrecomputer(config)
 precomputer.precompute_all()
-precomputer.save(Path("data/combo_abstraction/my_abstraction"))
+precomputer.save(out_dir)
 
 # Load and look up
-abstraction = PostflopPrecomputer.load(Path("data/combo_abstraction/my_abstraction"))
+abstraction = PostflopPrecomputer.load(out_dir)
 bucket = abstraction.get_bucket(
     hole_cards=(Card.new("As"), Card.new("Ks")),
     board=(Card.new("Th"), Card.new("9h"), Card.new("8c")),
