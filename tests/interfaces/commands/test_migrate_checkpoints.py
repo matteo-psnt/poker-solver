@@ -63,7 +63,15 @@ def _run(share, monkeypatch, **over):
     monkeypatch.setattr(
         blobstore, "put_rung", lambda _s, _r, _n, path: (seen.append(Path(path)), 4096)[1]
     )
-    args = argparse.Namespace(share=str(share), runs=None, limit=0, verify=False, **over)
+    args = argparse.Namespace(
+        share=str(share),
+        runs=None,
+        limit=0,
+        verify=False,
+        drop_share=False,
+        apply=False,
+        **over,
+    )
     return migrate_checkpoints.run(args), seen
 
 
@@ -91,7 +99,14 @@ class TestItConvertsRatherThanCopies:
 
         monkeypatch.setattr(blobstore, "put_rung", _put)
         migrate_checkpoints.run(
-            argparse.Namespace(share=str(share), runs=None, limit=0, verify=False)
+            argparse.Namespace(
+                share=str(share),
+                runs=None,
+                limit=0,
+                verify=False,
+                drop_share=False,
+                apply=False,
+            )
         )
         arrays, attrs = snapshot_format.read_snapshot(kept["at"])
         for name, original in ARRAYS.items():
@@ -140,7 +155,14 @@ def _header(body: bytes) -> bytes:
 
 
 def _args(share, **over):
-    base = {"share": str(share), "runs": None, "limit": 0, "verify": False}
+    base = {
+        "share": str(share),
+        "runs": None,
+        "limit": 0,
+        "verify": False,
+        "drop_share": False,
+        "apply": False,
+    }
     return argparse.Namespace(**(base | over))
 
 
@@ -227,3 +249,70 @@ class TestPresentIsNotTheSameAsReadable:
 
         assert payload.unreadable, "a truncated object passed as present"
         assert payload.rungs_already_there == 0
+
+
+class TestDroppingTheShareCopy:
+    """The other end of the migration. Every drop is gated on the container
+    being able to supply what is about to be deleted, because after this the
+    container is the only copy."""
+
+    def _blob(self, monkeypatch, *, present=True, header=True):
+        import src.shared.cloudtask.node.blobstore as blobstore
+
+        monkeypatch.setattr(blobstore, "exists", lambda *_a: present)
+        monkeypatch.setattr(
+            blobstore,
+            "read_head",
+            lambda *_a: _header(b'{"arrays": [{"name": "regrets"}]}') if header else b"\x00" * 64,
+        )
+
+    def test_a_rung_the_container_holds_is_dropped(self, share, monkeypatch):
+        self._blob(monkeypatch)
+        payload = migrate_checkpoints.run(_args(share, drop_share=True, apply=True))
+
+        assert payload.rungs_dropped == 1
+        assert not (share / "archive" / "run-a" / "static-100.zarr").exists()
+
+    def test_the_marker_is_kept(self, share, monkeypatch):
+        """Zero bytes, and it is the share's index of what was published:
+        `prune` reads markers for the ladder and `verify_published_rungs`
+        builds from them. Deleting it makes a rung the container HOLDS
+        unscoreable."""
+        self._blob(monkeypatch)
+        migrate_checkpoints.run(_args(share, drop_share=True, apply=True))
+
+        assert (share / "archive" / "run-a" / archive.marker_for("static-100.zarr")).exists()
+
+    def test_a_rung_the_container_lacks_is_kept(self, share, monkeypatch):
+        self._blob(monkeypatch, present=False)
+        payload = migrate_checkpoints.run(_args(share, drop_share=True, apply=True))
+
+        assert payload.rungs_dropped == 0
+        assert payload.kept == ["run-a/static-100.zarr: not in the container"]
+        assert (share / "archive" / "run-a" / "static-100.zarr").is_dir(), "the only copy"
+
+    def test_a_rung_whose_object_will_not_open_is_kept(self, share, monkeypatch):
+        """Present is not readable. A truncated upload answers a HEAD, and
+        this is the last moment the other copy still exists."""
+        self._blob(monkeypatch, header=False)
+        payload = migrate_checkpoints.run(_args(share, drop_share=True, apply=True))
+
+        assert payload.rungs_dropped == 0
+        assert (share / "archive" / "run-a" / "static-100.zarr").is_dir()
+
+    def test_without_apply_it_deletes_nothing(self, share, monkeypatch):
+        self._blob(monkeypatch)
+        payload = migrate_checkpoints.run(_args(share, drop_share=True))
+
+        assert payload.rungs_dropped == 1, "it still reports what it would drop"
+        assert (share / "archive" / "run-a" / "static-100.zarr").is_dir()
+
+    def test_an_unclaimed_directory_is_dropped_too(self, share, monkeypatch):
+        """Dropping walks the SHARE, not the manifest: a directory no manifest
+        names is duplicate weight as well, and the manifest cannot see it."""
+        (share / "archive" / "run-a" / "static-999.zarr").mkdir()
+        self._blob(monkeypatch)
+        payload = migrate_checkpoints.run(_args(share, drop_share=True, apply=True))
+
+        assert payload.rungs_dropped == 2
+        assert not (share / "archive" / "run-a" / "static-999.zarr").exists()
