@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 # When a leg happened, from whichever field its writer used. Not one field,
 # because the writers are different programs: the node stamps `ts`, while
-# `write_observed_record` stamps `observed_at` -- it is the READER saying when
+# `write_observed_document` stamps `observed_at` -- it is the READER saying when
 # IT looked, not the node saying when something happened. Batch's own times come
 # last so a record with neither is not dropped for want of a clock.
 _INSTANT_FIELDS = ("ts", "observed_at", "end_time", "start_time")

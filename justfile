@@ -55,7 +55,7 @@ create:
     {{tf}} init -input=false
     {{tf}} apply -input=false -auto-approve
     @echo ""
-    @echo "  next:  just cli push-data && just submit quick_test 3000"
+    @echo "  next:  uv run poker-solver submit-precompute --config quick_test && just submit quick_test 3000"
 
 # Delete the Batch account and pool. The share and every published run survive.
 # Prompts, on purpose -- see the note above `store-create`.
@@ -186,7 +186,7 @@ credit-check *flags:
 # the escape hatch for everything else.
 #
 # The nine pure passthroughs that used to sit here (`status`, `jobs`, `tasks`,
-# `logs`, `cancel`, `pool-status`, `autoscale-check`, `push-code`, `push-data`,
+# `logs`, `cancel`, `pool-status`, `autoscale-check`, `push-code`,
 # `ledger`) are gone. They retyped a command without changing it, and they
 # answered "what can I do here?" with 13 of 26 -- a hand-maintained subset that
 # `poker-solver --help` already answers in full and cannot drift from.

@@ -82,7 +82,6 @@ export type Autoscale = S["AutoscalePayload"];
  */
 export type Dispatched = S["SubmitPayload"] | S["ScorePayload"] | S["PrecomputeDispatchPayload"];
 export type PushedCode = S["PushedCodePayload"];
-export type PushedData = S["PushedDataPayload"];
 export type Compacted = S["CompactedPayload"];
 export type Cancelled = S["CancelledPayload"];
 export type Box = S["BoxPayload"];

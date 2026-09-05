@@ -24,7 +24,6 @@ import type {
   LogLines,
   NowView,
   PushedCode,
-  PushedData,
   Runs,
   RunsView,
   RunView,
@@ -202,11 +201,6 @@ export const usePrecompute = () => useDispatch<Dispatched>("/api/precompute");
 export const usePushCode = () =>
   useMutation<PushedCode, Error, Record<string, unknown>>({
     mutationFn: (body) => send("/api/push-code", body),
-  });
-
-export const usePushData = () =>
-  useMutation<PushedData, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/push-data", body),
   });
 
 /**

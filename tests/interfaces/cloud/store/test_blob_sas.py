@@ -33,7 +33,7 @@ class TestOnlyATrainerMayWrite:
         designed against a list that was wrong."""
         assert TaskName.MIGRATE_CHECKPOINTS in blob.WRITES_CHECKPOINTS
 
-    @pytest.mark.parametrize("op", [TaskName.EVALUATE, TaskName.PRECOMPUTE, TaskName.NET_PROBE])
+    @pytest.mark.parametrize("op", [TaskName.EVALUATE, TaskName.PRECOMPUTE])
     def test_everything_else_only_reads(self, op):
         assert op not in blob.WRITES_CHECKPOINTS
 
@@ -43,7 +43,7 @@ class TestOnlyATrainerMayWrite:
         is safe for a fetch and a 403 for anything that publishes."""
         from src.shared.cloudtask import kinds
 
-        readers = {TaskName.EVALUATE, TaskName.PRECOMPUTE, TaskName.NET_PROBE}
+        readers = {TaskName.EVALUATE, TaskName.PRECOMPUTE}
         unclassified = set(kinds.KINDS) - {str(op) for op in blob.WRITES_CHECKPOINTS | readers}
         assert not unclassified, f"no checkpoint-access decision for: {sorted(unclassified)}"
 

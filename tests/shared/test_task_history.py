@@ -19,6 +19,11 @@ def _node(share, task_id, event, cause=None, **kw):
     return write_leg(share, task_id, event, cause, **kw)
 
 
+def _observed(share, **kw):
+    """What `tasks` writes back once Batch has explained a death."""
+    return task_history.write_observed_document(share, task_history.observed_record(**kw))
+
+
 class TestNodeRecord:
     def test_started_record_is_not_terminal(self, tmp_path):
         _node(tmp_path, "task-a", "started")
@@ -61,7 +66,7 @@ class TestJoin:
 
     def test_observer_explains_a_task_the_node_never_finished(self, tmp_path):
         _node(tmp_path, "task-oom", "started", run_id="run-xyz")
-        task_history.write_observed_record(
+        _observed(
             tmp_path,
             task_id="task-oom",
             job_id="poker-20260801",
@@ -86,9 +91,7 @@ class TestJoin:
     def test_node_account_wins_when_it_reached_a_terminal_event(self, tmp_path):
         """Batch calls a timed-out task 'failure'; the node knows it was a hang."""
         _node(tmp_path, "task-hang", "finished", cause="timeout", exit_code=124)
-        task_history.write_observed_record(
-            tmp_path, task_id="task-hang", job_id="j", state="completed", result="failure"
-        )
+        _observed(tmp_path, task_id="task-hang", job_id="j", state="completed", result="failure")
 
         row = task_history.read_tasks(tmp_path)[0]
         assert row.cause == "timeout"
@@ -96,13 +99,11 @@ class TestJoin:
 
     def test_observer_only_task_still_appears(self, tmp_path):
         """A task killed before the node wrote anything must not vanish."""
-        task_history.write_observed_record(
-            tmp_path, task_id="task-ghost", job_id="j", state="completed", result="failure"
-        )
+        _observed(tmp_path, task_id="task-ghost", job_id="j", state="completed", result="failure")
         assert task_history.read_tasks(tmp_path)[0].task_id == "task-ghost"
 
     def test_running_task_is_not_called_dead(self, tmp_path):
-        task_history.write_observed_record(tmp_path, task_id="t", job_id="j", state="running")
+        _observed(tmp_path, task_id="t", job_id="j", state="running")
         assert task_history.read_tasks(tmp_path)[0].cause == "running"
 
 
@@ -127,18 +128,11 @@ class TestBatchRetry:
         _node(tmp_path, "task-1", "started")
         _node(tmp_path, "task-1", "finished", cause="killed", exit_code=137)
         _node(tmp_path, "task-1", "started")
-        task_history.write_observed_record(tmp_path, task_id="task-1", job_id="j", state="running")
+        _observed(tmp_path, task_id="task-1", job_id="j", state="running")
 
         rows = {r.attempt: r for r in task_history.read_tasks(tmp_path)}
         assert rows[1].cause == "killed"
         assert rows[2].cause == "running"
-
-    def test_unresolved_reports_each_task_once(self, tmp_path):
-        _node(tmp_path, "task-1", "started")
-        _node(tmp_path, "task-1", "finished", cause="failed", exit_code=1)
-        _node(tmp_path, "task-1", "started")
-
-        assert task_history.unresolved_task_ids(tmp_path) == ["task-1"]
 
 
 class TestTornTerminalWrite:
@@ -154,7 +148,6 @@ class TestTornTerminalWrite:
         rows = task_history.read_tasks(tmp_path)
         assert [r.task_id for r in rows] == ["task-torn"]
         assert rows[0].cause == "unresolved"
-        assert task_history.unresolved_task_ids(tmp_path) == ["task-torn"]
 
 
 class TestCauseVocabulary:
@@ -178,7 +171,7 @@ class TestCauseVocabulary:
         _node(tmp_path, "t", "started")
         _node(tmp_path, "t", "finished", cause=cause)
         assert task_history.read_tasks(tmp_path)[0].cause == cause
-        assert task_history.unresolved_task_ids(tmp_path) == []
+        assert cause in task_history.TERMINAL_CAUSES
 
     def test_an_oom_is_not_recorded_as_a_hang(self, tmp_path):
         """137 is SIGKILL from outside; `timeout` returns 124 even after its
@@ -192,101 +185,6 @@ class TestCauseVocabulary:
     def test_a_cancelled_task_is_not_a_clean_completion(self, tmp_path):
         _node(tmp_path, "c", "finished", cause=task_log.CAUSE_CANCELLED, exit_code=143)
         assert task_history.read_tasks(tmp_path)[0].cause == "cancelled"
-
-
-class TestReconcile:
-    def test_only_unresolved_tasks_are_written(self, tmp_path):
-        _node(tmp_path, "done", "finished", cause="completed", exit_code=0)
-        _node(tmp_path, "vanished", "started")
-
-        explained = task_history.reconcile(
-            tmp_path,
-            [
-                {"task": "done", "state": "completed", "result": "success"},
-                {"task": "vanished", "state": "completed", "result": "failure"},
-            ],
-        )
-
-        assert explained == ["vanished"]
-        assert not (task_log.tasks_dir(tmp_path) / "done.observed.json").exists(), (
-            "a task that reported its own exit needs no external explanation"
-        )
-
-    def test_unknown_tasks_are_ignored(self, tmp_path):
-        _node(tmp_path, "mine", "started")
-        assert (
-            task_history.reconcile(tmp_path, [{"task": "someone-elses", "state": "completed"}])
-            == []
-        )
-
-    def test_an_explained_task_reads_back_as_an_outcome_not_a_state_string(self, tmp_path):
-        """The whole join is worthless if the cause column says
-        `batchtaskstate.completed`, so the shape reconcile consumes is pinned to
-        the shape `batch.list_jobs_with_tasks` produces."""
-        _node(tmp_path, "vanished", "started")
-        task_history.reconcile(
-            tmp_path,
-            [{"task": "vanished", "job": "poker-1", "state": "completed", "result": "failure"}],
-        )
-        row = next(r for r in task_history.read_tasks(tmp_path) if r.task_id == "vanished")
-        assert row.cause == task_log.CAUSE_FAILED
-
-
-class TestAnObservationIsOnlyWrittenWhenItSaysSomethingNew:
-    """`observed_at` is stamped on every read, so an unchanged observation was
-    always a fresh document -- and a task that can never resolve (one Batch
-    still calls `running`) was re-written and re-uploaded on every single read.
-    Measured on the console: six such records, 14.1s of serial share writes,
-    per poll, forever, carrying no information.
-    """
-
-    def test_repeating_an_observation_reports_nothing_to_publish(self, tmp_path):
-        _node(tmp_path, "running-forever", "started")
-        observation = [{"task": "running-forever", "job": "poker-1", "state": "running"}]
-
-        assert task_history.reconcile(tmp_path, observation) == ["running-forever"]
-        assert task_history.reconcile(tmp_path, observation) == []
-        assert task_history.reconcile(tmp_path, observation) == []
-
-    def test_the_stored_record_is_left_alone(self, tmp_path):
-        _node(tmp_path, "running-forever", "started")
-        observation = [{"task": "running-forever", "job": "poker-1", "state": "running"}]
-        task_history.reconcile(tmp_path, observation)
-        path = task_log.tasks_dir(tmp_path) / "running-forever.observed.json"
-        before = path.read_text()
-
-        task_history.reconcile(tmp_path, observation)
-
-        assert path.read_text() == before
-
-    def test_two_readers_of_one_shared_tree_publish_it_once(self, tmp_path):
-        """`/api/tasks` and `/api/cost` are separate cache keys answering the
-        same page, so they run at once and are handed ONE legs tree. Two of them
-        writing `<task>.observed.json` to a share with no atomic rename breaks
-        the one-writer-per-file rule that makes writing there safe at all.
-        """
-        _node(tmp_path, "vanished", "started")
-        observation = [{"task": "vanished", "job": "j", "state": "completed", "result": "failure"}]
-
-        first = task_history.reconcile(tmp_path, observation)
-        second = task_history.reconcile(tmp_path, observation)
-
-        assert (first, second) == (["vanished"], []), "both readers published the same record"
-
-    def test_news_is_still_written(self, tmp_path):
-        """The property this must not cost: a task that has since FINISHED is a
-        different observation, and losing it would leave a death unexplained."""
-        _node(tmp_path, "vanished", "started")
-        task_history.reconcile(tmp_path, [{"task": "vanished", "job": "j", "state": "running"}])
-
-        explained = task_history.reconcile(
-            tmp_path,
-            [{"task": "vanished", "job": "j", "state": "completed", "result": "failure"}],
-        )
-
-        assert explained == ["vanished"]
-        row = next(r for r in task_history.read_tasks(tmp_path) if r.task_id == "vanished")
-        assert row.cause == task_log.CAUSE_FAILED
 
 
 class TestRobustness:
@@ -582,8 +480,8 @@ class TestOneMalformedDocumentCannotTakeDownEveryReader:
 
     These are untyped JSON off an SMB share, written by a wrapper that may be an
     older version or killed halfway through a write. `read_tasks` feeds
-    `tasks`, `cost`, `runinfo` and -- through `unresolved_tasks` -- `reconcile`,
-    so one strict field would take all four down together. `kinds.Progress`
+    `tasks`, `cost` and `runinfo`, so one strict field would take all three down
+    together. `kinds.Progress`
     reads the same bytes and tolerates both of these; the model must agree, or
     two readers of one record disagree about whether it is readable.
     """
@@ -607,46 +505,3 @@ class TestOneMalformedDocumentCannotTakeDownEveryReader:
         progress = task_history.read_tasks(tmp_path)[0].progress
         assert progress is not None
         assert progress.unit == ""
-
-
-class TestOnlyAskBatchWhatBatchCanAnswer:
-    """Batch describes a task's CURRENT attempt and no other, which is why the
-    join hands `_cause` an empty batch record for every earlier one. So a
-    superseded attempt is non-terminal by construction and asking about it can
-    only ever return the answer for a different attempt.
-
-    Measured on the real log: 1,326 non-terminal rows, 1,290 of them superseded,
-    36 questions Batch could actually answer. Asking about all of them cost
-    7.8s on every console poll.
-    """
-
-    def _share(self, tmp_path, attempts):
-        directory = task_log.tasks_dir(tmp_path)
-        directory.mkdir(parents=True, exist_ok=True)
-        for attempt, cause in attempts:
-            (directory / f"task-a.{attempt}.start.json").write_text(
-                json.dumps({"task_id": "task-a", "attempt": attempt, "job_id": "job-1"})
-            )
-            if cause is not None:
-                (directory / f"task-a.{attempt}.exit.json").write_text(
-                    json.dumps({"task_id": "task-a", "attempt": attempt, "cause": cause})
-                )
-        return tmp_path
-
-    def test_a_superseded_attempt_is_not_asked_about(self, tmp_path):
-        """Attempt 1 died without stamping an end and attempt 2 finished. The
-        first is unresolved forever and no question can change that."""
-        share = self._share(tmp_path, [(1, None), (2, "completed")])
-        assert [row.attempt for row in task_history.unresolved_tasks(share)] == []
-
-    def test_the_latest_attempt_is_still_asked_about(self, tmp_path):
-        share = self._share(tmp_path, [(1, "failed"), (2, None)])
-        assert [row.attempt for row in task_history.unresolved_tasks(share)] == [2]
-
-    def test_a_task_on_its_first_attempt_is_asked_about(self, tmp_path):
-        share = self._share(tmp_path, [(1, None)])
-        assert [row.attempt for row in task_history.unresolved_tasks(share)] == [1]
-
-    def test_a_finished_task_is_asked_about_at_no_attempt(self, tmp_path):
-        share = self._share(tmp_path, [(1, None), (2, "completed"), (3, "completed")])
-        assert task_history.unresolved_tasks(share) == []

@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from src.pipeline.evaluation import ledger as eval_ledger
-from src.pipeline.services import checkpoint_iteration_of
+from src.pipeline.services.runs import checkpoint_iteration_of
 from src.shared.records import STATIC_CHECKPOINT
 from tests.test_helpers import seed_ledger
 

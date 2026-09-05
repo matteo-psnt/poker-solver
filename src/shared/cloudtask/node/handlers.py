@@ -3,7 +3,7 @@
 One executor per kind, and a registry keyed by the kind's own name -- so a kind
 with no executor is a ``KeyError`` naming it rather than a task that silently
 does nothing. The lifecycle around them (the guard, the tee, the exit account)
-is deliberately not here: it is identical for all three, and mixing the two is
+is deliberately not here: it is identical for every kind, and mixing the two is
 what made the shell version impossible to reason about.
 """
 
@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import itertools
 import json
-import os
-import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -23,12 +21,6 @@ from src.shared.cloudtask.node import archive, profile, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
-
-# How often a running sweep copies its curve to the share. Two minutes against
-# arms that run for hours: frequent enough to see the first rung land, rare
-# enough that the copy is invisible next to the work.
-PUBLISH_EVERY_SECONDS = 120
-
 
 # The second element is the OUTCOME an exit code cannot carry: an evaluation that
 # scored some rungs and failed others exits 0 for Batch's retry economics.
@@ -392,97 +384,6 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
 # ``TaskName`` because what arrives from the environment is the wire string.
 
 
-# Where each measurement kind's result lands on the share. Separate folders
-# because they answer different questions and a reader globs one of them.
-MEASUREMENT_OUTPUT: dict[str, str] = {}
-
-
-def _measurement(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    """Run one abstraction measurement, publishing its result as it grows.
-
-    The result is published on EVERY exit, not only success. A sweep that runs
-    past its timeout is killed mid-checkpoint, and without this it would lose
-    every checkpoint it had already scored -- the same failure this module's
-    training path publishes rungs to avoid, in a different shape.
-
-    Abstractions are read from the share in place: they are ~773 MB each and the
-    node's disk is discarded when the task ends, so a copy would be paid for on
-    every arm and thrown away.
-    """
-    plan = _reporting(plan, paths)
-    result = Path(plan.progress_path)
-    destination = paths.share / MEASUREMENT_OUTPUT[plan.op]
-    # The task id is the node's, not the plan's -- the plan describes the WORK
-    # and several retries of it would share one. Read the same way every other
-    # node module reads it.
-    published = f"{os.environ.get('AZ_BATCH_TASK_ID', 'local')}.json"
-
-    def publish_partial() -> None:
-        if result.is_file() and result.stat().st_size > 0:
-            try:
-                destination.mkdir(parents=True, exist_ok=True)
-                archive.copy_file(result, destination / published)
-            except OSError as error:
-                log(f"could not publish partial result: {error}")
-
-    def publish_as_it_lands(stop: threading.Event) -> None:
-        """Copy the curve up whenever it grows, not only when the task ends.
-
-        The sweep writes the whole result after every checkpoint, but that file
-        is on the node's disk, which is discarded. Publishing only on exit means
-        a six-hour arm shows NOTHING until it stops -- no way to tell a slow
-        sweep from a wedged one, and no early read on a measurement whose first
-        rung landed in minutes. The command prints its table at the end too, so
-        the log is no help either.
-
-        Cheap enough to be unconditional: the curve is a few kilobytes, and a
-        copy is skipped entirely unless the file changed.
-        """
-        seen: tuple[int, float] | None = None
-        while not stop.wait(PUBLISH_EVERY_SECONDS):
-            if not result.is_file():
-                continue
-            stat = result.stat()
-            current = (stat.st_size, stat.st_mtime)
-            if current != seen and stat.st_size > 0:
-                seen = current
-                publish_partial()
-
-    abstractions = paths.share / "combo_abstraction"
-    if not (abstractions / plan.config).is_dir():
-        log(f"FATAL no such abstraction on the share: {plan.config}")
-        log("  publish one with `poker-solver push-data`, or build one with submit-precompute")
-        return 1, None
-
-    log(f"{plan.op}: {plan.arm or 'measure'} on {plan.config} (timeout {plan.timeout_seconds}s)")
-    progress.note_baseline(paths, plan)
-    watcher = progress.ProgressWatcher(paths, log, plan=plan, publish_log=log.publish)
-    watcher.start()
-    stop = threading.Event()
-    publisher = threading.Thread(
-        target=publish_as_it_lands, args=(stop,), name=f"{plan.op}-publish", daemon=True
-    )
-    publisher.start()
-    try:
-        code = run_guarded(
-            _cli([*plan.commands[0], "--abstractions-dir", str(abstractions)]),
-            cwd=paths.code,
-            timeout=plan.timeout_seconds,
-            log=log,
-        )
-    finally:
-        stop.set()
-        publisher.join(timeout=30)
-        watcher.stop()
-        publish_partial()
-
-    if code != 0:
-        log(f"{plan.op} failed rc={code} (partial result published if any was reached)")
-        return code, None
-    log(f"published {MEASUREMENT_OUTPUT[plan.op]}/{published}")
-    return 0, None
-
-
 def _migrate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     """Move published rungs from the mounted share into the container.
 
@@ -523,19 +424,6 @@ def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
         archive.publish_rungs_to_blob(run_dir, run_dir.name, plan.checkpoint_sas, log)
 
 
-def _probe(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    """Run the reachability probe and publish NOTHING.
-
-    The answer is a few lines of stdout, and the task log is already durable and
-    already readable with `logs --task`. Writing it to the share as well would
-    add a document whose only reader is a person who has the log open.
-    """
-    code = run_guarded(
-        _cli(plan.commands[0]), cwd=paths.code, timeout=plan.timeout_seconds, log=log
-    )
-    return code, None
-
-
 HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN: _train,
     # Same executor: the board-free kernel writes ordinary checkpoints, so
@@ -543,7 +431,5 @@ HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN_PCS: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
-    # Same executor: an abstraction off the share, one command, one JSON result.
-    TaskName.NET_PROBE: _probe,
     TaskName.MIGRATE_CHECKPOINTS: _migrate,
 }

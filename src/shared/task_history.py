@@ -51,7 +51,6 @@ from src.shared.cloudtask.task_log import (
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Iterable
     from pathlib import Path
 
 # Written by the READER, not the node. Its own filename, so the two sides never
@@ -135,44 +134,6 @@ def observed_record(
         "node_id": node_id,
         "observed_at": utcnow(),
     }
-
-
-def write_observed_record(
-    share: str | os.PathLike[str],
-    *,
-    task_id: str,
-    job_id: str,
-    state: str,
-    result: str | None = None,
-    exit_code: int | None = None,
-    failure: dict[str, Any] | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
-    node_id: str = "",
-    only_if_new: bool = False,
-) -> Path | None:
-    """Record what Batch says happened, from the client.
-
-    ``only_if_new`` answers None when the stored record already says this, so a
-    caller that publishes what changed has nothing to publish. See
-    :data:`_VOLATILE_OBSERVED_FIELDS` for why "already says this" cannot be a
-    byte comparison.
-    """
-    path = tasks_dir(share) / f"{task_id}{OBSERVED_SUFFIX}"
-    record = observed_record(
-        task_id=task_id,
-        job_id=job_id,
-        state=state,
-        result=result,
-        exit_code=exit_code,
-        failure=failure,
-        start_time=start_time,
-        end_time=end_time,
-        node_id=node_id,
-    )
-    if only_if_new and says_the_same(records.read_snapshot(path), record):
-        return None
-    return write_observed_document(share, record)
 
 
 def write_observed_document(share: str | os.PathLike[str], record: dict[str, Any]) -> Path:
@@ -564,73 +525,3 @@ def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:
     for row, eta in zip(joined, kinds.etas(joined, utcnow()), strict=True):
         row["eta_seconds"] = eta
     return [TaskRow(**row) for row in joined]
-
-
-def unresolved_tasks(share: str | os.PathLike[str]) -> list[TaskRow]:
-    """The rows Batch could still explain: non-terminal, and the LATEST attempt.
-
-    Returned whole, not as ids, so a caller can ask Batch about exactly these
-    ``(job_id, task_id)`` pairs. Enumerating every job in the account to find
-    the one or two open questions cost ~0.39s per job -- the answer scaled with
-    history rather than with what was actually unexplained.
-
-    The latest-attempt cut is the same idea one step further. Batch describes
-    only a task's CURRENT attempt, which is why the join hands `_cause` an empty
-    batch record for every earlier one -- so an earlier attempt is permanently
-    unresolved by construction, and asking about it can only ever return the
-    answer for a different attempt. Measured: 1,326 non-terminal rows, of which
-    1,290 were superseded attempts and 36 were questions Batch could answer.
-    """
-    rows = read_tasks(share)
-    latest: dict[str, int] = {}
-    for row in rows:
-        latest[row.task_id] = max(latest.get(row.task_id, 0), row.attempt)
-    return [
-        row
-        for row in rows
-        if row.cause not in TERMINAL_CAUSES and row.attempt == latest[row.task_id]
-    ]
-
-
-def unresolved_task_ids(share: str | os.PathLike[str]) -> list[str]:
-    """Tasks whose node record never reached a terminal event -- exactly the
-    ones worth asking Batch about."""
-    return sorted({row.task_id for row in unresolved_tasks(share)})
-
-
-def reconcile(share: str | os.PathLike[str], tasks: Iterable[dict[str, Any]]) -> list[str]:
-    """Write observer records for tasks the node never explained.
-
-    ``tasks`` is `batch.list_jobs_with_tasks` output, flattened so each task
-    carries its `job`. Only unresolved tasks: otherwise the cost scales with
-    history rather than with open questions.
-
-    Returns the ids whose observation is NEW -- which the caller then publishes,
-    so an observation that repeats what the share already holds costs no write.
-    A task Batch cannot explain any better than last time (one still running,
-    most of all) stays unresolved forever, and re-uploading its unchanged record
-    on every read is the difference between a poll costing nothing and costing
-    14 seconds.
-    """
-    open_questions = set(unresolved_task_ids(share))
-    explained = []
-    for task in tasks:
-        task_id = task.get("task")
-        if not task_id or task_id not in open_questions:
-            continue
-        written = write_observed_record(
-            share,
-            task_id=task_id,
-            job_id=task.get("job", ""),
-            state=task.get("state") or "",
-            result=task.get("result"),
-            exit_code=task.get("exit_code"),
-            failure=task.get("failure"),
-            start_time=task.get("start_time"),
-            end_time=task.get("end_time"),
-            node_id=task.get("node") or "",
-            only_if_new=True,
-        )
-        if written is not None:
-            explained.append(task_id)
-    return explained

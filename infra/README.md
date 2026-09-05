@@ -63,7 +63,7 @@ Needs `terraform`, `az` and `just` locally, plus `az login` for the credential.
 az login
 just store-create   # the durable share — once, ever
 just create         # Batch account, pool, guardrails
-just cli push-data  # card abstractions to the share (~773 MB, one time)
+uv run poker-solver submit-precompute --config production  # card abstractions, built on a node (one time)
 ```
 
 ## Daily use

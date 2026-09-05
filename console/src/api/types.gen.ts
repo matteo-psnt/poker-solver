@@ -396,23 +396,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/push-data": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Push Data */
-        post: operations["_push_data_api_push_data_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/runs": {
         parameters: {
             query?: never;
@@ -1896,13 +1879,6 @@ export interface components {
             /** Root */
             root?: string | null;
         };
-        /** PushDataBody */
-        PushDataBody: {
-            /** Name */
-            name?: string | null;
-            /** Source */
-            source?: string | null;
-        };
         /**
          * PushedCodePayload
          * @description The snapshot that was sealed. Its id is what a task executes.
@@ -1916,25 +1892,6 @@ export interface components {
              * @constant
              */
             op: "push-code";
-        };
-        /**
-         * PushedDataPayload
-         * @description Abstraction name to files uploaded. Empty means everything was current.
-         */
-        PushedDataPayload: {
-            /**
-             * Op
-             * @default push-data
-             * @constant
-             */
-            op: "push-data";
-            /**
-             * Uploaded
-             * @default {}
-             */
-            uploaded: {
-                [key: string]: number;
-            };
         };
         /**
          * ResizeError
@@ -3394,48 +3351,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PushedCodePayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _push_data_api_push_data_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PushDataBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PushedDataPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

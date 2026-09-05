@@ -60,7 +60,7 @@ just console-dev   # Vite on :5173 with hot reload, proxying /api to :8765
 
 ### Training Your First Solver
 
-1. `just create` once, then `just cli push-data` to publish the card abstractions.
+1. `just create` once, then `poker-solver submit-precompute` to build the card abstractions on a node.
 2. `uv run poker-solver submit --config quick_test --to 3000`
 3. Watch with `poker-solver jobs`; read the leg with
    `poker-solver logs --task <id>`.

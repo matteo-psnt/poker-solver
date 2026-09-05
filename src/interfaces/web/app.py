@@ -59,7 +59,6 @@ from src.interfaces.commands import (
     profile,
     progress,
     push_code,
-    push_data,
     runinfo,
     runs,
     score,
@@ -201,11 +200,6 @@ class PrecomputeBody(BaseModel):
 
 class PushCodeBody(BaseModel):
     root: str | None = None
-
-
-class PushDataBody(BaseModel):
-    source: str | None = None
-    name: str | None = None
 
 
 class CompactBody(BaseModel):
@@ -396,18 +390,13 @@ def create_app() -> FastAPI:
     def _precompute(body: PrecomputeBody) -> JSONResponse:
         return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
 
-    # `push-code` and `push-data` read a tree on the machine RUNNING THIS
-    # SERVER, which is the one fact about them a browser hides. `--root` and
-    # `--source` default to this checkout, so a console served from a different
-    # worktree publishes that worktree -- and the payload names what it sealed,
-    # which is what the page shows back.
+    # `push-code` reads a tree on the machine RUNNING THIS SERVER, which is the
+    # one fact about it a browser hides. `--root` defaults to this checkout, so
+    # a console served from a different worktree publishes that worktree -- and
+    # the payload names what it sealed, which is what the page shows back.
     @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
     def _push_code(body: PushCodeBody) -> JSONResponse:
         return answer(TtlCache(0.0), push_code.COMMAND, **given(body))
-
-    @app.post("/api/push-data", response_model=contract.PushedData, responses=ERRORS)
-    def _push_data(body: PushDataBody) -> JSONResponse:
-        return answer(TtlCache(0.0), push_data.COMMAND, **given(body))
 
     @app.post("/api/compact-legs", response_model=contract.Compacted, responses=ERRORS)
     def _compact_legs(body: CompactBody) -> JSONResponse:

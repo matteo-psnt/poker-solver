@@ -55,7 +55,6 @@ NODE_ONLY: dict[str, str] = {
     "precompute": "compute, run BY the node wrapper — `submit-precompute` is the door",
     "evaluate": "compute, run BY the node wrapper — `score` is the door",
     "train-pcs": "compute, run BY the node wrapper — `submit --kernel pcs` is the door",
-    "net-probe": "compute, run BY the node wrapper — `submit-net-probe` is the door",
 }
 
 DESTRUCTIVE: dict[str, str] = {
@@ -86,8 +85,6 @@ DIAGNOSTIC: dict[str, str] = {
     "record-migrate": "it changes the record's SCHEMA, once per code change, from the "
     "checkout that carries the migration; a button would apply whatever the server "
     "process happened to be running",
-    "submit-net-probe": "it answers a question about the POOL, not about the record, and its whole output is a task log the console already renders. A button would be a "
-    "permanent fixture for a question asked during a migration",
 }
 
 EXCLUDED = NO_PAYLOAD | NODE_ONLY | DESTRUCTIVE | EXTERNAL | DIAGNOSTIC

@@ -191,7 +191,7 @@ def test_evaluate_run_lbr_refuses_run_without_recorded_abstraction(monkeypatch, 
     monkeypatch.setattr(services_shared, "load_run_metadata", lambda run_dir, source=None: metadata)
 
     with pytest.raises(ValueError, match="does not record which card abstraction"):
-        services.evaluate_run_lbr(tmp_path / "run-legacy", LBRConfig(num_hands=1))
+        services_lbr.evaluate_run_lbr(tmp_path / "run-legacy", LBRConfig(num_hands=1))
 
 
 def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
@@ -226,7 +226,7 @@ def test_evaluate_run_lbr_pins_hash_recorded_on_run(monkeypatch, tmp_path):
         ),
     )
 
-    services.evaluate_run_lbr(tmp_path / "run-1", LBRConfig(num_hands=1))
+    services_lbr.evaluate_run_lbr(tmp_path / "run-1", LBRConfig(num_hands=1))
 
     assert seen["abstraction_hash"] == "recorded99"
 
@@ -267,7 +267,9 @@ def test_evaluate_run_lbr_pins_abstraction_hash(monkeypatch, tmp_path):
         ),
     )
 
-    services.evaluate_run_lbr(tmp_path / "run-1", LBRConfig(num_hands=1), abstraction_hash="abc123")
+    services_lbr.evaluate_run_lbr(
+        tmp_path / "run-1", LBRConfig(num_hands=1), abstraction_hash="abc123"
+    )
 
     assert seen["abstraction_hash"] == "abc123"
 
@@ -315,7 +317,7 @@ def test_evaluate_run_lbr_maps_result_and_builds_config(monkeypatch, tmp_path):
         lambda solver, cfg, **kw: seen.update(cfg=cfg) or lbr_result,
     )
 
-    output = services.evaluate_run_lbr(
+    output = services_lbr.evaluate_run_lbr(
         tmp_path / "run-1", LBRConfig(num_hands=2000, equity_runouts=8, seed=7)
     )
 
@@ -405,7 +407,7 @@ def test_evaluate_run_lbr_threads_lookahead_scorer(monkeypatch, tmp_path):
         lambda solver, cfg, **kw: seen.update(cfg=cfg) or lbr_result,
     )
 
-    output = services.evaluate_run_lbr(
+    output = services_lbr.evaluate_run_lbr(
         tmp_path / "run-1",
         LBRConfig(num_hands=1, seed=7, scorer="lookahead", lookahead_depth=3, lookahead_top_k=5),
     )
