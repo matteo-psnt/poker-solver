@@ -56,11 +56,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Stop after this many rungs (0 = no limit). A task has a deadline.",
     )
     parser.add_argument(
-        "--recover-tars",
-        action="store_true",
-        help="Convert rungs that exist only as .tar objects; skip everything the share holds.",
-    )
-    parser.add_argument(
         "--verify",
         action="store_true",
         help="Upload nothing; report which published rungs the container lacks.",
@@ -95,13 +90,6 @@ class MigratedPayload(BaseModel):
     Pre-marker or interrupted, and indistinguishable from here. They are not a
     migration failure -- they are snapshots nothing has ever been willing to
     load, since `require_complete` refuses them at fetch time too.
-    """
-    recoverable: list[str] = Field(default_factory=list)
-    """Claimed rungs with no share bytes at all, but a `.tar` in the container.
-
-    Written by the dual-write path that tarred a directory to Blob and skipped
-    the share, so the tar is the ONLY copy -- 313 rungs across six 300M runs.
-    `--recover-tars` converts them; nothing at HEAD can read one as it stands.
     """
     phantom: list[str] = Field(default_factory=list)
     """Claimed rungs with no bytes in either store.
@@ -232,16 +220,6 @@ def _one_rung(
         return
 
     if snapshot not in on_share:
-        # No share bytes at all. The tar era wrote the rung to Blob and skipped
-        # the share, so the tar is the only copy that has ever existed.
-        tar = f"{snapshot}.tar"
-        if blobstore.exists(sas, run_dir.name, tar):
-            payload.recoverable.append(f"{run_dir.name}/{snapshot}")
-            if args.recover_tars and not args.verify:
-                print(f"  {snapshot}: recovering from {tar}...", flush=True)
-                payload.bytes_uploaded += _recover_from_tar(sas, run_dir.name, snapshot, work)
-                payload.rungs_uploaded += 1
-            return
         payload.phantom.append(f"{run_dir.name}/{snapshot}")
         return
 
@@ -260,10 +238,6 @@ def _one_rung(
         return
     if args.verify:
         payload.missing.append(f"{run_dir.name}/{snapshot}")
-        return
-    if args.recover_tars:
-        # A recovery pass moves only what the share cannot supply; converting
-        # the share again would be the sweep, at 20s a rung.
         return
     print(f"  {snapshot}: converting...", flush=True)
     _name, uploaded = _upload(sas, run_dir, snapshot, work)
@@ -353,57 +327,6 @@ def _header_fault(sas: str, run_dir: Path, object_name: str) -> str:
     return ""
 
 
-def _recover_from_tar(sas: str, run_id: str, snapshot: str, work: Path) -> int:
-    """Convert a rung that exists ONLY as a `.tar` object. Returns bytes written.
-
-    The tar holds the zarr directory whole, rooted at the snapshot's own name.
-    It goes out as the same `.ckpt.zst` any other rung does, so nothing
-    downstream has to know a rung took this route -- and the tar is left in
-    place, because until that upload is verified it is still the only copy.
-    """
-    import shutil  # noqa: PLC0415 -- node-only
-    import tarfile  # noqa: PLC0415 -- node-only
-    import time  # noqa: PLC0415 -- node-only
-
-    from src.engine.solver.storage import snapshot_format  # noqa: PLC0415 -- node-only
-    from src.shared import records  # noqa: PLC0415 -- see above
-    from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- node-only
-
-    staged = work / f"{snapshot}.tar"
-    extracted = work / "extracted"
-    converted = work / records.object_name(snapshot)
-    shutil.rmtree(extracted, ignore_errors=True)
-    try:
-        at = time.monotonic()
-        if not blobstore.get_rung(sas, run_id, f"{snapshot}.tar", work):
-            raise CommandError(f"{run_id}/{snapshot}.tar disappeared mid-recovery")
-        downloaded = time.monotonic() - at
-
-        at = time.monotonic()
-        with tarfile.open(staged) as archive_file:
-            archive_file.extractall(extracted, filter="data")
-        arrays, attrs = _read_zarr(extracted / snapshot)
-        size = snapshot_format.write_snapshot(converted, arrays, attrs)
-        encoded = time.monotonic() - at
-        del arrays
-
-        at = time.monotonic()
-        blobstore.put_rung(sas, run_id, converted.name, converted)
-        print(
-            f"    downloaded {staged.stat().st_size / 1024**2:.0f} MiB in {downloaded:.1f}s, "
-            f"encoded to {size / 1024**2:.0f} MiB in {encoded:.1f}s, "
-            f"uploaded in {time.monotonic() - at:.1f}s",
-            flush=True,
-        )
-        return size
-    finally:
-        # Every rung is a ~1.2 GiB tar plus its extraction plus the encode, so
-        # a pass that kept them would fill the node's disk inside ten rungs.
-        shutil.rmtree(extracted, ignore_errors=True)
-        staged.unlink(missing_ok=True)
-        converted.unlink(missing_ok=True)
-
-
 def _read_zarr(path: Path) -> tuple[dict, dict]:
     """A legacy rung's arrays and attrs. The only zarr read left in the sweep."""
     import zarr  # noqa: PLC0415 -- the format being migrated away from
@@ -425,8 +348,6 @@ def render(payload: MigratedPayload) -> None:
         f"rungs uploaded:   {payload.rungs_uploaded:,}  ({payload.bytes_uploaded / 1024**3:.1f} GiB)"
     )
     print(f"already present:  {payload.rungs_already_there:,}")
-    if payload.recoverable:
-        print(f"recovered/recoverable from tar: {len(payload.recoverable):,}")
     if payload.stopped_early:
         print("STOPPED EARLY at --limit; re-run to continue where this left off.")
     if payload.unmarked:
@@ -442,8 +363,7 @@ def _render_verification(payload: MigratedPayload) -> None:
     """What the container is missing, split by what could be done about it.
 
     Every line here is a different ANSWER, not a different severity: a sweep
-    fixes one, only `--recover-tars` fixes another, and two of them cannot be
-    fixed at all. A verification that merged them into one count is what let a
+    fixes one and the others cannot be fixed at all. A verification that merged them into one count is what let a
     deletion gate report "nothing missing" while 316 claimed rungs had no share
     copy to migrate from.
     """
@@ -453,13 +373,11 @@ def _render_verification(payload: MigratedPayload) -> None:
     print(f"claimed and present:  {payload.rungs_already_there:,}")
     print(f"MISSING (marked):     {len(payload.missing):,}   <- a sweep will move these")
     print(f"unmarked:             {len(payload.unmarked):,}   <- no sweep will, ever")
-    print(f"RECOVERABLE from tar: {len(payload.recoverable):,}   <- --recover-tars moves these")
     print(f"UNREADABLE object:    {len(payload.unreadable):,}   <- present but will not open")
     print(f"unclaimed on share:   {len(payload.unclaimed):,}   <- no manifest names them")
     print(f"phantom ladder rows:  {len(payload.phantom):,}   <- pruned; block nothing")
     for label, lines, cap in (
         ("missing", payload.missing, 20),
-        ("recoverable", payload.recoverable, 10),
         ("UNREADABLE", payload.unreadable, 20),
         ("unmarked", payload.unmarked, 10),
         ("unclaimed", payload.unclaimed, 10),
@@ -469,8 +387,6 @@ def _render_verification(payload: MigratedPayload) -> None:
         if len(lines) > cap:
             print(f"  ... and {len(lines) - cap:,} more {label}")
 
-    # TWO DELETIONS, TWO ANSWERS. They are gated on different things and
-    # merging them is how a gate says no to the safe one and yes to the other.
     print()
     blocks_share = payload.missing + payload.unreadable
     if blocks_share:
@@ -478,11 +394,6 @@ def _render_verification(payload: MigratedPayload) -> None:
         print("       container, or are there and will not open.")
     else:
         print("SHARE: every rung it holds is in the container and opens.")
-    if payload.recoverable:
-        print(f"TARS:  DO NOT DELETE -- {len(payload.recoverable):,} rung(s) exist ONLY as a tar.")
-        print("       Run --recover-tars first; nothing else can read them.")
-    else:
-        print("TARS:  every rung that only a tar held has been converted.")
 
 
 COMMAND = Command(
