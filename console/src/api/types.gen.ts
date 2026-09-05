@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/api/activity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Activity */
-        get: operations["_activity_api_activity_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/autoscale": {
         parameters: {
             query?: never;
@@ -605,55 +588,6 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * ActivityPayload
-         * @description The local activity log, summarised.
-         *
-         *     The only payload here that describes THIS TOOL rather than the solver or the
-         *     cloud. `exists`/`enabled` are two different empty states with different fixes
-         *     -- nothing has run yet, versus recording is switched off -- and collapsing
-         *     them would send someone hunting for a bug in the writer.
-         */
-        ActivityPayload: {
-            /** By Surface */
-            by_surface?: {
-                [key: string]: number;
-            };
-            /** Commands */
-            commands?: components["schemas"]["CommandActivity"][];
-            /** Days */
-            days: number;
-            /** Enabled */
-            enabled: boolean;
-            /** Exists */
-            exists: boolean;
-            /** Failures */
-            failures?: components["schemas"]["Failure"][];
-            /**
-             * Failures Only
-             * @default false
-             */
-            failures_only: boolean;
-            /** First At */
-            first_at?: string | null;
-            /** Log */
-            log: string;
-            /**
-             * Op
-             * @default activity
-             * @constant
-             */
-            op: "activity";
-            /** Rows */
-            rows: number;
-            /**
-             * Total Failures
-             * @default 0
-             */
-            total_failures: number;
-            /** Total Rows */
-            total_rows: number;
-        };
-        /**
          * ApiError
          * @description A refusal (422) or an outage (503). The only non-payload body served.
          */
@@ -992,28 +926,6 @@ export interface components {
             /** Combos */
             combos: string[];
         };
-        /**
-         * CommandActivity
-         * @description One command's cost, over the window.
-         */
-        CommandActivity: {
-            /** Calls */
-            calls: number;
-            /** Command */
-            command: string;
-            /** Errors */
-            errors: number;
-            /** Max Seconds */
-            max_seconds: number;
-            /** P50 Seconds */
-            p50_seconds: number;
-            /** P95 Seconds */
-            p95_seconds: number;
-            /** Refusals */
-            refusals: number;
-            /** Total Seconds */
-            total_seconds: number;
-        };
         /** CompactBody */
         CompactBody: {
             /** Apply */
@@ -1282,28 +1194,6 @@ export interface components {
             token: string;
             /** Type */
             type: string;
-        };
-        /**
-         * Failure
-         * @description One recorded failure, with what was asked for when it happened.
-         */
-        Failure: {
-            /** Asked */
-            asked?: {
-                [key: string]: unknown;
-            };
-            /** At */
-            at?: string | null;
-            /** Command */
-            command?: string | null;
-            /** Error */
-            error?: string | null;
-            /** Error Type */
-            error_type?: string | null;
-            /** Outcome */
-            outcome?: string | null;
-            /** Surface */
-            surface?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2493,47 +2383,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    _activity_api_activity_get: {
-        parameters: {
-            query?: {
-                days?: number;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     _autoscale_api_autoscale_get: {
         parameters: {
             query?: never;

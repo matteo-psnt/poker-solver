@@ -19,7 +19,6 @@ noticed, because past the grace the request blocks and fails in the open.
 
 from __future__ import annotations
 
-import contextvars
 import logging
 import threading
 import time
@@ -135,17 +134,13 @@ class TtlCache:
     def _refresh_behind(self, key: Hashable, produce: Callable[[], Any]) -> None:
         """Produce ``key`` on a thread of its own. Caller holds the lock.
 
-        Under a COPY of the caller's context, so a command's telemetry is filed
-        under the surface that asked for it rather than a bare thread's default
-        -- the same trap `_compose._bound` documents. A failure is logged and
-        otherwise dropped: the stale entry stays, and the next request past the
-        grace is the one that reports it.
+        A failure is logged and otherwise dropped: the stale entry stays, and
+        the next request past the grace is the one that reports it.
         """
-        context = contextvars.copy_context()
 
         def _run() -> None:
             try:
-                context.run(self._produce, key, produce)
+                self._produce(key, produce)
             except Exception:  # a thread has nobody to raise to
                 logger.warning("background refresh of %r failed", key, exc_info=True)
 

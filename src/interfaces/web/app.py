@@ -39,12 +39,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from src.interfaces import telemetry
 from src.interfaces.cloud.config import export_record_dsn
 from src.interfaces.cloud.store import workspace
 from src.interfaces.commands import (
     Command,
-    activity,
     arms,
     autoscale_check,
     cancel,
@@ -219,18 +217,13 @@ def _served(
 ) -> JSONResponse:
     """One memoised answer, with its failures mapped onto status codes.
 
-    The surface goes on around the memo, not inside it: a request served from the
-    cache did not run the command, and recording it as if it had would report a
-    `tasks` that takes 5 seconds as one that mostly takes microseconds.
-
     Failures are deliberately NOT cached: a repeated 503 costs a repeated cloud
     read, and the alternative keeps serving "Azure is down" for the whole TTL
     after `az login` has fixed it.
     """
-    with telemetry.surface("console"):
-        payload, failure = attempt(
-            lambda: cache.get(key, produce, serve_stale_for=serve_stale_for, force=force)
-        )
+    payload, failure = attempt(
+        lambda: cache.get(key, produce, serve_stale_for=serve_stale_for, force=force)
+    )
     if failure is not None:
         return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
     return PayloadResponse(payload)
@@ -241,7 +234,7 @@ def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
 
     ``cache`` and ``command`` are POSITIONAL-ONLY and the ``/`` is load-bearing:
     everything after it is a command's own flags, and a command is free to have one
-    called `command` -- `activity --command tasks` does. Without the slash that
+    called `command`. Without the slash that
     argument binds here instead, several frames from anything the reader was
     thinking about.
 
@@ -346,13 +339,6 @@ def create_app() -> FastAPI:
     @app.get("/api/configs", response_model=contract.Configs, responses=ERRORS)
     def _configs() -> JSONResponse:
         return answer(cache, configs.COMMAND)
-
-    # Local, so it costs nothing and is memoised only to keep a shared tab from
-    # re-reading the log every poll. It is also the one endpoint whose answer
-    # this server's own requests keep changing.
-    @app.get("/api/activity", response_model=contract.Activity, responses=ERRORS)
-    def _activity(days: float = 7.0, limit: int = 20) -> JSONResponse:
-        return answer(cache, activity.COMMAND, days=days, limit=limit)
 
     @app.get("/api/autoscale", response_model=contract.Autoscale, responses=ERRORS)
     def _autoscale() -> JSONResponse:

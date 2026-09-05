@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.interfaces import run_names, telemetry
+from src.interfaces import run_names
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
 
@@ -98,31 +98,6 @@ class Command:
             {action.dest for action in actions if action.required},
         )
 
-    def execute(self, args: argparse.Namespace) -> Payload:
-        """Run this command's handler. **The seam every surface goes through.**
-
-        `invoke` is not that seam and cannot be: the command line builds its Namespace
-        by parsing argv and calls the handler directly, so anything wrapped around
-        `invoke` would see the console and miss the CLI. Kept separate from :attr:`run`
-        so the handler stays an ordinary function a test can call; a guard test fails if
-        a surface calls `run` directly and slips past this.
-
-        Preparing the observation is itself guarded, which is not belt and braces:
-        `asked_for` evaluates ``value != default`` on caller-supplied values, and one
-        whose ``__ne__`` returns a non-bool -- a numpy array, and `invoke` accepts
-        anything -- would raise out of here and fail a working command.
-        """
-        return self._observed(args) if telemetry.enabled() else self.run(args)
-
-    def _observed(self, args: argparse.Namespace) -> Payload:
-        """:meth:`execute`, with the observation attached."""
-        try:
-            asked = telemetry.asked_for(self.add_arguments, args, self.declared()[0])
-        except Exception:  # noqa: BLE001 — never the reason a command fails
-            asked = {}
-        with telemetry.observe(self.name, asked):
-            return self.run(args)
-
     def arguments(self, **overrides: Any) -> argparse.Namespace:
         """Build this command's arguments without a command line.
 
@@ -150,7 +125,7 @@ class Command:
         raises :class:`CommandError` where the command line would have exited,
         so a caller polling several commands survives one of them failing.
         """
-        return self.execute(self.arguments(**overrides))
+        return self.run(self.arguments(**overrides))
 
     def invoke_as[T](self, model: type[T], **overrides: Any) -> T:
         """:meth:`invoke`, narrowed to the payload the caller expects.

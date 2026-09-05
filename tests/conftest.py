@@ -1,6 +1,6 @@
 """Suite-wide fixtures.
 
-The card-abstraction guard, the telemetry kill switch, and the hypothesis
+The card-abstraction guard and the hypothesis
 profile.
 
 The abstraction guard is the older of the two. A test that trains for real
@@ -15,7 +15,6 @@ from __future__ import annotations
 import pytest
 from hypothesis import HealthCheck, settings
 
-from src.interfaces import telemetry
 from tests.memory_record import MemoryRecord
 
 # `derandomize=True` is the whole reason property tests are allowed in here.
@@ -35,32 +34,6 @@ settings.register_profile(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 settings.load_profile("suite")
-
-
-@pytest.fixture(autouse=True, scope="session")
-def _no_telemetry_from_the_suite():
-    """The suite records nothing, and this must be autouse.
-
-    `Command.execute` writes one row per invocation into the developer's real
-    cache -- `cache_root()` reads the environment, and nothing here redirects
-    it. A full run calls commands hundreds of times, so without this every
-    `pytest` would append hundreds of rows describing commands that ran against
-    fakes and measured nothing. `activity` would then report a p95 for `tasks`
-    derived mostly from a stub returning a dict.
-
-    Session-scoped and set in the environment rather than monkeypatched,
-    because `-n auto` runs 12 worker PROCESSES and a patched module attribute
-    would only silence the one that applied it.
-    """
-    import os
-
-    previous = os.environ.get(telemetry.ENV_VAR)
-    os.environ[telemetry.ENV_VAR] = "0"
-    yield
-    if previous is None:
-        del os.environ[telemetry.ENV_VAR]
-    else:
-        os.environ[telemetry.ENV_VAR] = previous
 
 
 @pytest.fixture

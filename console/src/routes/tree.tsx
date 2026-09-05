@@ -82,7 +82,7 @@ const routes = [
     path: "/operate",
     component: Operate,
     validateSearch: z.object({
-      tab: z.enum(["dispatch", "share", "cost", "activity"]).default("dispatch"),
+      tab: z.enum(["dispatch", "share", "cost"]).default("dispatch"),
     }),
   }),
 ];
@@ -102,7 +102,6 @@ const MOVED: Record<string, { to: string; search?: Record<string, unknown> }> = 
   "/dispatch": { to: "/operate", search: { tab: "dispatch" } },
   "/share": { to: "/operate", search: { tab: "share" } },
   "/cost": { to: "/operate", search: { tab: "cost" } },
-  "/activity": { to: "/operate", search: { tab: "activity" } },
   "/evals": { to: "/runs" },
 };
 

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -70,27 +69,6 @@ def _answer(part: Part) -> dict[str, Any]:
     }
 
 
-def _bound(part: Part) -> Callable[[], dict[str, Any]]:
-    """:func:`_answer`, bound to a COPY of the CALLING thread's context.
-
-    **The copy has to be taken here, on the caller.** Taking it inside the
-    worker would copy the worker's own context -- the fresh one that already
-    lost everything -- so it would look like a fix and change nothing.
-    `telemetry._SURFACE` is a ContextVar, and a raw ``pool.submit`` starts its
-    task with a fresh context in which it reverts to its default, filing every
-    panel's cost under the wrong surface.
-
-    A copy PER SUBMIT, not one shared copy: :meth:`Context.run` is not
-    re-entrant, so handing the same context to concurrent threads raises.
-
-    A zero-argument closure rather than ``pool.submit(context.run, _answer,
-    part)`` because `Context.run` is typed with a ParamSpec that does not
-    compose through `submit`, and the checker is right to say so.
-    """
-    context = copy_context()
-    return lambda: context.run(_answer, part)
-
-
 def fan_out(parts: Sequence[Part]) -> dict[str, dict[str, Any]]:
     """Answer every part concurrently, keyed by :attr:`Part.key`.
 
@@ -109,7 +87,7 @@ def fan_out(parts: Sequence[Part]) -> dict[str, dict[str, Any]]:
     if not parts:
         return {}
     with ThreadPoolExecutor(max_workers=len(parts)) as pool:
-        futures = {part.key: pool.submit(_bound(part)) for part in parts}
+        futures = {part.key: pool.submit(_answer, part) for part in parts}
         return {key: future.result() for key, future in futures.items()}
 
 

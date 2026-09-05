@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
-from src.interfaces import telemetry
 from src.interfaces.commands._base import Command
 from src.interfaces.commands._compose import Part, compose, fan_out, payloads
 from src.interfaces.errors import CommandError
@@ -116,29 +115,6 @@ class TestTheFanOut:
 
         answered = fan_out([_part(str(i), _command(str(i), _waits)) for i in range(3)])
         assert [answered[str(i)]["payload"] for i in range(3)] == [{"op": "waited"}] * 3
-
-    def test_each_part_keeps_the_calling_thread_s_context(self):
-        """The trap `d67411f` paid for once.
-
-        `telemetry._SURFACE` is a ContextVar, and a raw `pool.submit` starts its
-        task with a fresh context in which it reverts to its default -- so the
-        parts carrying the real Azure cost get filed `unknown` while the thin
-        wrapper around them is filed as the surface. Nothing else in this file
-        notices; the payloads are identical either way.
-        """
-        seen: list[str] = []
-
-        def _reads_surface(_args):
-            # The ContextVar itself: there is no public accessor, and asserting
-            # on the telemetry LOG instead would pass on a fresh context too --
-            # the row is still written, just filed under the wrong surface.
-            seen.append(telemetry._SURFACE.get())
-            return {"op": "read"}
-
-        with telemetry.surface("console"):
-            fan_out([_part(str(i), _command(str(i), _reads_surface)) for i in range(3)])
-
-        assert seen == ["console"] * 3
 
 
 class TestCompose:
