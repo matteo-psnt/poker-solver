@@ -316,3 +316,47 @@ class TestDroppingTheShareCopy:
 
         assert payload.rungs_dropped == 2
         assert not (share / "archive" / "run-a" / "static-999.zarr").exists()
+
+
+class TestASpaceJoinedRunsValueStillFilters:
+    """MEASURED: a shell that did not word-split `--runs $ids` handed the node
+    ONE space-joined value. It matched no run, so 29 dispatched tasks each
+    considered 0 runs, deleted nothing, and exited 0 -- a whole fan-out that
+    reported success and did not happen.
+    """
+
+    def test_one_joined_value_selects_every_run_it_names(self, share, monkeypatch):
+        (share / "archive" / "run-b").mkdir()
+        import src.shared.cloudtask.node.blobstore as blobstore
+
+        monkeypatch.setattr(blobstore, "exists", lambda *_a: False)
+        payload = migrate_checkpoints.run(_args(share, verify=True, runs=["run-a run-b"]))
+
+        assert payload.runs_considered == 2, "both ids in the joined value must be seen"
+
+    def test_a_normal_list_is_unaffected(self, share, monkeypatch):
+        import src.shared.cloudtask.node.blobstore as blobstore
+
+        monkeypatch.setattr(blobstore, "exists", lambda *_a: False)
+        payload = migrate_checkpoints.run(_args(share, verify=True, runs=["run-a"]))
+
+        assert payload.runs_considered == 1
+
+
+class TestDeletingARungIsParallel:
+    def test_every_file_under_the_snapshot_goes(self, share, monkeypatch):
+        """`shutil.rmtree` is serial and SMB is latency-bound: 169 deletes/sec
+        measured, which is 443 rungs in a four-hour task. Whatever the pool,
+        the tree must be gone."""
+        nested = share / "archive" / "run-a" / "static-100.zarr" / "deep" / "nested"
+        nested.mkdir(parents=True, exist_ok=True)
+        for i in range(25):
+            (nested / str(i)).write_text("chunk")
+        import src.shared.cloudtask.node.blobstore as blobstore
+
+        monkeypatch.setattr(blobstore, "exists", lambda *_a: True)
+        monkeypatch.setattr(blobstore, "read_head", lambda *_a: _header(b'{"arrays": [{"n": 1}]}'))
+
+        migrate_checkpoints.run(_args(share, drop_share=True, apply=True))
+
+        assert not (share / "archive" / "run-a" / "static-100.zarr").exists()
