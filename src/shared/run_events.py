@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 RUN_LOG_FILENAME = "run.jsonl"
-ARTIFACT = records.REGISTRY[RUN_LOG_FILENAME]
 
 # The vocabulary. Adding to a run's record means adding to this list -- not a
 # file, a writer and a reader.
@@ -104,11 +103,6 @@ def rung_uri(run_id: str, iteration: int) -> str:
 
 def log_path(run_dir: str | os.PathLike[str]) -> Path:
     return Path(run_dir) / RUN_LOG_FILENAME
-
-
-def append(run_dir: str | os.PathLike[str], event: str, **fields: Any) -> None:
-    """Append one event. Raises on IO failure -- callers choose their policy."""
-    records.append_log(log_path(run_dir), {EVENT_KEY: event, **fields}, ARTIFACT)
 
 
 def read(run_dir: str | os.PathLike[str]) -> list[dict[str, Any]]:

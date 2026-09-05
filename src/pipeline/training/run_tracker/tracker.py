@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.pipeline.training.run_tracker.metadata import RunMetadata
-from src.shared import records, run_events
+from src.shared import run_events
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -409,79 +409,3 @@ def has_run_record(run_dir: Path, source: RecordSource | None = None) -> bool:
     if source is not None and source.events(directory.name):
         return True
     return run_events.log_path(directory).exists() or (directory / ".run.json").exists()
-
-
-def migrate_run_log(run_dir: Path) -> bool:
-    """Convert a ``.run.json`` (+ ``progress.jsonl``) run into an event log.
-
-    Replays the snapshot as the events that would have produced it: ``created``
-    from the fields fixed at construction, a started/ended pair per recorded
-    attempt, a ``checkpoint`` per progress row, and a terminal ``status``. The
-    fold of that log is the state the snapshot held.
-
-    Non-destructive and idempotent -- the originals stay for an operator to
-    delete, and a directory that already has a log is left alone. Returns
-    whether anything was written.
-    """
-    directory = Path(run_dir)
-    if run_events.log_path(directory).exists():
-        return False
-    snapshot = records.read_snapshot(directory / ".run.json")
-    if snapshot is None:
-        return False
-
-    metadata = RunMetadata.from_dict(snapshot)
-    run_events.append(directory, run_events.CREATED, **metadata.creation_facts())
-    for attempt in metadata.attempts:
-        run_events.append(
-            directory,
-            run_events.ATTEMPT_STARTED,
-            ts=attempt.started_at,
-            index=attempt.index,
-            kind=attempt.kind,
-            start_iter=attempt.start_iter,
-            git_commit=attempt.git_commit,
-            git_dirty=attempt.git_dirty,
-            git_branch=attempt.git_branch,
-            code_snapshot=attempt.code_snapshot,
-        )
-        if attempt.ended_at is not None or attempt.status != "running":
-            run_events.append(
-                directory,
-                run_events.ATTEMPT_ENDED,
-                ts=attempt.ended_at,
-                index=attempt.index,
-                end_iter=attempt.end_iter,
-                runtime_seconds=attempt.runtime_seconds,
-                status=attempt.status,
-            )
-
-    # The per-checkpoint series, folded in from the file it used to live in.
-    for row in records.read_log(directory / "progress.jsonl"):
-        run_events.append(
-            directory,
-            run_events.CHECKPOINT,
-            **{k: v for k, v in row.items() if k != "schema_version"},
-        )
-
-    run_events.append(
-        directory,
-        run_events.PROGRESS,
-        ts=metadata.started_at,
-        iterations=metadata.iterations,
-        num_infosets=metadata.num_infosets,
-        storage_capacity=metadata.storage_capacity,
-        attempt_runtime_seconds=metadata.current_attempt.runtime_seconds
-        if metadata.attempts
-        else 0.0,
-    )
-    if metadata.status != "running":
-        run_events.append(
-            directory,
-            run_events.STATUS,
-            ts=metadata.completed_at or metadata.started_at,
-            status=metadata.status,
-            completed_at=metadata.completed_at,
-            iterations=metadata.iterations,
-        )
-    return True

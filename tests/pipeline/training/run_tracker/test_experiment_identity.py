@@ -9,6 +9,7 @@ from src.core.actions.action_model import ActionModel
 from src.pipeline.training.run_tracker import ExperimentTag, RunMetadata, RunTracker
 from src.shared import run_events
 from src.shared.config import Config
+from tests.legacy_runs import append_event
 
 
 def _action_config_hash(config: Config | None = None) -> str:
@@ -77,7 +78,7 @@ class TestMetadataRoundTrip:
             arm="control",
             parent_run_id="run-base",
         )
-        run_events.append(run_dir, run_events.CREATED, **metadata.creation_facts())
+        append_event(run_dir, run_events.CREATED, **metadata.creation_facts())
 
         loaded = RunMetadata.load(run_dir)
         assert loaded.experiment_id == "exp-1"
@@ -92,7 +93,7 @@ class TestMetadataRoundTrip:
         metadata = RunMetadata.new(
             "run-x", "test", config, action_config_hash=_action_config_hash(config)
         )
-        run_events.append(run_dir, run_events.CREATED, **metadata.creation_facts())
+        append_event(run_dir, run_events.CREATED, **metadata.creation_facts())
 
         loaded = RunMetadata.load(run_dir)
         assert loaded.experiment_id is None

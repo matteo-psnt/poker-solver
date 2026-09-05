@@ -19,6 +19,7 @@ from src.interfaces.commands import reconcile_runs
 from src.pipeline.training.run_tracker.tracker import RunTracker
 from src.shared import run_events
 from src.shared.config import Config
+from tests.legacy_runs import append_event
 
 
 class _Task:
@@ -195,7 +196,7 @@ class TestAZeroedLogIsNotARunningRun:
         identity, so there is nothing a terminal status would be about."""
         directory = tmp_path / "run-a"
         directory.mkdir()
-        run_events.append(directory, run_events.PROGRESS, iteration=10)
+        append_event(directory, run_events.PROGRESS, iteration=10)
         assert _plan(monkeypatch, tmp_path, record, [_Task("run-a", "killed")]).closures == []
 
 
