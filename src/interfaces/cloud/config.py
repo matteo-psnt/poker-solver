@@ -7,9 +7,13 @@ holds the durable share in its own resource group, so ``just destroy`` can tear
 down compute without being able to reach the experiment record.
 
 ``terraform output -json`` is shelled rather than reading a generated outputs
-file. The store's ``access_key`` is marked ``sensitive``; materialising it into
-a second on-disk artifact would spread a secret to buy nothing -- the state
-file already has it, and it is already gitignored.
+file, and the answer is kept under the cache root for an hour. The shell-out
+is 3 s against a remote state: terraform starts, authenticates to the backend
+and downloads the state, all to read a dozen strings that change only at an
+apply -- and it was paid twice by any command that reconciles with Batch. The
+cached file holds the store's ``access_key`` and the record DSN, so it is
+written owner-only; the `just` apply recipes delete it, since an apply is the
+one event that changes the answer.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from src.interfaces.errors import CommandError
+from src.shared import cache
 
 INFRA_DIR = Path("infra")
 STORE_DIR = Path("infra/store")
@@ -36,6 +41,14 @@ RECORD_DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 
 # Guards the cold-cache computation in `_outputs`, not the cache itself.
 _OUTPUTS_LOCK = threading.Lock()
+
+# The on-disk copy of each state's outputs, keyed by the root's relative path
+# so every worktree reads the same file: the states are remote and one per
+# root, so the answer is the same from any checkout. An hour bounds how long a
+# direct `terraform apply` (one that bypassed `just`) can leave a stale
+# coordinate in play; a stale one fails loudly, as a refused connection.
+OUTPUTS_CACHE = "terraform-outputs"
+OUTPUTS_TTL_SECONDS = 3600.0
 
 _TERRAFORM_MISSING = (
     "terraform is not on PATH. The cloud commands read the deployed pool and "
@@ -74,8 +87,18 @@ def _outputs(chdir: str) -> dict[str, Any]:
 
 @functools.cache
 def _read_outputs(chdir: str) -> dict[str, Any]:
-    """The uncached read. Keyed by ``str`` rather than ``Path`` so the cache is
-    hashable and stable."""
+    """The per-process read: the on-disk copy if it is fresh, else terraform.
+    Keyed by ``str`` rather than ``Path`` so the cache is hashable and stable."""
+    stored = cache.cached_json(OUTPUTS_CACHE, chdir, OUTPUTS_TTL_SECONDS)
+    if stored is not None:
+        return stored
+    parsed = _terraform_output(chdir)
+    cache.store_json(OUTPUTS_CACHE, chdir, parsed)
+    return parsed
+
+
+def _terraform_output(chdir: str) -> dict[str, Any]:
+    """The shell-out itself."""
     if shutil.which("terraform") is None:
         raise CloudConfigError(_TERRAFORM_MISSING)
     try:

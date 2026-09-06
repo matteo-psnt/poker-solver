@@ -34,6 +34,12 @@ plan:
     {{tf}} init -input=false
     {{tf}} plan
 
+# The commands cache `terraform output` for an hour (src/interfaces/cloud/
+# config.py: 3 s per read against the remote state). An apply is the one event
+# that changes the answer, so every apply recipe ends here.
+_forget-coordinates:
+    rm -rf "${POKER_SOLVER_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/poker-solver}/terraform-outputs"
+
 # The `create` recipes below are `-auto-approve`. That MOVES the review step
 # rather than removing it: `just plan` and `serve-plan` are where a change gets
 # read, and they are read properly because reading is all they do. The prompt was
@@ -48,12 +54,14 @@ plan:
 store-create:
     {{tfs}} init -input=false
     {{tfs}} apply -input=false -auto-approve
+    just _forget-coordinates
 
 # Create/update the Batch account, pool and guardrails. Safe to re-run.
 # Requires store-create first: the pool mounts the share by name.
 create:
     {{tf}} init -input=false
     {{tf}} apply -input=false -auto-approve
+    just _forget-coordinates
     @echo ""
     @echo "  next:  uv run poker-solver submit-precompute --config quick_test && just submit quick_test 3000"
 
@@ -61,6 +69,7 @@ create:
 # Prompts, on purpose -- see the note above `store-create`.
 destroy:
     {{tf}} destroy
+    just _forget-coordinates
 
 # Create the box that serves a trained run for reading. Its own state, so
 # `destroy` above cannot reach it -- and it is NOT part of the pool, because the
@@ -68,6 +77,7 @@ destroy:
 serve-create:
     {{tfv}} init -input=false
     {{tfv}} apply -input=false -auto-approve
+    just _forget-coordinates
     @echo ""
     @echo "  next:  just serve-ssh to point it at a run, then eval \"$(just serve-env)\""
 

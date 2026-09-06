@@ -17,10 +17,11 @@ from typing import Any
 import pytest
 
 from src.interfaces.cloud import config as cloud_config
+from src.shared import cache
 
 
 @pytest.fixture
-def counting_terraform(monkeypatch):
+def counting_terraform(monkeypatch, tmp_path):
     """Stand in for `terraform output -json`, counting invocations.
 
     The stub sleeps: without it the first call can finish before the others
@@ -35,6 +36,7 @@ def counting_terraform(monkeypatch):
         threading.Event().wait(0.05)
         return subprocess.CompletedProcess(command, 0, stdout='{"pool_id": {"value": "p"}}')
 
+    monkeypatch.setenv(cache.ENV_OVERRIDE, str(tmp_path))
     monkeypatch.setattr(cloud_config.shutil, "which", lambda _name: "/usr/bin/terraform")
     monkeypatch.setattr(cloud_config.subprocess, "run", _run)
     cloud_config._read_outputs.cache_clear()
