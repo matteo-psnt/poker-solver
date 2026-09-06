@@ -171,6 +171,43 @@ def eval_records(engine: Any, run_id: str | None = None) -> list[dict[str, Any]]
         return [row[0] for row in connection.execute(_EVALS_FOR_RUN, {"run_id": run_id})]
 
 
+# The listing's filters are COLUMNS, so the page is cut here and the document
+# ships only for the rows shown: `ledger` was pulling every eval -- 7.5 MB, 3 s
+# on the wire from the laptop -- to print 25. `experiment_id` is the one filter
+# the schema does not index; it stays an expression on the document rather
+# than becoming a column for one reader. The window count is what the filters
+# matched before the page, in the same statement and so the same snapshot.
+# NULLIF turns a limit of 0 into no limit, which is what `--limit 0` means.
+_LEDGER_PAGE = sa.text("""
+    SELECT payload, count(*) OVER () AS matched
+      FROM evals
+     WHERE (CAST(:run_id AS text) IS NULL OR run_id = :run_id)
+       AND (CAST(:method AS text) IS NULL OR method = :method)
+       AND (CAST(:experiment_id AS text) IS NULL OR payload->>'experiment_id' = :experiment_id)
+     ORDER BY recorded_at DESC, eval_id DESC
+     LIMIT NULLIF(CAST(:limit AS integer), 0)
+""")
+
+
+def ledger_page(
+    engine: Any,
+    *,
+    run_id: str | None,
+    method: str | None,
+    experiment_id: str | None,
+    limit: int,
+) -> tuple[int, list[dict[str, Any]]]:
+    """The newest `limit` matching evaluations, oldest first, and how many matched."""
+    with _read(engine) as connection:
+        rows = connection.execute(
+            _LEDGER_PAGE,
+            {"run_id": run_id, "method": method, "experiment_id": experiment_id, "limit": limit},
+        ).all()
+    if not rows:
+        return 0, []
+    return int(rows[0][1]), [row[0] for row in reversed(rows)]
+
+
 _SCORED = sa.text("""
     SELECT run_id, checkpoint_iteration FROM evals WHERE checkpoint_iteration IS NOT NULL
 """)

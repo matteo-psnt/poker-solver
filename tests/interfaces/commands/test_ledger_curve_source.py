@@ -91,3 +91,49 @@ def test_arms_reads_the_database_when_one_is_configured(monkeypatch):
     monkeypatch.setattr(arms, "eval_index_rows", lambda _e: [row])
     payload = arms.run(argparse.Namespace(experiment="e1", control=None))
     assert [a for tier in payload.result.tiers for a in tier.arms] == ["a1"]
+
+
+def test_ledger_cuts_its_page_in_sql(monkeypatch):
+    """It pulled every eval document -- 7.5 MB, 3 s on the wire -- to print
+    25. The filters are columns, so the page is cut on the server."""
+    from src.interfaces.commands import ledger
+
+    asked: list[dict[str, Any]] = []
+
+    def _page(_engine, **filters):
+        asked.append(filters)
+        return 7, [DOCUMENT]
+
+    monkeypatch.setattr(ledger.connect, "engine_from_environment", lambda: object())
+    monkeypatch.setattr(ledger.queries, "ledger_page", _page)
+    payload = ledger.run(
+        argparse.Namespace(run="run-a", experiment="e1", method="exact_br", since=None, limit=25)
+    )
+    assert asked == [{"run_id": "run-a", "method": "exact_br", "experiment_id": "e1", "limit": 25}]
+    assert payload.matched == 7
+    assert [row.run_id for row in payload.rows] == ["run-a"]
+
+
+def test_ledger_since_pages_in_python(monkeypatch):
+    """`--since` compares the instants the document's own timestamp yields --
+    naive legacy values mean LOCAL time -- so it cannot be the column, and the
+    whole filtered set comes over for it."""
+    from src.interfaces.commands import ledger
+
+    asked: list[dict[str, Any]] = []
+    older = {**DOCUMENT, "timestamp": "2026-08-01T00:00:00+00:00"}
+
+    def _page(_engine, **filters):
+        asked.append(filters)
+        return 2, [older, DOCUMENT]
+
+    monkeypatch.setattr(ledger.connect, "engine_from_environment", lambda: object())
+    monkeypatch.setattr(ledger.queries, "ledger_page", _page)
+    payload = ledger.run(
+        argparse.Namespace(
+            run=None, experiment=None, method=None, since="2026-08-15T00:00:00+00:00", limit=25
+        )
+    )
+    assert asked[0]["limit"] == 0
+    assert payload.matched == 1
+    assert [row.model_dump()["timestamp"] for row in payload.rows] == ["2026-09-01T00:00:00+00:00"]
