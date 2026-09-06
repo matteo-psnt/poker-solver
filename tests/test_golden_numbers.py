@@ -173,9 +173,10 @@ def test_a_checkpoint_round_trip_does_not_move_the_score():
     """The ruler must survive PERSISTENCE, not only live in memory.
 
     Every other golden number here scores a solver that was never written to
-    disk, so a change to the checkpoint format or its row layout moves every
-    recorded score while this file stays green. Scored under the production
-    tier's knobs (conditional chance + thresholding), which nothing else pins.
+    disk, so a change to the checkpoint format or its row layout would move every
+    recorded score while this file stayed green. Closes that COVERAGE gap -- no
+    regression is known to have used it. Also the only guard on conditional
+    chance and thresholding, the knobs the quoted numbers are made of.
     """
     scoring = PublicBRConfig(
         num_flops=2,
