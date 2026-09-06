@@ -113,11 +113,10 @@ PAYLOADS: dict[str, Any] = {
         no_evidence=["run-production-025433-1095"],
     ),
     "migrate-checkpoints": MigratedPayload(
-        runs_considered=314,
-        rungs_uploaded=1177,
-        rungs_already_there=0,
-        bytes_uploaded=892_000_000_000,
-        failures=["run-a/static-100.zarr: no completion marker"],
+        runs_considered=343,
+        rungs_present=1269,
+        phantom=["run-a/static-100.zarr"],
+        failures=["run-a/static-200.zarr: HTTPError: 503"],
     ),
     "submit-migrate": SubmitMigratePayload(
         code_snapshot="code-20260903_230001",

@@ -142,7 +142,7 @@ GROUPS: tuple[CommandGroup, ...] = (
         (
             CommandRef(
                 "migrate-checkpoints",
-                "Upload published rungs from the share into the checkpoint container.",
+                "Check that the container holds every rung the manifests claim.",
             ),
             CommandRef(
                 "train-static",

@@ -14,7 +14,6 @@ import json
 
 import numpy as np
 import pytest
-import zarr
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
@@ -412,10 +411,21 @@ def test_mixing_runs_that_never_recorded_an_abstraction_is_allowed(tree, tmp_pat
 
 
 def _write_legacy_zarr(path, arrays, attrs):
-    """A pre-`.ckpt.zst` snapshot, as every published rung still is."""
+    """A rung in the pre-migration ARRAY ORDER, in the format that replaced it.
 
-    root = zarr.open(zarr.DirectoryStore(str(path)), mode="w")
-    for name, array in arrays.items():
-        root.create_dataset(name, data=np.asarray(array), dtype=array.dtype)
-    for key, value in attrs.items():
-        root.attrs[key] = value
+    The zarr directory is gone from every store, but node-major order is not:
+    the migration re-encoded those rungs byte-for-byte, so the container is full
+    of `.ckpt.zst` objects whose arrays are still scattered the old way. The
+    translation this exercises is what makes them loadable.
+
+    Named for the manifest's spelling, written under the object's: a legacy
+    manifest still says `static-5.zarr` and `records.object_name` is what turns
+    that into the file beside it.
+    """
+    from src.shared import records
+
+    snapshot_format.write_snapshot(
+        path.with_name(records.object_name(path.name)),
+        {name: np.asarray(array) for name, array in arrays.items()},
+        dict(attrs),
+    )
