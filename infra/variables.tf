@@ -289,6 +289,9 @@ variable "allowed_locations" {
   type        = list(string)
   default = [
     "swedencentral",
+    # The record database only (infra/store): it sits with its readers, not
+    # with the boxes. Nothing else may land here.
+    "canadacentral",
     "northeurope",
     "uksouth",
     "germanywestcentral",

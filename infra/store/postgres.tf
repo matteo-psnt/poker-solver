@@ -26,11 +26,12 @@ resource "random_password" "postgres" {
   override_special = "-_=+"
 }
 
-resource "azurerm_postgresql_flexible_server" "record" {
+resource "azurerm_postgresql_flexible_server" "record_ca" {
   name                = var.postgres_server_name
   resource_group_name = azurerm_resource_group.store.name
-  location            = azurerm_resource_group.store.location
-  version             = "16"
+  # Not the resource group's region: see `postgres_location`.
+  location = var.postgres_location
+  version  = "16"
 
   administrator_login    = var.postgres_admin_user
   administrator_password = random_password.postgres.result
@@ -95,9 +96,9 @@ resource "azurerm_postgresql_flexible_server" "record" {
 # TLS is enforced by default on Flexible Server and this makes it explicit, so a
 # future `terraform plan` shows an attempt to weaken it rather than silently
 # accepting one.
-resource "azurerm_postgresql_flexible_server_configuration" "require_tls" {
+resource "azurerm_postgresql_flexible_server_configuration" "require_tls_ca" {
   name      = "require_secure_transport"
-  server_id = azurerm_postgresql_flexible_server.record.id
+  server_id = azurerm_postgresql_flexible_server.record_ca.id
   value     = "ON"
 }
 
@@ -110,6 +111,79 @@ resource "azurerm_postgresql_flexible_server_configuration" "require_tls" {
 # and the data is TLS plus a 32-character generated password. The tighter
 # version is VNet integration, which costs a full pool recreation AND a new
 # server (see the one-way door above) -- so it is a migration, not a tweak.
+resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services_ca" {
+  name             = "allow-azure-services"
+  server_id        = azurerm_postgresql_flexible_server.record_ca.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0"
+}
+
+# The laptop, so the console and the CLI can read. A home ISP rotates this;
+# when `psql` starts timing out rather than refusing, this variable is why.
+resource "azurerm_postgresql_flexible_server_firewall_rule" "operator_ca" {
+  count            = var.operator_ip == null ? 0 : 1
+  name             = "allow-operator"
+  server_id        = azurerm_postgresql_flexible_server.record_ca.id
+  start_ip_address = var.operator_ip
+  end_ip_address   = var.operator_ip
+
+  # `poker-solver record-admit` rewrites the address in place whenever the ISP
+  # rotates it. Terraform creates the rule and then leaves the address alone,
+  # or every apply would put a stale one back.
+  lifecycle {
+    ignore_changes = [start_ip_address, end_ip_address]
+  }
+}
+
+resource "azurerm_postgresql_flexible_server_database" "record_ca" {
+  name      = var.postgres_database
+  server_id = azurerm_postgresql_flexible_server.record_ca.id
+  charset   = "UTF8"
+  collation = "en_US.utf8"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# --------------------------------------------------------------------------- #
+# THE SWEDEN SERVER, retired 2026-09-06 when the record moved to Canada Central
+# (docs/record-move.md). Still here, with its rules, because:
+#
+#   - a task dispatched before the move sealed THIS server's DSN and writes to
+#     it until it ends, so its firewall must stay open until the queue drains;
+#   - its 35-day point-in-time window is the only history older than the move.
+#
+# It keeps the address `record` so that no state was moved to retire it.
+# `ignore_changes = all`: nothing about it is managed again, only that it
+# exists. To delete it -- after the delta has been copied and a week of reading
+# the new server -- remove this section, drop `prevent_destroy`, apply, and
+# `moved { from = record_ca, to = record }` gives the live server its name back.
+# --------------------------------------------------------------------------- #
+
+resource "azurerm_postgresql_flexible_server" "record" {
+  name                   = "poker-solver-record"
+  resource_group_name    = azurerm_resource_group.store.name
+  location               = azurerm_resource_group.store.location
+  version                = "16"
+  administrator_login    = var.postgres_admin_user
+  administrator_password = random_password.postgres.result
+  sku_name               = "B_Standard_B2s"
+  storage_mb             = 32768
+  tags                   = local.tags
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = all
+  }
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "require_tls" {
+  name      = "require_secure_transport"
+  server_id = azurerm_postgresql_flexible_server.record.id
+  value     = "ON"
+}
+
 resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
   name             = "allow-azure-services"
   server_id        = azurerm_postgresql_flexible_server.record.id
@@ -117,8 +191,6 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services" {
   end_ip_address   = "0.0.0.0"
 }
 
-# The laptop, so the console and the CLI can read. A home ISP rotates this;
-# when `psql` starts timing out rather than refusing, this variable is why.
 resource "azurerm_postgresql_flexible_server_firewall_rule" "operator" {
   count            = var.operator_ip == null ? 0 : 1
   name             = "allow-operator"
@@ -126,9 +198,6 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "operator" {
   start_ip_address = var.operator_ip
   end_ip_address   = var.operator_ip
 
-  # `poker-solver record-admit` rewrites the address in place whenever the ISP
-  # rotates it. Terraform creates the rule and then leaves the address alone,
-  # or every apply would put a stale one back.
   lifecycle {
     ignore_changes = [start_ip_address, end_ip_address]
   }

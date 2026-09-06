@@ -32,11 +32,11 @@ output "code_container_name" {
 }
 
 output "postgres_host" {
-  value = azurerm_postgresql_flexible_server.record.fqdn
+  value = azurerm_postgresql_flexible_server.record_ca.fqdn
 }
 
 output "postgres_database" {
-  value = azurerm_postgresql_flexible_server_database.record.name
+  value = azurerm_postgresql_flexible_server_database.record_ca.name
 }
 
 # Sensitive so it never reaches a log or a plan diff. `terraform output -raw
@@ -47,8 +47,8 @@ output "postgres_dsn" {
     "postgresql://%s:%s@%s:5432/%s?sslmode=require",
     var.postgres_admin_user,
     urlencode(random_password.postgres.result),
-    azurerm_postgresql_flexible_server.record.fqdn,
-    azurerm_postgresql_flexible_server_database.record.name,
+    azurerm_postgresql_flexible_server.record_ca.fqdn,
+    azurerm_postgresql_flexible_server_database.record_ca.name,
   )
   sensitive = true
 }

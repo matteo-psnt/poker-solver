@@ -74,7 +74,9 @@ paths:
   on a node can remove a rung even by accident.
 - **`infra/store/` is a separate Terraform state** holding the durable share,
   so `just destroy` cannot reach the experiment record. Jobs and tasks are
-  created at runtime by Python, never in HCL.
+  created at runtime by Python, never in HCL. The share sits with the boxes
+  (Sweden Central); the record database sits with its readers, the laptop
+  (`postgres_location`, Canada Central) -- `docs/record-move.md`.
 - **Always spell it `terraform -chdir=<dir> …`, never `cd infra && terraform`.**
   The approved forms are per-directory (`-chdir=infra`, `-chdir=infra/serve`,
   `-chdir=infra/store`), so a `cd` form matches nothing and is refused — that
