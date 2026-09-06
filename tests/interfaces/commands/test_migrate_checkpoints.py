@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 
-import numpy as np
 import pytest
 
 from src.engine.solver.storage import snapshot_format
@@ -20,21 +19,19 @@ from src.interfaces.commands import migrate_checkpoints
 from src.shared import records
 from src.shared.cloudtask.node import archive
 
-ARRAYS = {"regrets": np.arange(64, dtype=np.float32), "visited": np.ones(16, dtype=np.uint8)}
-
 
 @pytest.fixture
 def share(tmp_path, monkeypatch):
-    """A share holding one marked ZARR rung -- what the migration converts."""
-    import zarr
+    """A share still holding one marked snapshot directory.
 
+    Its CONTENTS no longer matter: nothing reads a zarr rung, so what this
+    checks is that the directory is seen, classified, and reconciled against
+    the container by name.
+    """
     root = tmp_path / "share" / "archive" / "run-a"
     root.mkdir(parents=True)
-    group = zarr.open(zarr.DirectoryStore(str(root / "static-100.zarr")), mode="w")
-    for name, array in ARRAYS.items():
-        group.create_dataset(name, data=array, dtype=array.dtype)
-    group.attrs["iteration"] = 100
-    group.attrs["fingerprint"] = "cafe"
+    (root / "static-100.zarr" / "regrets").mkdir(parents=True)
+    (root / "static-100.zarr" / "regrets" / "0").write_text("chunk")
     (root / archive.marker_for("static-100.zarr")).write_text("")
     # The manifest is the CLAIM, and the sweep migrates what is claimed. A run
     # whose manifest names nothing has snapshots no reader can resolve, and
