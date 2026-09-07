@@ -114,12 +114,6 @@ class TestUntrainedIsNotUniform:
             assert len(entry.strategy) == len(grid.actions)
             assert sum(entry.strategy) == pytest.approx(1.0)
             assert all(p >= 0.0 for p in entry.strategy)
-
-    def test_reach_count_is_reported_for_trained_rows(self, blueprint, root):
-        grid = strategy_grid(blueprint, root)
-        trained = [e for e in grid.buckets.values() if e.trained]
-
-        assert any(e.reach_count > 0 for e in trained)
         assert grid.trained_buckets == len(trained)
 
 

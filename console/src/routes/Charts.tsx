@@ -571,23 +571,37 @@ function Actions({ summary, labels }: { summary: RangeSummary | null; labels: Ac
         })}
       </div>
       <div className="text-[11px] text-[var(--fg-faint)]">
-        over {summary.trained} combos
+        over {summary.trained.toLocaleString()} combos
         {/* Travels with the number it qualifies, never below the fold: a total
             over a fifth of the range is not the range's strategy. */}
-        {summary.untrained > 0 && `; ${summary.untrained} untrained and left out`}
+        {summary.untrained > 0 && `; ${summary.untrained.toLocaleString()} untrained and left out`}
       </div>
     </div>
   );
 }
 
-/** How much of this spot the solver actually learned. */
+/**
+ * How much of this spot the solver learned, and how finely it can answer.
+ *
+ * The resolution line is the one that stops a flat grid reading as a fault. The
+ * solver plays a BUCKET, so every combo sharing one carries an identical row:
+ * where 1,176 combos map to 44 buckets there are 44 possible answers on screen,
+ * and hands the abstraction cannot tell apart are drawn alike because they ARE
+ * alike to the strategy. Without the count that looks like a broken chart.
+ */
 function Coverage({
   grid,
 }: {
-  grid: { buckets: Record<string, unknown>; trained_buckets: number; blocked: number };
+  grid: {
+    buckets: Record<string, unknown>;
+    trained_buckets: number;
+    blocked: number;
+    combo_buckets: number[];
+  };
 }) {
   const total = Object.keys(grid.buckets).length;
   const fraction = total ? grid.trained_buckets / total : 0;
+  const live = grid.combo_buckets.length - grid.blocked;
   return (
     <div className="space-y-1.5 border-t border-[var(--border)] pt-2">
       <div className="flex justify-between gap-2">
@@ -608,12 +622,23 @@ function Coverage({
           style={{ width: `${fraction * 100}%` }}
         />
       </span>
+      {/* One string, not four expressions: split across nodes it is neither
+          readable in the DOM nor assertable in a test. */}
+      <p className="text-[11px] leading-snug text-[var(--fg-faint)]">{resolution(live, total)}</p>
       <div className="flex justify-between gap-2">
         <span className="text-[var(--fg-faint)]">blocked</span>
         <span className="tabular-nums text-[var(--fg-muted)]">{grid.blocked} combos</span>
       </div>
     </div>
   );
+}
+
+/** How many different answers this spot can possibly show, and why. */
+function resolution(live: number, buckets: number): string {
+  const combos = `${live.toLocaleString()} combos over ${buckets.toLocaleString()}`;
+  return buckets === 1
+    ? `${combos} bucket — every hand here shares one mix.`
+    : `${combos} buckets — at most ${buckets.toLocaleString()} different mixes on screen.`;
 }
 
 /**

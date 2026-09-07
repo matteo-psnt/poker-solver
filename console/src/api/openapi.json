@@ -541,12 +541,8 @@
         "type": "object"
       },
       "Bucket": {
-        "description": "One bucket's strategy at a spot.\n\n`strategy` is null exactly when `trained` is false: this server refuses to\nemit the uniform that an allocated-but-unvisited row would otherwise read\nas, and a client must be able to tell \"never visited\" from \"plays uniform\".",
+        "description": "One bucket's strategy at a spot.\n\n`strategy` is null exactly when `trained` is false: this server refuses to\nemit the uniform that an allocated-but-unvisited row would otherwise read\nas, and a client must be able to tell \"never visited\" from \"plays uniform\".\nThere is no visit count: it read 0 on every row a PCS run ever served.",
         "properties": {
-          "reach_count": {
-            "title": "Reach Count",
-            "type": "integer"
-          },
           "strategy": {
             "anyOf": [
               {
@@ -568,8 +564,7 @@
         },
         "required": [
           "trained",
-          "strategy",
-          "reach_count"
+          "strategy"
         ],
         "title": "Bucket",
         "type": "object"

@@ -82,8 +82,8 @@ const NODE = {
     blocked: 2,
     trained_buckets: 1,
     buckets: {
-      "0": { trained: true, strategy: [0.2, 0.5, 0.3], reach_count: 40 },
-      "1": { trained: false, strategy: null, reach_count: 0 },
+      "0": { trained: true, strategy: [0.2, 0.5, 0.3] },
+      "1": { trained: false, strategy: null },
     },
   },
   children: [
@@ -275,6 +275,38 @@ describe("the chart, drawn", () => {
     await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
     // `r6` at a big blind of 2, the same words the play table's buttons use.
     expect(screen.getByText("raise to 3bb")).toBeTruthy();
+  });
+
+  it("says how finely the spot can be answered at all", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("trained buckets")).toBeTruthy());
+    // 6 combos in the fixture, 2 blocked, 2 buckets. Without this line a grid
+    // where every hand looks alike reads as a broken chart rather than as an
+    // abstraction that cannot tell those hands apart.
+    expect(screen.getByText(/4 combos over 2 buckets/)).toBeTruthy();
+    expect(screen.getByText(/at most 2 different mixes/)).toBeTruthy();
+  });
+
+  it("says it plainly when the abstraction has collapsed the spot entirely", async () => {
+    // One bucket is the case this line exists for -- every hand on screen is
+    // drawn alike because the solver cannot tell any of them apart. It is also
+    // the case that read "1 buckets ... 1 different mixes".
+    node = () =>
+      new Response(
+        JSON.stringify({
+          ...NODE,
+          grid: {
+            ...NODE.grid,
+            combo_buckets: [0, 0, 0, 0, -1, -1],
+            trained_buckets: 1,
+            buckets: { "0": { trained: true, strategy: [0.2, 0.5, 0.3] } },
+          },
+        }),
+        { status: 200 },
+      );
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("trained buckets")).toBeTruthy());
+    expect(screen.getByText(/over 1 bucket — every hand here shares one mix/)).toBeTruthy();
   });
 
   it("reports how much of the spot was learned", async () => {

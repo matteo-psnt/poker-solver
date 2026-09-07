@@ -24,6 +24,17 @@ a confident-looking strategy the solver never learned. ``TreePolicySource``
 already refuses that (it returns ``None`` for an unvisited row), and this module
 carries the refusal outward as ``trained=False`` with no strategy at all, rather
 than substituting the uniform that a caller would have no way to recognise.
+
+Visited, never how MANY times
+-----------------------------
+``trained`` is a boolean because a per-row visit count is not a thing a reader
+can be told. ``reach_counts`` is written only by the scalar MCCFR walk -- the
+PCS trainer every production run uses never touches it -- so it read 0 on every
+row of every served blueprint while claiming to say how much training stood
+behind that row. Even where it IS written it counts only the traverser's own
+nodes and omits the opponent's, understating by more than half, which is why
+`StaticArrayStorage` marks coverage from ``visited`` instead. Coverage is the
+diagnostic; a per-row count is not available and is not asked for here.
 """
 
 from __future__ import annotations
@@ -54,15 +65,13 @@ class BucketStrategy:
 
     ``strategy`` is ``None`` exactly when ``trained`` is false, so there is no
     representable state in which a caller reads a strategy the solver never
-    learned. ``reach_count`` is how many times training visited this infoset --
-    the number to weigh a row by, and small enough on most rows to be the real
-    story about a blueprint.
+    learned. ``trained`` is the only confidence this reader can honestly
+    offer -- see the module docstring on why a visit count is not.
     """
 
     bucket: int
     trained: bool
     strategy: tuple[float, ...] | None
-    reach_count: int
 
 
 @dataclass(frozen=True)
@@ -168,17 +177,16 @@ def _read_bucket(
     """
     infoset = blueprint.policy_source.infoset_at(state, bucket)
     if infoset is None:
-        return BucketStrategy(bucket=bucket, trained=False, strategy=None, reach_count=0)
+        return BucketStrategy(bucket=bucket, trained=False, strategy=None)
 
     distribution = blueprint_action_distribution(
         infoset, state, blueprint.rules, legal, use_average=use_average
     )
     if distribution is None:
-        return BucketStrategy(bucket=bucket, trained=False, strategy=None, reach_count=0)
+        return BucketStrategy(bucket=bucket, trained=False, strategy=None)
 
     return BucketStrategy(
         bucket=bucket,
         trained=True,
         strategy=tuple(float(distribution.get(action, 0.0)) for action in legal),
-        reach_count=int(infoset.reach_count),
     )

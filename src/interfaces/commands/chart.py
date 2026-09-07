@@ -9,6 +9,10 @@ Cells show aggression as a percentage, and the legend counts what was never
 trained: an untrained class is left blank rather than shown as uniform, because a
 uniform row looks exactly like a deliberate mixed strategy and is not one.
 
+Trained or blank is the only confidence here, and deliberately so:
+:mod:`src.pipeline.blueprint.grid` explains why a per-class visit count is not
+something a reader of a served blueprint can be told.
+
 THIS IS THE BLUEPRINT, NOT NECESSARILY WHAT PLAYS. The rows come straight out of
 storage, and `HUResolver` has no street gate -- armed, it resolves the preflop
 root too and can return something the chart does not show. So a chart describes
@@ -48,11 +52,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Preflop line to chart. Empty is the opening spot; 'c' is the big "
         "blind's option behind a limp; a raise token is the spot facing it.",
     )
-    parser.add_argument(
-        "--counts",
-        action="store_true",
-        help="Show training visits per class instead of aggression.",
-    )
 
 
 class ChartPayload(BaseModel):
@@ -65,9 +64,6 @@ class ChartPayload(BaseModel):
     actions: list[str]
     trained: int
     untrained: int
-    counts: bool = False
-    """Render visit counts rather than the mix -- a flag the payload carries so
-    the renderer reads it from the payload like every other field."""
     rows: dict[str, dict[str, Any]]
 
 
@@ -95,14 +91,12 @@ def run(args: argparse.Namespace) -> ChartPayload:
         actions=list(chart.actions),
         trained=len(chart.classes),
         untrained=len(chart.untrained),
-        counts=bool(args.counts),
         rows={
             label: {
                 "strategy": list(row.strategy),
                 "aggression": row.aggression,
                 "fold": row.fold,
                 "passive": row.passive,
-                "reach_count": row.reach_count,
             }
             for label, row in sorted(chart.classes.items())
         },
@@ -110,20 +104,18 @@ def run(args: argparse.Namespace) -> ChartPayload:
 
 
 def render(payload: ChartPayload) -> None:
-    counts = payload.counts
     print(f"{payload.run} · preflop{f' after {payload.path}' if payload.path else ''}")
     print(f"seat {payload.actor} to act · actions {' '.join(payload.actions)}")
     print()
-    _print_grid(payload, counts=counts)
+    _print_grid(payload)
     print()
     print(f"{payload.trained} of 169 classes trained, {payload.untrained} never visited.")
-    if not counts:
-        print("cell = P(raise or all-in).  · <2%   ░ <20%   ▒ <50%   ▓ <80%   █ 80%+")
-        print("suited above the diagonal, offsuit below, pairs on it.")
-        print("the stored blueprint — a resolver, if armed, also acts preflop.")
+    print("cell = P(raise or all-in).  · <2%   ░ <20%   ▒ <50%   ▓ <80%   █ 80%+")
+    print("suited above the diagonal, offsuit below, pairs on it.")
+    print("the stored blueprint — a resolver, if armed, also acts preflop.")
 
 
-def _print_grid(payload: ChartPayload, *, counts: bool) -> None:
+def _print_grid(payload: ChartPayload) -> None:
     from src.pipeline.blueprint.preflop import RANKS, class_label  # noqa: PLC0415 -- render-only
 
     header = "    " + "".join(f"{rank:>4}" for rank in RANKS)
@@ -134,8 +126,6 @@ def _print_grid(payload: ChartPayload, *, counts: bool) -> None:
             row = payload.rows.get(class_label(high, low))
             if row is None:
                 cells.append("   .")
-            elif counts:
-                cells.append(f"{row['reach_count']:>4}")
             else:
                 cells.append(f"{_cell(row['aggression']):>4}")
         print(f"{high:>3} " + "".join(cells))

@@ -43,17 +43,17 @@ _ACE = 12
 
 @dataclass(frozen=True)
 class ClassStrategy:
-    """One hand class's strategy, and how much training stands behind it.
+    """One hand class's strategy at a preflop spot.
 
-    ``reach_count`` is the number of times training visited the infoset. A row
-    with a handful of visits is a guess wearing a probability, and the chart says
-    so rather than letting the colour imply confidence.
+    Trained or absent, with nothing in between: a class the solver never visited
+    is listed in ``untrained`` rather than given a row. There is deliberately no
+    visit count -- see :mod:`src.pipeline.blueprint.grid` on why a reader cannot
+    honestly offer one.
     """
 
     label: str
     actions: tuple[str, ...]
     strategy: tuple[float, ...]
-    reach_count: int
 
     def weight_of(self, *tokens: str) -> float:
         """Total probability on actions whose token starts with any of ``tokens``.
@@ -143,7 +143,6 @@ def preflop_chart(blueprint: ScorableBlueprint, path: str = "") -> PreflopChart:
                 label=label,
                 actions=grid.actions,
                 strategy=row.strategy,
-                reach_count=row.reach_count,
             ),
         )
 

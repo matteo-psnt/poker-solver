@@ -91,11 +91,11 @@ class Bucket(BaseModel):
     `strategy` is null exactly when `trained` is false: this server refuses to
     emit the uniform that an allocated-but-unvisited row would otherwise read
     as, and a client must be able to tell "never visited" from "plays uniform".
+    There is no visit count: it read 0 on every row a PCS run ever served.
     """
 
     trained: bool
     strategy: list[float] | None
-    reach_count: int
 
 
 class NodeGrid(BaseModel):
@@ -275,7 +275,6 @@ def grid_payload(grid: StrategyGrid) -> NodeGrid:
             str(bucket): Bucket(
                 trained=entry.trained,
                 strategy=list(entry.strategy) if entry.strategy else None,
-                reach_count=entry.reach_count,
             )
             for bucket, entry in grid.buckets.items()
         },

@@ -756,10 +756,9 @@ export interface components {
          *     `strategy` is null exactly when `trained` is false: this server refuses to
          *     emit the uniform that an allocated-but-unvisited row would otherwise read
          *     as, and a client must be able to tell "never visited" from "plays uniform".
+         *     There is no visit count: it read 0 on every row a PCS run ever served.
          */
         Bucket: {
-            /** Reach Count */
-            reach_count: number;
             /** Strategy */
             strategy: number[] | null;
             /** Trained */
