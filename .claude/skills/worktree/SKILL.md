@@ -53,10 +53,16 @@ those are in place. Symlinking `.terraform` ITSELF does not work — init must
 populate a real directory. `INFRA_DIR` is a relative path, which is why this
 is per-worktree rather than once globally.
 
-Only if you need `npm run gen:types`: `ln -sfn "$P/console/node_modules"
-console/node_modules`. `.gitignore` has `console/node_modules/` with a trailing
-slash, so it matches a directory and **not** this symlink — it shows up
-untracked. Delete the link once types are regenerated.
+**`pre-commit run --all-files` needs `console/node_modules`** — its last hook
+runs `npm run gen:types && biome ci && tsc && vitest && knip`, and without the
+link it dies on `openapi-typescript: command not found`. So the merge gate needs
+this, not just `npm run gen:types`:
+
+    ln -sfn "$P/console/node_modules" console/node_modules
+
+`.gitignore` has `console/node_modules/` with a trailing slash, so it matches a
+directory and **not** this symlink — it shows up untracked. Delete the link once
+the gate is green, so it is never staged.
 
 ## Running commands once you are isolated
 
