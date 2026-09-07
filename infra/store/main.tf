@@ -76,10 +76,11 @@ resource "azurerm_storage_account" "store" {
   }
 }
 
-# WHERE THE CHECKPOINTS GO. A rung is ~4,200 zarr chunk files on the share and
-# takes minutes to copy over SMB; as ONE tar object it is a single request, and
+# WHERE THE CHECKPOINTS GO. A rung WAS ~4,200 zarr chunk files on the share and
+# took minutes to copy over SMB; as ONE object it is a single request, and
 # object existence becomes completeness -- which is what `checkpoints` in the
-# record already claims to be a cache OF.
+# record already claims to be a cache OF. The migration is done: the share now
+# holds no checkpoint bytes at all.
 #
 # A container rather than a second share because Azure Files cannot TIER. One
 # rung per run is current and the rest are scored evidence nobody reads; the

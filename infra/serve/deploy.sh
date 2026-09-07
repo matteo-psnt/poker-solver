@@ -8,15 +8,22 @@
 # machine, and this is the part that will be iterated on. Piping it means the box
 # always runs the version in the repo and stores none of it.
 #
-# EVERYTHING LANDS ON LOCAL DISK, never read from the share at runtime. A
-# checkpoint is ~5,500 small files that the read path mmaps, and SMB turns every
-# page fault into a network round trip -- the same constraint that keeps
-# `runs_dir` off the share everywhere else. The copies survive a deallocate
-# because /mnt/work is a managed disk, which is what makes waking the box a
-# two-minute boot rather than a re-download.
+# EVERYTHING LANDS ON LOCAL DISK, never read from the store at runtime. The
+# copies survive a deallocate because /mnt/work is a managed disk, which is what
+# makes waking the box a two-minute boot rather than a re-download.
 #
-# Idempotent: `cp -u` skips what is already current, so re-running after a
-# checkpoint is published copies only the new rungs.
+# THE SHARE NO LONGER HOLDS CHECKPOINT BYTES. Measured 09-07: across the whole
+# archive there are zero `.ckpt.zst` objects and zero `.zarr` directories -- a
+# run directory is now its manifest, its loose result files and a completion
+# marker per rung. The bytes are one Blob object per rung in the `checkpoints`
+# container. So the record comes off the share and the RUNG comes off Blob, and
+# there is deliberately no share fallback: a fallback that cannot succeed turns
+# "this rung is not published" into 400 MB copied and a failure later inside the
+# loader.
+#
+# Idempotent by SIZE: a rung is re-fetched only when what is on disk does not
+# match what the container holds. Node-local state is not evidence of a complete
+# copy, and a truncated snapshot fails deep in the reader minutes later.
 
 set -euo pipefail
 
@@ -115,17 +122,38 @@ ln -sfn "$WORK/data" "$WORK/code/data"
 # --------------------------------------------------------------------------- #
 # the card abstraction
 # --------------------------------------------------------------------------- #
+# Abstractions moved off the share too: one `<name>.tar.zst` object each in the
+# `abstractions` container. MERGES rather than mirrors, exactly like the node's
+# `fetch_abstractions` -- which abstraction a run resolves against is not known
+# until its config is read, so all of them have to be here. An abstraction
+# already unpacked is not re-fetched, so the steady state is one list call.
 echo "==> card abstraction"
-cp -ru "$SHARE/combo_abstraction/." "$WORK/data/combo_abstraction/"
+mkdir -p "$WORK/data/combo_abstraction"
+for packed in $(az storage blob list --auth-mode login --account-name "$STORE_ACCOUNT" \
+    --container-name abstractions --query "[].name" -o tsv); do
+    case "$packed" in *.tar.zst) ;; *) continue ;; esac
+    unpacked="$WORK/data/combo_abstraction/${packed%.tar.zst}"
+    [ -d "$unpacked" ] && continue
+    echo "    fetching abstraction ${packed%.tar.zst}"
+    az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+        --container-name abstractions --name "$packed" \
+        --file "$WORK/data/combo_abstraction/$packed" --output none
+    # Drop the archive once unpacked: a packed file left beside the directories
+    # is hundreds of MB the resolver will never read. On a tar failure `set -e`
+    # aborts and it stays, which the next download simply overwrites.
+    tar --zstd -xf "$WORK/data/combo_abstraction/$packed" -C "$WORK/data/combo_abstraction"
+    rm -f "$WORK/data/combo_abstraction/$packed"
+done
 
 # --------------------------------------------------------------------------- #
 # the checkpoint
 # --------------------------------------------------------------------------- #
 # ONE RUNG, not the run directory -- the same rule `blueprint/staging.py` states
 # and this script used to ignore. A published run keeps its whole retained
-# ladder: the 300M control run is 60 rungs, ~51 GB in ~330,000 files, about six
-# hours at this box's file rate. The reader loads exactly one of them. Copying
-# the lot bought nothing and made staging a run an afternoon's job.
+# ladder and the reader loads exactly one of them, so fetching the lot bought
+# nothing and made staging a run an afternoon's job. One object per rung has
+# made that cheaper, not moot: the 300M control run is 60 rungs, and the eight
+# rungs this ladder actually seats are 1.8 GB against that.
 #
 # $AT names a rung to stage instead of the head, mirroring `--at`.
 # Staging is a FUNCTION because the depth ladder stages several runs the same
@@ -140,9 +168,22 @@ stage_run() {
     for small in run.jsonl .run.json progress.jsonl; do
         cp -u "$SHARE/archive/$run/$small" "$dest/" 2>/dev/null || true
     done
-    local zarr
-    zarr=$(AT="$at" python3 - "$SHARE/archive/$run/STATIC_CHECKPOINT.json" <<'PY'
+
+    # THE NAME IS MAPPED, NOT BUILT. A manifest still spells `static-N.zarr` and
+    # is never repointed -- rewriting 300+ of them would mutate the durable
+    # share -- while the container holds `static-N.ckpt.zst`. `records.object_name`
+    # is the single place that maps between the two, and hand-building the
+    # spelling instead is the bug that has already hit evaluation fetch,
+    # warm-start, dispatch verification and prune. Imported from the code just
+    # extracted above: `src.shared.records` is stdlib-only, so the system
+    # interpreter can read it without the venv.
+    local object
+    object=$(AT="$at" PYTHONPATH="$WORK/code" python3 - \
+        "$SHARE/archive/$run/STATIC_CHECKPOINT.json" <<'PY'
 import json, os, sys
+
+from src.shared import records
+
 manifest = json.load(open(sys.argv[1]))
 rungs = manifest.get("retained") or []
 at = os.environ.get("AT") or ""
@@ -150,34 +191,65 @@ if at:
     match = [r for r in rungs if str(r.get("iteration")) == at]
     if not match:
         sys.exit(f"no rung at iteration {at}; have {[r.get('iteration') for r in rungs]}")
-    print(match[0]["zarr"])
-    raise SystemExit
-head = manifest.get("zarr") or (rungs[-1]["zarr"] if rungs else "")
-if not head:
-    sys.exit("manifest names no head checkpoint")
-print(head)
+    named = match[0]["zarr"]
+else:
+    named = manifest.get("zarr") or (rungs[-1]["zarr"] if rungs else "")
+    if not named:
+        sys.exit("manifest names no head checkpoint")
+print(records.object_name(named))
 PY
     )
-    echo "==> staging $run rung $zarr"
-    if [ -d "$SHARE/archive/$run/$zarr" ]; then
-        cp -ru "$SHARE/archive/$run/$zarr" "$dest/"
-        cp -u "$SHARE/archive/$run/.complete-$zarr" "$dest/" 2>/dev/null || true
-    elif [ -d "$dest/$zarr" ] && [ -e "$dest/.complete-$zarr" ]; then
-        # The share PRUNES checkpoints and its manifest outlives the bytes, so a
-        # rung can be advertised and gone. What is already staged here is the
-        # same data: a redeploy of the CODE must not be hostage to the share
-        # still holding a checkpoint this box already has.
-        echo "    (pruned from the share; keeping the complete copy already staged)"
-    else
-        echo "Rung $zarr of $run is on neither the share nor this box." >&2
+
+    # A MANIFEST OVER-CLAIMS BY DESIGN: `prune-checkpoints` drops a snapshot
+    # without rewriting the ladder that advertises it, so being named here is no
+    # evidence the bytes exist. Ask the container, which is the only store that
+    # holds them.
+    local held
+    held=$(az storage blob show --auth-mode login --account-name "$STORE_ACCOUNT" \
+        --container-name checkpoints --name "$run/$object" \
+        --query properties.contentLength -o tsv 2>/dev/null || true)
+    if [ -z "$held" ]; then
+        echo "Rung $object of $run is not in the checkpoints container." >&2
+        echo "  The share holds no checkpoint bytes any more, so there is nowhere" >&2
+        echo "  else to look. Re-publish it from a node that has it." >&2
         return 1
+    fi
+
+    # BOTH SPELLINGS, not merely the one being fetched. A box that staged under
+    # the old name can still be holding a `.zarr` directory, and the reader can
+    # no longer open one at all -- the zarr path is deleted. Leaving it behind
+    # wastes the disk it is on and confuses the next person to look.
+    local legacy="${object%.ckpt.zst}.zarr"
+    rm -rf "$dest/$legacy" "$dest/.complete-$legacy"
+
+    local have
+    have=$(stat -c %s "$dest/$object" 2>/dev/null || echo 0)
+    if [ "$have" = "$held" ]; then
+        echo "==> $run rung $object already staged ($((held / 1000000)) MB)"
+    else
+        echo "==> staging $run rung $object ($((held / 1000000)) MB from the container)"
+        # To a temp name and moved into place: a half-downloaded object under the
+        # real name is something the seat would try to load on the next restart.
+        az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+            --container-name checkpoints --name "$run/$object" \
+            --file "$dest/$object.partial" --output none
+        mv "$dest/$object.partial" "$dest/$object"
     fi
     chmod -R u+w "$dest" 2>/dev/null || true
 }
 
-echo "==> checkpoint (thousands of small files, a few minutes on first copy)"
+echo "==> checkpoints (one object per rung, from the container)"
 mkdir -p "$WORK/data/runs/$RUN_ID"
 stage_run "$RUN_ID" "${AT:-}"
+
+# TWO CONSUMERS, TWO RUNGS. The seat pins the rung a number was measured at;
+# the reader's `ExecStart` is baked into cloud-init with no `--at`, so it opens
+# whatever the manifest calls the head. Staging only $AT left the reader looking
+# for `static-4200.ckpt.zst` that no deploy had fetched, and `blueprint.service`
+# died on FileNotFoundError while the seat itself was fine.
+if [ -n "${AT:-}" ]; then
+    stage_run "$RUN_ID" ""
+fi
 
 # $RUNGS is a comma-separated `run[:at]` list: the SHALLOWER blueprints of the
 # depth ladder. Each is staged exactly like the deepest, and each becomes a
@@ -296,10 +368,12 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # argparse. 0.02 is the measured point (940.1 -> 854.0 mbb/hand on the gate over
 # three seeds); 0 fields the table as trained.
 #
-# SEAT_EXTRA carries $AT through to the seat, which `blueprint-serve` has no flag
-# for. The two want different things from one staged run: the reader takes the
-# manifest head, and the seat should field the rung a NUMBER was measured at.
-# Empty when $AT is unset, which the unit expands to no arguments.
+# SEAT_EXTRA carries $AT through to the seat. `blueprint-serve` grew an `--at`
+# of its own, but the READER'S unit is baked into cloud-init without one, so in
+# practice the two still want different rungs from one staged run: the reader
+# takes the manifest head, the seat fields the rung a NUMBER was measured at.
+# That is why both are staged above. Empty when $AT is unset, which the unit
+# expands to no arguments.
 sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
