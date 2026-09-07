@@ -17,6 +17,7 @@ from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.training.run_tracker import RunMetadata
 from src.shared import records, run_events, task_history
 from src.shared.cloudtask.node import archive
+from src.shared.ports.record import RecordSource
 
 
 class CurvePoint(BaseModel):
@@ -79,9 +80,9 @@ def exploitability_curve(
 ) -> CurveOutput:
     """Join the retained checkpoint ladder to recorded evaluations, as a curve.
 
-    Pure reader -- it never evaluates. Rungs without a recorded eval come back in
-    ``missing_iterations`` rather than being silently skipped, because a curve with
-    holes in it and a curve that stops early look identical once plotted.
+    The SHARE'S half: read the ladder from the manifest and the evals from the
+    index, then hand both to :func:`curve_from`. A caller with the same two
+    things from anywhere else calls that directly.
     """
     # The directory name IS the run id (RunTracker defines it that way), so this
     # reads nothing that a legacy or torn .run.json could make it fail on.
@@ -93,7 +94,31 @@ def exploitability_curve(
         # Legacy or torn manifest. A reporting command must still render the
         # evaluations it can find rather than dying on the ladder it cannot.
         retained = []
-    records = eval_ledger.read_records(ledger_path)
+    return curve_from(
+        run_id,
+        retained=retained,
+        records=eval_ledger.read_records(ledger_path),
+        tier_index=tier_index,
+    )
+
+
+def curve_from(
+    run_id: str,
+    *,
+    retained: list[int],
+    records: list[dict[str, Any]],
+    tier_index: int = 0,
+) -> CurveOutput:
+    """The curve itself, over a ladder and evals from wherever they were read.
+
+    Pure reader -- it never evaluates. Rungs without a recorded eval come back in
+    ``missing_iterations`` rather than being silently skipped, because a curve with
+    holes in it and a curve that stops early look identical once plotted.
+
+    Split from the reading so a second store can supply the same two inputs
+    without a second copy of the tiering, which is ~30 knobs deep: a version
+    that re-expressed it reported -100.0 mbb where the truth was -60.0.
+    """
     series = eval_ledger.curve_series(records, run_id)
     unplaceable = sum(
         1 for r in records if r.get("run_id") == run_id and r.get("checkpoint_iteration") is None
@@ -140,6 +165,151 @@ def exploitability_curve(
     )
 
 
+class ArmPoint(BaseModel):
+    """One arm's score at one checkpoint, inside one tier."""
+
+    arm: str
+    iteration: int
+    exploitability_mbb: float
+    std_error_mbb: float
+    run_id: str | None
+    # Signed difference against the control arm at the SAME iteration and tier,
+    # null when the control has no row there. Negative is better: exploitability.
+    vs_control_mbb: float | None = None
+    # Combined standard error of that difference, null when both rows are exact
+    # (`exact_br` has zero evaluation variance, so the difference IS the answer
+    # and quoting an error on it would invent one).
+    vs_control_stderr_mbb: float | None = None
+
+
+class ArmTier(BaseModel):
+    """Every arm scored with ONE instrument, and their differences.
+
+    A tier is the unit of comparison, so it is also the unit of rendering. Two
+    arms scored at different board budgets are two numbers about different
+    games; they appear in separate tiers and are never subtracted.
+    """
+
+    tier: str
+    control: str | None
+    points: list[ArmPoint]
+    arms: list[str]
+    # Iterations where NOT every arm has a row. A difference read across a
+    # partial column compares the arms at different amounts of training.
+    unmatched_iterations: list[int]
+
+
+class ArmsOutput(BaseModel):
+    """What `arms` answers: one experiment's arms, grouped by instrument."""
+
+    experiment_id: str
+    tiers: list[ArmTier]
+    unplaceable_records: int = 0
+    # Tiers dropped because they hold no row for the requested control, and so
+    # cannot answer the question `--control` asked. Reported, because a silent
+    # drop and an experiment that was never scored look the same.
+    tiers_without_control: int = 0
+
+
+def experiment_arms(
+    records: list[dict[str, Any]],
+    experiment_id: str,
+    *,
+    control: str | None = None,
+) -> ArmsOutput:
+    """Group one experiment's evaluations by tier, then by arm.
+
+    The difference is taken DIRECTLY, without a p-value, and that is not a
+    weakening. `exact_br` has zero evaluation variance -- the same checkpoint
+    always scores identically -- so two arms in a matched tier differ by exactly
+    the number subtracted here. The paired-sample machinery this replaces
+    refused those rows outright (they carry no per-hand samples), which is why
+    every exact_br A/B in this project's history was subtracted by hand.
+
+    LBR rows DO carry sampling error, so their difference carries the combined
+    standard error rather than pretending to be exact.
+    """
+    rows = [r for r in records if r.get("experiment_id") == experiment_id]
+    unplaceable = sum(1 for r in rows if r.get("checkpoint_iteration") is None)
+
+    # (tier, arm, iteration) -> record; a re-evaluation supersedes its predecessor.
+    grouped: dict[tuple[Any, ...], dict[tuple[str, int], dict[str, Any]]] = {}
+    labels: dict[tuple[Any, ...], str] = {}
+    for record in rows:
+        iteration = record.get("checkpoint_iteration")
+        if iteration is None:
+            continue
+        arm = record.get("arm") or record.get("run_id") or "?"
+        key = eval_ledger.tier_key(record)
+        labels.setdefault(key, eval_ledger.tier_label(record))
+        grouped.setdefault(key, {})[(str(arm), int(iteration))] = record
+
+    tiers = []
+    skipped = 0
+    for key, cells in sorted(grouped.items(), key=lambda kv: (-len(kv[1]), str(kv[0]))):
+        arms = sorted({arm for arm, _ in cells})
+        iterations = sorted({iteration for _, iteration in cells})
+        chosen = control if control in arms else None
+        if control is not None and chosen is None:
+            # `--control X` asks one question, and a tier with no X row cannot
+            # answer it. Counted rather than rendered: `cfr-br` holds 47 tiers
+            # (avg_gamma, mixtures, thresholds, three seeds) and exactly one
+            # contains both weighting arms -- printing the other 46 buries it.
+            skipped += 1
+            continue
+        points = [
+            _arm_point(arm, iteration, cells, chosen)
+            for arm, iteration in sorted(cells, key=lambda cell: (cell[1], cell[0]))
+        ]
+        tiers.append(
+            ArmTier(
+                tier=labels[key],
+                control=chosen,
+                points=points,
+                arms=arms,
+                unmatched_iterations=[
+                    i for i in iterations if any((a, i) not in cells for a in arms)
+                ],
+            )
+        )
+    return ArmsOutput(
+        experiment_id=experiment_id,
+        tiers=tiers,
+        unplaceable_records=unplaceable,
+        tiers_without_control=skipped,
+    )
+
+
+def _arm_point(
+    arm: str,
+    iteration: int,
+    cells: dict[tuple[str, int], dict[str, Any]],
+    control: str | None,
+) -> ArmPoint:
+    record = cells[(arm, iteration)]
+    results = record.get("results") or {}
+    value = float(results.get("exploitability_mbb", 0.0))
+    error = float(results.get("std_error_mbb", 0.0) or 0.0)
+    point = ArmPoint(
+        arm=arm,
+        iteration=iteration,
+        exploitability_mbb=value,
+        std_error_mbb=error,
+        run_id=record.get("run_id"),
+    )
+    if control is None or arm == control:
+        return point
+    against = cells.get((control, iteration))
+    if against is None:
+        return point
+    base = against.get("results") or {}
+    point.vs_control_mbb = value - float(base.get("exploitability_mbb", 0.0))
+    base_error = float(base.get("std_error_mbb", 0.0) or 0.0)
+    if error or base_error:
+        point.vs_control_stderr_mbb = (error**2 + base_error**2) ** 0.5
+    return point
+
+
 class RunDigest(BaseModel):
     """Everything recorded about one run, joined into a single view.
 
@@ -167,6 +337,12 @@ class RunDigest(BaseModel):
     iterations: int
     runtime_seconds: float
     attempts: int
+    # The RESOLVED solver/pcs knobs, which is what `--config` plus a `--set` list
+    # actually produced. They were on the metadata's `config` all along and no
+    # reader surfaced them, so telling two arms apart meant reading a node's log:
+    # `w-noplus` and `w-dcfr-noplus` share a commit, a config name and an
+    # abstraction, and the only record of what they differed in was the label.
+    trainer_knobs: dict[str, Any]
     progress: list[dict[str, Any]]
     coverage_flat_from: int | None
     curve: CurveOutput
@@ -180,14 +356,22 @@ def run_digest(
     ledger_path: Path,
     tier_index: int = 0,
     tasks_dir: Path | None = None,
+    record_source: RecordSource | None = None,
 ) -> RunDigest:
     """Join every record this run left behind. Pure reader.
 
     ``tasks_dir`` points at a local copy of the share's ``legs/`` (``just fetch``
     brings one down). Omitted for a purely local run, which has no tasks.
     """
-    metadata = load_run_metadata(run_dir)
-    progress = run_events.checkpoints(run_events.read(run_dir))
+    metadata = load_run_metadata(run_dir, record_source)
+    # The checkpoint series, from the store that holds it. `run_events.read`
+    # answers from a file that a published run no longer has.
+    recorded = (
+        [dict(event) for event in record_source.events(run_dir.name)]
+        if record_source is not None
+        else []
+    )
+    progress = run_events.checkpoints(recorded or run_events.read(run_dir))
     curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
     tasks = (
         [row for row in task_history.read_tasks(tasks_dir) if row.run_id == run_dir.name]
@@ -208,12 +392,27 @@ def run_digest(
         iterations=metadata.iterations,
         runtime_seconds=metadata.runtime_seconds,
         attempts=len(metadata.attempts),
+        trainer_knobs=_trainer_knobs(metadata),
         progress=progress,
         coverage_flat_from=run_events.plateau_iteration(progress),
         curve=curve,
         tasks=tasks,
         gaps=_digest_gaps(metadata, progress, curve, tasks, run_dir),
     )
+
+
+def _trainer_knobs(metadata: RunMetadata) -> dict[str, Any]:
+    """The knobs that decide what ALGORITHM ran, off the run's own config.
+
+    Solver and pcs only. The rest of `Config` describes the GAME -- blinds,
+    stack, action model, abstraction -- and is already pinned by
+    `action_config_hash` and `card_abstraction_hash`; repeating it would bury
+    the two lines that actually differ between two arms.
+    """
+    config = getattr(metadata, "config", None)
+    if config is None:
+        return {}
+    return {"solver": config.solver.model_dump(), "pcs": config.pcs.model_dump()}
 
 
 def _digest_gaps(

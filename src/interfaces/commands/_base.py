@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.interfaces import run_names, telemetry
+from src.interfaces import run_names
 from src.interfaces.errors import CommandError
 from src.pipeline.evaluation.ledger import rebuild_ledger
 
@@ -98,31 +98,6 @@ class Command:
             {action.dest for action in actions if action.required},
         )
 
-    def execute(self, args: argparse.Namespace) -> Payload:
-        """Run this command's handler. **The seam every surface goes through.**
-
-        `invoke` is not that seam and cannot be: the command line builds its Namespace
-        by parsing argv and calls the handler directly, so anything wrapped around
-        `invoke` would see the console and miss the CLI. Kept separate from :attr:`run`
-        so the handler stays an ordinary function a test can call; a guard test fails if
-        a surface calls `run` directly and slips past this.
-
-        Preparing the observation is itself guarded, which is not belt and braces:
-        `asked_for` evaluates ``value != default`` on caller-supplied values, and one
-        whose ``__ne__`` returns a non-bool -- a numpy array, and `invoke` accepts
-        anything -- would raise out of here and fail a working command.
-        """
-        return self._observed(args) if telemetry.enabled() else self.run(args)
-
-    def _observed(self, args: argparse.Namespace) -> Payload:
-        """:meth:`execute`, with the observation attached."""
-        try:
-            asked = telemetry.asked_for(self.add_arguments, args, self.declared()[0])
-        except Exception:  # noqa: BLE001 — never the reason a command fails
-            asked = {}
-        with telemetry.observe(self.name, asked):
-            return self.run(args)
-
     def arguments(self, **overrides: Any) -> argparse.Namespace:
         """Build this command's arguments without a command line.
 
@@ -150,7 +125,7 @@ class Command:
         raises :class:`CommandError` where the command line would have exited,
         so a caller polling several commands survives one of them failing.
         """
-        return self.execute(self.arguments(**overrides))
+        return self.run(self.arguments(**overrides))
 
     def invoke_as[T](self, model: type[T], **overrides: Any) -> T:
         """:meth:`invoke`, narrowed to the payload the caller expects.
@@ -207,6 +182,51 @@ def resolve_run_dir(run: str, runs_dir: str) -> Path:
     if matches:
         raise CommandError(run_names.ambiguous_message(run, matches))
     raise CommandError(f"Run not found: '{run}' (looked at {as_path} and {exact})")
+
+
+def resolve_run_id(run: str, engine: Any) -> str:
+    """The same question as :func:`resolve_run_dir`, asked of the database.
+
+    Same rule, because it is the same rule: both hand the fragment to
+    `run_names.matching` and both refuse ambiguity by NAMING the candidates. The
+    difference is only what they are matching against -- directory names in a
+    materialised tree, or the ids the record holds -- and what they return.
+
+    A path is not accepted here. On the share a run IS a directory and pointing
+    at one is meaningful; in the database there is nothing for a path to name,
+    and quietly resolving its basename would answer about whichever published
+    run happened to share the name.
+    """
+    if not run.strip():
+        raise CommandError("No run given: --run needs a run id or a fragment of one.")
+    # Lazily: `_base` is imported by every command, and `queries` pulls in
+    # SQLAlchemy -- 1.2s onto an invocation that may never touch a database.
+    from src.adapters.postgres import queries  # noqa: PLC0415
+
+    matches = run_names.matching(run, queries.run_ids(engine))
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise CommandError(run_names.ambiguous_message(run, matches))
+    raise CommandError(f"Run not found: '{run}' is not a published run id or a fragment of one.")
+
+
+def eval_index_rows(engine: Any, run_id: str | None = None) -> list[dict[str, Any]]:
+    """Every evaluation as the INDEX ROW, not the whole document.
+
+    `evals.payload` holds the document; the share's ledger holds what
+    `ledger_row` derives from it -- everything except the bulk results, plus a
+    four-field summary of those. Handing a reader the document instead looks
+    right and is not: `results` then carries every knob and sample, and 2,224 of
+    2,238 rows compared unequal against the share.
+
+    Here rather than in each command, because two of them read this and a rule
+    in two places is the shape this migration keeps getting wrong.
+    """
+    from src.adapters.postgres import queries  # noqa: PLC0415 -- see `resolve_run_id`
+    from src.pipeline.evaluation import ledger as eval_ledger  # noqa: PLC0415
+
+    return [eval_ledger.ledger_row(document) for document in queries.eval_records(engine, run_id)]
 
 
 def parse_overrides(pairs: list[str]) -> dict[str, Any]:

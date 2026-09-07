@@ -21,8 +21,9 @@
 set -euo pipefail
 
 RUN="${1:-}"
-if [ -z "$RUN" ]; then
-    echo "usage: deploy.sh <run-id>" >&2
+RECORD_DSN="${2:-}"
+if [ -z "$RUN" ] || [ -z "$RECORD_DSN" ]; then
+    echo "usage: deploy.sh <run-id> <record-dsn>   (just serve-deploy <run> supplies both)" >&2
     exit 2
 fi
 
@@ -59,34 +60,47 @@ echo "==> run $RUN_ID"
 # --------------------------------------------------------------------------- #
 # code
 # --------------------------------------------------------------------------- #
+# Snapshots live in the store's `code` blob container, not on the share. The
+# account is read off the mount so nothing here hard-codes it, and the box
+# reads Blob as ITSELF -- the managed identity it already logs in with to
+# deallocate. (It needs Storage Blob Data Reader on the account for this.)
+STORE_ACCOUNT=$(findmnt -n -o SOURCE "$SHARE" | sed -E 's#^//([^.]+)\..*#\1#')
+az login --identity --output none
+
 # $CODE pins a snapshot; without it, the newest. Names sort lexicographically by
-# timestamp, which is what makes `tail -1` the newest rather than merely last.
+# timestamp, which is what makes the last one the newest rather than merely last.
 #
-# PIN IT when it matters. The share is shared: three other sessions pushed
+# PIN IT when it matters. The store is shared: three other sessions pushed
 # snapshots within 15 seconds of one here, so "newest" deployed somebody else's
 # tree and the box came up without the package this deploy existed to ship.
 # `push-code` echoes the id to pass back in.
 if [ -n "${CODE:-}" ]; then
-    snapshot="$SHARE/code/${CODE%.tar.gz}.tar.gz"
-    if [ ! -f "$snapshot" ]; then
-        echo "No snapshot '$CODE' on the share." >&2
+    snapshot="${CODE%.tar.gz}.tar.gz"
+    exists=$(az storage blob exists --auth-mode login --account-name "$STORE_ACCOUNT" \
+        --container-name code --name "$snapshot" --query exists -o tsv)
+    if [ "$exists" != "true" ]; then
+        echo "No snapshot '$CODE' in the store." >&2
         exit 1
     fi
 else
-    snapshot=$(find "$SHARE/code" -maxdepth 1 -name '*.tar.gz' | sort | tail -1)
+    snapshot=$(az storage blob list --auth-mode login --account-name "$STORE_ACCOUNT" \
+        --container-name code --query "sort_by([].name, &name)[-1]" -o tsv)
     if [ -z "$snapshot" ]; then
-        echo "No code snapshot on the share. Run: poker-solver push-code" >&2
+        echo "No code snapshot in the store. Run: poker-solver push-code" >&2
         exit 1
     fi
 fi
-echo "==> code $(basename "$snapshot")"
+echo "==> code $snapshot"
 
 # Extracted beside the live tree and swapped in, so a failed or interrupted
 # extraction never leaves a half-written checkout that `uv sync` would then
 # build against.
 rm -rf "$WORK/code.incoming"
 mkdir -p "$WORK/code.incoming"
-tar -xzf "$snapshot" -C "$WORK/code.incoming"
+az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+    --container-name code --name "$snapshot" --file "$WORK/code.incoming.tar.gz" --output none
+tar -xzf "$WORK/code.incoming.tar.gz" -C "$WORK/code.incoming"
+rm -f "$WORK/code.incoming.tar.gz"
 rm -rf "$WORK/code.previous"
 [ -d "$WORK/code" ] && mv "$WORK/code" "$WORK/code.previous"
 mv "$WORK/code.incoming" "$WORK/code"
@@ -204,7 +218,10 @@ sudo tee /etc/blueprint.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 IDLE_TIMEOUT=$IDLE
+POKER_SOLVER_RECORD_DSN=$RECORD_DSN
 EOF
+# The DSN carries a password; the unit runs as root and is the only reader.
+sudo chmod 600 /etc/blueprint.env
 
 # The shutdown half of the unit, rewritten on every deploy.
 #

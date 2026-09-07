@@ -78,9 +78,17 @@ def run(args: argparse.Namespace) -> PoolPayload:  # noqa: ARG001
         config.pool_id: config.hourly_cost,
         config.pool_big_id: config.pool_big_hourly_cost,
         config.pool_huge_id: config.pool_huge_hourly_cost,
+        config.pool_mem_id: config.pool_mem_hourly_cost,
     }
     wanted = [
-        pool_id for pool_id in (config.pool_id, config.pool_big_id, config.pool_huge_id) if pool_id
+        pool_id
+        for pool_id in (
+            config.pool_id,
+            config.pool_big_id,
+            config.pool_huge_id,
+            config.pool_mem_id,
+        )
+        if pool_id
     ]
     with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
         statuses = list(pool.map(lambda pool_id: batch.pool_status(client, pool_id), wanted))

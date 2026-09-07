@@ -79,6 +79,9 @@ def store_json(name: str, key: str, value: dict[str, Any]) -> None:
         # once is ordinary; the pid keeps their scratch files apart.
         scratch = path.with_suffix(f".{os.getpid()}.tmp")
         scratch.write_text(json.dumps({"at": time.time(), "value": value}))
+        # Owner-only: the Terraform outputs cached here carry the store's
+        # access key and the record DSN.
+        scratch.chmod(0o600)
         scratch.replace(path)
     except OSError:
         return

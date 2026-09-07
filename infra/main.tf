@@ -57,6 +57,20 @@ locals {
   start_script = <<-EOT
     set -euo pipefail
 
+    # Yama defaults to 1: a process may ptrace only its own DESCENDANTS. The
+    # sampling profiler is started BY the task wrapper, which makes it the
+    # trainer's SIBLING, so the attach is refused -- measured on a train-huge
+    # node, `py-spy` answering "Permission Denied" with ptrace_scope=1, the
+    # non-native fallback failing identically.
+    #
+    # Here rather than by elevating tasks: this grants ONE capability on a
+    # single-tenant compute node, where running every task as root would grant
+    # all of them forever to buy it.
+    #
+    # `|| echo` because a kernel without Yama has no such knob, and no profiler
+    # is a reason to log -- never to fail a start task, which bricks the node.
+    sysctl -w kernel.yama.ptrace_scope=0 || echo "WARN could not relax ptrace_scope"
+
     # Find the data disk by its PROPERTIES, not by a fixed path. The obvious
     # /dev/disk/azure/scsi1/lun0 symlink is created by the Azure Linux Agent's
     # udev rules and does NOT exist on the Batch node image -- assuming it fails
@@ -121,6 +135,34 @@ locals {
     export UV_PYTHON_INSTALL_DIR=/opt/uv-python
     export UV_PYTHON_BIN_DIR=/usr/local/bin
     /usr/local/bin/uv python install 3.13
+
+    # The ONE dependency the WRAPPER itself needs. It records a task's start and
+    # exit and mirrors both into the record database, and it runs before
+    # `uv sync` -- so the venv holding the project's own driver does not exist
+    # yet and never will for this process.
+    #
+    # `--target`, NOT `--system`: uv refuses to install into the interpreter it
+    # manages ("externally managed ... should not be modified"), which failed
+    # the start task and left the node START_TASK_FAILED. A directory the
+    # wrapper puts on its own path touches that interpreter not at all. Pinned
+    # against `spec.py`, which sets PYTHONPATH, by `test_node_interpreter.py`.
+    #
+    # NOT `|| echo`, and this one is worth bricking a node over -- the tradeoff
+    # inverted when `run.jsonl` stopped being written. It used to be that a node
+    # without the driver trained exactly as before and merely failed to mirror a
+    # copy of a record the share already held. The share holds nothing now: a
+    # node that cannot reach the database accepts training work and fails every
+    # task at its first event, having already been handed the work.
+    #
+    # So it FAILS HERE, where Batch marks the node unusable and autoscale
+    # replaces it, rather than N task failures later. The install is verified by
+    # importing rather than by its exit code, under the same interpreter and the
+    # same PYTHONPATH the wrapper uses -- a `pip install` that "succeeded" into a
+    # directory the wrapper cannot import from is the failure this actually
+    # guards.
+    /usr/local/bin/uv pip install --target /opt/node-deps --quiet "psycopg[binary]"
+    chmod -R a+rX /opt/node-deps 2>/dev/null || true
+    PYTHONPATH=/opt/node-deps /usr/local/bin/python3.13 -c "import psycopg"
     chmod -R a+rX /opt/uv-python
     SHARE="$AZ_BATCH_NODE_MOUNTS_DIR/shared"
     mkdir -p /mnt/work/data/combo_abstraction /mnt/work/data/runs
@@ -272,273 +314,96 @@ resource "azurerm_batch_account" "main" {
 }
 
 # --------------------------------------------------------------------------- #
-# The pool
+# The pools
 # --------------------------------------------------------------------------- #
-
-resource "azurerm_batch_pool" "train" {
-  name                = "train"
-  resource_group_name = azurerm_resource_group.main.name
-  account_name        = azurerm_batch_account.main.name
-  display_name        = "poker-solver training pool"
-  vm_size             = var.pool_vm_size
-  node_agent_sku_id   = "batch.node.ubuntu 22.04"
-
-  # `just panic` disables autoscale and forces a resize to zero, which leaves a
-  # pending resize operation behind. Without this flag the very next `just create`
-  # -- the documented way to re-arm autoscale after a panic -- fails with "because
-  # of pending resize operation", stranding the pool with autoscale off. The
-  # recovery path has to work unattended, so the pool always yields to Terraform.
-  stop_pending_resize_operation = true
-
-  # Gen2 image, non-negotiable: the als_v6 family cannot boot a Generation 1
-  # image, and the failure surfaces as a generic `AllocationFailed` whose real
-  # cause is buried in resizeErrors[].valuesProperty[].value.
-  storage_image_reference {
-    publisher = "canonical"
-    offer     = "0001-com-ubuntu-server-jammy"
-    sku       = "22_04-lts-gen2"
-    version   = "latest"
-  }
-
-  # Scale to zero at rest. $PendingTasks counts active AND running tasks, so a
-  # node is never counted idle while its task is still going; `taskcompletion`
-  # then guarantees a node is not deallocated out from under a running task -- both
-  # matter here because a task runs for hours.
-  # MEASURED CONSTRAINTS, both found by running this against Azure:
-  #
-  #  * Comments are `//`. A `#` comment is rejected ("Invalid character"), and
-  #    an invalid formula means the pool silently stops autoscaling.
-  #  * GetSample MUST use the two-argument form. The one-argument form demands
-  #    70% sample coverage and THROWS below it, and a thrown formula aborts the
-  #    whole evaluation -- so an idle pool (thin data, by definition) refuses to
-  #    scale UP. Observed: `InsufficientSampleData: wanted 70%, received 50%`
-  #    while the evaluation had already computed the correct target.
-  #
-  # There is deliberately NO CPU-based stall clause here. One was written and
-  # then removed: `$CPUPercent` reports a sample PERCENTAGE on this pool but
-  # yields no usable values -- `avg`/`max`/`Count` over it all fail, and `avg`
-  # returns NaN even with a live busy node and 99% coverage. A backstop that
-  # cannot fire is worse than none, because it reads like protection. Hang
-  # protection is the task-level maxWallClockTime instead; see infra/README.md.
-  auto_scale {
-    evaluation_interval = "PT5M"
-    formula             = <<-EOT
-      maxNodes = ${var.max_nodes};
-      pending = max($PendingTasks.GetSample(5 * TimeInterval_Minute, 20));
-      $TargetDedicatedNodes = min(maxNodes, pending);
-      $NodeDeallocationOption = taskcompletion;
-    EOT
-  }
-
-  # The durable share, mounted on every node. Code snapshots, card abstractions,
-  # published runs and eval records all travel through here.
-  #
-  # MOUNT OPTIONS ARE A RELIABILITY CONTROL, not tuning. Two nodes have gone
-  # `unusable` with MountConfigurationError MID-LEG (not at startup), stranding a
-  # task that Batch then reports as `running` forever. Both happened while
-  # publishing multi-GB checkpoint snapshots, which is the only sustained SMB
-  # load this pool generates.
-  #
-  #   vers=3.1.1    Azure Files' recommended dialect; 3.0 predates the reconnect
-  #                 and encryption improvements, and this share supports it.
-  #   nosharesock   a dedicated TCP connection for this mount rather than one
-  #                 shared across mounts to the same server -- one stalled
-  #                 operation then cannot take the whole mount down with it.
-  #   actimeo=30    caches attributes for 30s. Publishing walks thousands of
-  #                 files with cp -u, which stats every one; without this each
-  #                 stat is a round trip and the metadata traffic alone can
-  #                 exhaust the share's IOPS allowance.
-  #   mfsymlinks    symlink support, so a copy cannot fail on one unexpectedly.
-  mount {
-    azure_file_share {
-      account_name        = data.azurerm_storage_account.store.name
-      account_key         = data.azurerm_storage_account.store.primary_access_key
-      azure_file_url      = "https://${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.store_share_name}"
-      relative_mount_path = "shared"
-      mount_options       = "-o vers=3.1.1,dir_mode=0777,file_mode=0777,serverino,nosharesock,actimeo=30,mfsymlinks"
-    }
-  }
-
-  # als_v6 has NO local temp disk, and a run needs the 773 MB abstraction plus
-  # multi-GB checkpoints. This disk is the node's working storage; the start task
-  # formats and mounts it before anything writes.
-  data_disks {
-    lun                  = 0
-    disk_size_gb         = var.data_disk_gb
-    caching              = "ReadWrite"
-    storage_account_type = "Premium_LRS"
-  }
-
-  # Runs once per node, before any task. Inlined rather than fetched from a
-  # resource file so the pool has no external dependency to keep in sync.
-  #
-  # Three jobs: make the data disk usable, install the interpreter toolchain, and
-  # pull the card abstraction down to LOCAL disk. That last one is deliberate --
-  # the abstraction is mmapped during training, and every page fault against the
-  # SMB mount would be a network round-trip.
-  # base64, NOT jsonencode: the script has to survive being a single Batch
-  # command-line string. jsonencode turns newlines into a literal `\n` (so the
-  # whole script arrives as one physical line), escapes `&&` to `&&`,
-  # and any `$`-escaping applied on top is doubly wrong. A base64 blob is
-  # alphanumeric, so nothing in it can be reinterpreted by Terraform or by bash.
-  start_task {
-    command_line       = "/bin/bash -c 'echo ${base64encode(local.start_script)} | base64 -d | bash'"
-    task_retry_maximum = 1
-    wait_for_success   = true
-
-    user_identity {
-      auto_user {
-        elevation_level = "Admin"
-        scope           = "Pool"
-      }
-    }
-  }
-}
-
-
-# --------------------------------------------------------------------------- #
-# The big-box pool
-# --------------------------------------------------------------------------- #
-# A SECOND pool rather than a bigger `pool_vm_size`: vm_size forces pool
+# FOUR pools rather than one whose `vm_size` moves: vm_size forces pool
 # replacement, which kills every running task -- including other sessions'.
-# Same share, same data disk, same start task; only the SKU and the node
-# ceiling differ. Scale-to-zero means it costs nothing while unused.
-# `just panic` takes the pool id as an argument -- a full stop must be run
-# against BOTH pools.
-resource "azurerm_batch_pool" "train_big" {
-  name                = "train-big"
-  resource_group_name = azurerm_resource_group.main.name
-  account_name        = azurerm_batch_account.main.name
-  display_name        = "poker-solver big-box pool (worker-scaling past one D16)"
-  vm_size             = var.pool_big_vm_size
-  node_agent_sku_id   = "batch.node.ubuntu 22.04"
-
-  # `just panic` disables autoscale and forces a resize to zero, which leaves a
-  # pending resize operation behind. Without this flag the very next `just create`
-  # -- the documented way to re-arm autoscale after a panic -- fails with "because
-  # of pending resize operation", stranding the pool with autoscale off. The
-  # recovery path has to work unattended, so the pool always yields to Terraform.
-  stop_pending_resize_operation = true
-
-  # Gen2 image, non-negotiable: the als_v6 family cannot boot a Generation 1
-  # image, and the failure surfaces as a generic `AllocationFailed` whose real
-  # cause is buried in resizeErrors[].valuesProperty[].value.
-  storage_image_reference {
-    publisher = "canonical"
-    offer     = "0001-com-ubuntu-server-jammy"
-    sku       = "22_04-lts-gen2"
-    version   = "latest"
-  }
-
-  # Scale to zero at rest. $PendingTasks counts active AND running tasks, so a
-  # node is never counted idle while its task is still going; `taskcompletion`
-  # then guarantees a node is not deallocated out from under a running task -- both
-  # matter here because a task runs for hours.
-  # MEASURED CONSTRAINTS, both found by running this against Azure:
-  #
-  #  * Comments are `//`. A `#` comment is rejected ("Invalid character"), and
-  #    an invalid formula means the pool silently stops autoscaling.
-  #  * GetSample MUST use the two-argument form. The one-argument form demands
-  #    70% sample coverage and THROWS below it, and a thrown formula aborts the
-  #    whole evaluation -- so an idle pool (thin data, by definition) refuses to
-  #    scale UP. Observed: `InsufficientSampleData: wanted 70%, received 50%`
-  #    while the evaluation had already computed the correct target.
-  #
-  # There is deliberately NO CPU-based stall clause here. One was written and
-  # then removed: `$CPUPercent` reports a sample PERCENTAGE on this pool but
-  # yields no usable values -- `avg`/`max`/`Count` over it all fail, and `avg`
-  # returns NaN even with a live busy node and 99% coverage. A backstop that
-  # cannot fire is worse than none, because it reads like protection. Hang
-  # protection is the task-level maxWallClockTime instead; see infra/README.md.
-  auto_scale {
-    evaluation_interval = "PT5M"
-    formula             = <<-EOT
-      maxNodes = ${var.pool_big_max_nodes};
-      pending = max($PendingTasks.GetSample(5 * TimeInterval_Minute, 20));
-      $TargetDedicatedNodes = min(maxNodes, pending);
-      $NodeDeallocationOption = taskcompletion;
-    EOT
-  }
-
-  # The durable share, mounted on every node. Code snapshots, card abstractions,
-  # published runs and eval records all travel through here.
-  #
-  # MOUNT OPTIONS ARE A RELIABILITY CONTROL, not tuning. Two nodes have gone
-  # `unusable` with MountConfigurationError MID-LEG (not at startup), stranding a
-  # task that Batch then reports as `running` forever. Both happened while
-  # publishing multi-GB checkpoint snapshots, which is the only sustained SMB
-  # load this pool generates.
-  #
-  #   vers=3.1.1    Azure Files' recommended dialect; 3.0 predates the reconnect
-  #                 and encryption improvements, and this share supports it.
-  #   nosharesock   a dedicated TCP connection for this mount rather than one
-  #                 shared across mounts to the same server -- one stalled
-  #                 operation then cannot take the whole mount down with it.
-  #   actimeo=30    caches attributes for 30s. Publishing walks thousands of
-  #                 files with cp -u, which stats every one; without this each
-  #                 stat is a round trip and the metadata traffic alone can
-  #                 exhaust the share's IOPS allowance.
-  #   mfsymlinks    symlink support, so a copy cannot fail on one unexpectedly.
-  mount {
-    azure_file_share {
-      account_name        = data.azurerm_storage_account.store.name
-      account_key         = data.azurerm_storage_account.store.primary_access_key
-      azure_file_url      = "https://${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.store_share_name}"
-      relative_mount_path = "shared"
-      mount_options       = "-o vers=3.1.1,dir_mode=0777,file_mode=0777,serverino,nosharesock,actimeo=30,mfsymlinks"
+# Same image, share, data disk and start task everywhere; only the SKU, the
+# node ceiling and the name differ, so they are ONE resource over this map.
+# Scale-to-zero means an unused pool costs nothing. `just panic` takes the pool
+# id as an argument -- a full stop must be run against ALL FOUR.
+#
+#   train       D16als_v6   the default; scoring and throwaway work
+#   train_big   D32als_v6   16 physical cores, ~2x a D16 per the worker curve
+#   train_huge  D64als_v6   32 physical cores; the DRAM-latency-bound kernel
+#                           projects ~3x a D16 here, and the critical path lives on it
+#   train_mem   E64ds_v6    512 GB. The als_v6 pools are 2 GiB/vCPU, right for
+#                           the scalar trainer's ~773 MB worker; a PCS/CFR-BR
+#                           worker on the 200 bb tree holds 10.85 GB, so a D64
+#                           fits 11 of 64 cores and this box fits ~46.
+#
+# The map key is the Terraform address (`azurerm_batch_pool.pool["train_big"]`);
+# `name` is what Batch and `poker-solver` call it.
+locals {
+  pools = {
+    train = {
+      name         = "train"
+      display_name = "poker-solver training pool"
+      vm_size      = var.pool_vm_size
+      max_nodes    = var.max_nodes
     }
-  }
-
-  # als_v6 has NO local temp disk, and a run needs the 773 MB abstraction plus
-  # multi-GB checkpoints. This disk is the node's working storage; the start task
-  # formats and mounts it before anything writes.
-  data_disks {
-    lun                  = 0
-    disk_size_gb         = var.data_disk_gb
-    caching              = "ReadWrite"
-    storage_account_type = "Premium_LRS"
-  }
-
-  # Runs once per node, before any task. Inlined rather than fetched from a
-  # resource file so the pool has no external dependency to keep in sync.
-  #
-  # Three jobs: make the data disk usable, install the interpreter toolchain, and
-  # pull the card abstraction down to LOCAL disk. That last one is deliberate --
-  # the abstraction is mmapped during training, and every page fault against the
-  # SMB mount would be a network round-trip.
-  # base64, NOT jsonencode: the script has to survive being a single Batch
-  # command-line string. jsonencode turns newlines into a literal `\n` (so the
-  # whole script arrives as one physical line), escapes `&&` to `&&`,
-  # and any `$`-escaping applied on top is doubly wrong. A base64 blob is
-  # alphanumeric, so nothing in it can be reinterpreted by Terraform or by bash.
-  start_task {
-    command_line       = "/bin/bash -c 'echo ${base64encode(local.start_script)} | base64 -d | bash'"
-    task_retry_maximum = 1
-    wait_for_success   = true
-
-    user_identity {
-      auto_user {
-        elevation_level = "Admin"
-        scope           = "Pool"
-      }
+    train_big = {
+      name         = "train-big"
+      display_name = "poker-solver big-box pool (worker-scaling past one D16)"
+      vm_size      = var.pool_big_vm_size
+      max_nodes    = var.pool_big_max_nodes
+    }
+    train_huge = {
+      name         = "train-huge"
+      display_name = "poker-solver huge-box pool (32 physical cores)"
+      vm_size      = var.pool_huge_vm_size
+      max_nodes    = var.pool_huge_max_nodes
+    }
+    train_mem = {
+      name         = "train-mem"
+      display_name = "poker-solver memory-optimised pool (512 GB)"
+      vm_size      = var.pool_mem_vm_size
+      max_nodes    = var.pool_mem_max_nodes
     }
   }
 }
 
-# --------------------------------------------------------------------------- #
-# The huge-box pool
-# --------------------------------------------------------------------------- #
-# Same shape as `train-big` for the same reason: a THIRD pool rather than a
-# bigger `pool_big_vm_size`, because vm_size forces pool replacement. D64als_v6
-# = 32 physical cores; the DRAM-latency-bound kernel projects ~3x a D16 here.
-# Scale-to-zero means it costs nothing while unused. `just panic` must be run
-# against ALL THREE pools.
-resource "azurerm_batch_pool" "train_huge" {
-  name                = "train-huge"
+# The pools were four separately-named resources before they became one
+# `for_each`. These keep the live pools at their new addresses instead of
+# destroying and recreating them, which would kill every running task.
+moved {
+  from = azurerm_batch_pool.train
+  to   = azurerm_batch_pool.pool["train"]
+}
+
+moved {
+  from = azurerm_batch_pool.train_big
+  to   = azurerm_batch_pool.pool["train_big"]
+}
+
+moved {
+  from = azurerm_batch_pool.train_huge
+  to   = azurerm_batch_pool.pool["train_huge"]
+}
+
+moved {
+  from = azurerm_batch_pool.train_mem
+  to   = azurerm_batch_pool.pool["train_mem"]
+}
+
+# An identity the nodes can present to Azure -- today they have NONE, so a node
+# cannot obtain an AAD token at all (measured: IMDS answers `Identity not
+# found`). No role assignments yet; this is the principal, not its rights.
+resource "azurerm_user_assigned_identity" "pool" {
+  name                = "poker-pool"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  tags                = local.tags
+}
+
+resource "azurerm_batch_pool" "pool" {
+  for_each = local.pools
+
+  name                = each.value.name
   resource_group_name = azurerm_resource_group.main.name
   account_name        = azurerm_batch_account.main.name
-  display_name        = "poker-solver huge-box pool (32 physical cores)"
-  vm_size             = var.pool_huge_vm_size
+  display_name        = each.value.display_name
+  vm_size             = each.value.vm_size
   node_agent_sku_id   = "batch.node.ubuntu 22.04"
 
   # `just panic` disables autoscale and forces a resize to zero, which leaves a
@@ -548,9 +413,22 @@ resource "azurerm_batch_pool" "train_huge" {
   # recovery path has to work unattended, so the pool always yields to Terraform.
   stop_pending_resize_operation = true
 
+  # MEASURED 2026-09-04 (azurerm 4.81.0): the provider plans this as an
+  # IN-PLACE update, not a replacement, so flipping `pool_identity_enabled`
+  # does not kill running tasks. Off until the identity holds a role
+  # assignment, so that a plan of this root stays "No changes" meanwhile.
+  dynamic "identity" {
+    for_each = var.pool_identity_enabled ? [1] : []
+    content {
+      type         = "UserAssigned"
+      identity_ids = [azurerm_user_assigned_identity.pool.id]
+    }
+  }
+
   # Gen2 image, non-negotiable: the als_v6 family cannot boot a Generation 1
   # image, and the failure surfaces as a generic `AllocationFailed` whose real
-  # cause is buried in resizeErrors[].valuesProperty[].value.
+  # cause is buried in resizeErrors[].valuesProperty[].value. Edsv6 is Gen2-only
+  # too, with the same failure mode.
   storage_image_reference {
     publisher = "canonical"
     offer     = "0001-com-ubuntu-server-jammy"
@@ -581,7 +459,7 @@ resource "azurerm_batch_pool" "train_huge" {
   auto_scale {
     evaluation_interval = "PT5M"
     formula             = <<-EOT
-      maxNodes = ${var.pool_huge_max_nodes};
+      maxNodes = ${each.value.max_nodes};
       pending = max($PendingTasks.GetSample(5 * TimeInterval_Minute, 20));
       $TargetDedicatedNodes = min(maxNodes, pending);
       $NodeDeallocationOption = taskcompletion;
@@ -620,6 +498,11 @@ resource "azurerm_batch_pool" "train_huge" {
   # als_v6 has NO local temp disk, and a run needs the 773 MB abstraction plus
   # multi-GB checkpoints. This disk is the node's working storage; the start task
   # formats and mounts it before anything writes.
+  #
+  # Edsv6 DOES have a local temp disk, but the start task finds its working disk
+  # by matching `data_disk_gb` exactly and skipping anything already mounted --
+  # and the agent mounts the temp disk at boot. So the attached disk keeps the
+  # start script identical across all four pools rather than special-casing one.
   data_disks {
     lun                  = 0
     disk_size_gb         = var.data_disk_gb

@@ -44,12 +44,45 @@ class BadEnvironmentError(Exception):
     """
 
 
+# The ops that MINT a run rather than referencing one. Everything else -- an
+# evaluate, a score, a precompute -- is handed the run it works on, or works on
+# no run at all.
+_MINTS_A_RUN = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS})
+
+
+def run_id_for(op: str, run_id: str, task_id: str) -> str:
+    """The run a task's records belong to, and the ONE statement of that rule.
+
+    A fresh training task is given no run id -- the name is derived from the
+    TASK, so a Batch retry, which keeps the task id, continues the run rather
+    than starting a second one from zero. That derivation lived only where the
+    trainer read it, so the node's own leg records wrote the raw (empty)
+    environment variable instead: 1,256 rows across 329 tasks recorded no run at
+    all. Nothing could then attribute a task to its run, `reconcile-runs`
+    reported "no task record" and refused to close 24 finished runs, and their
+    checkpoint ladders were unprunable disk.
+
+    Returns "" for an op that mints nothing, because a precompute has no run and
+    inventing `run-buckets-...` would be a link to something that never existed.
+    """
+    if run_id:
+        return run_id
+    return f"run-{task_id}" if op in _MINTS_A_RUN else ""
+
+
 @dataclass(frozen=True)
 class TaskPlan:
     """One task, as the node will execute it."""
 
     op: str
     config: str = ""
+    # Empty when the dispatching machine had none, which is how a task runs
+    # exactly as it did before the database existed.
+    record_dsn: str = ""
+    #: Container SAS for the checkpoint store. Empty publishes to the share.
+    checkpoint_sas: str = ""
+    # Already spent: the command line fetched the tree with it before this ran.
+    code_url: str = ""
     to: int = 0
     run_id: str = ""
     experiment: str = ""
@@ -59,9 +92,6 @@ class TaskPlan:
     workers: int = 1
     checkpoint_every: int = 0
     retain_every: int = 0
-    universe_boards: int = 0
-    universe_seed: int = 0
-    dtype: str = ""
     warm_start_from: str = ""
     warm_start_weight: int = 0
     warm_start_at: int = 0
@@ -90,13 +120,10 @@ class TaskPlan:
 
     @property
     def train_run_id(self) -> str:
-        """The run a training task writes to.
-
-        Derived from the task when none was given, so a Batch RETRY -- which
-        keeps the same task id -- continues this run rather than starting a
-        second one from zero. That is what makes a retry safe here.
-        """
-        return self.run_id or f"run-{os.environ.get('AZ_BATCH_TASK_ID', 'local')}"
+        """The run a training task writes to. See :func:`run_id_for`."""
+        return run_id_for(
+            self.op or TaskName.TRAIN, self.run_id, os.environ.get("AZ_BATCH_TASK_ID", "local")
+        )
 
     @property
     def commands(self) -> list[list[str]]:

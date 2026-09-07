@@ -28,9 +28,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from src.shared import records
+from src.shared.cloudtask.node import blobstore
 
 if TYPE_CHECKING:
     from pathlib import Path
+from uuid import uuid4
 
 # The deleted dynamic backend's manifest, recognised only so a run predating the
 # static tree is REFUSED rather than fetched and failed several minutes deeper.
@@ -122,7 +124,7 @@ def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: b
             return 0
         size = item.stat().st_size
         if atomic:
-            partial = target.with_name(target.name + ".partial")
+            partial = _partial_path(target)
             shutil.copyfile(item, partial)
             partial.replace(target)
         else:
@@ -135,12 +137,34 @@ def copy_tree(source: Path, destination: Path, *, update: bool = True, atomic: b
         return sum(pool.map(transfer, files))
 
 
-def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
+def _partial_path(destination: Path) -> Path:
+    """A staging name unique to THIS writer.
+
+    `<name>.partial` is deterministic, so two sessions publishing the same run
+    stage to the SAME path: one `replace()` moves it and the other raises
+    ENOENT, aborting a copy whose file was already written correctly. Measured
+    09-03 -- two scoring tasks scored fine, logged "1 scored, 0 failed", and
+    never reached the share because a concurrent publisher won the rename.
+    """
+    return destination.with_name(f"{destination.name}.{os.getpid()}-{uuid4().hex[:8]}.partial")
+
+
+def publish_run(run_dir: Path, destination: Path, log: Log = _quiet, sas: str = "") -> bool:
     """Copy one run directory to the share. Returns False if anything failed.
 
     Idempotent and safe to call while training continues, which is what lets
     the mid-run watcher use it. Never raises: a failed publish must not kill a
     task that is still making progress on local disk.
+
+    WITH A SAS, THE SNAPSHOTS DO NOT GO TO THE SHARE. They go to the container
+    instead -- `publish_rungs_to_blob` puts them there on the same tick -- and
+    what stays here is the metadata: the manifests, `.run.json`, the loose
+    result files. Those are kilobytes; the snapshots were 831 GiB.
+
+    The marker still gets written for a rung that lands in the container, and
+    that is not vestigial: `migrate-checkpoints` refuses to upload an unmarked
+    rung, `prune-checkpoints` reads markers to know what the share holds, and a
+    node fetching from a share that predates the container still needs them.
     """
     destination.mkdir(parents=True, exist_ok=True)
     # READ BEFORE THE LADDER, published after it. A rung takes minutes over SMB
@@ -153,6 +177,18 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
     failed = False
 
     for child in children:
+        if child.is_file() and is_snapshot(child.name):
+            # ONE FILE PER RUNG since the format changed. With a SAS the bytes
+            # go to the container and only the marker lands here; without one
+            # this is the old behaviour with a file where a directory was.
+            marker = destination / marker_for(child.name)
+            if marker.exists():
+                continue
+            if sas or _copy_one(child, destination / child.name, log):
+                _touch(marker)
+            else:
+                failed = True
+            continue
         if not child.is_dir():
             continue
         if not is_snapshot(child.name):
@@ -167,15 +203,24 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
         # measured at 6.6 minutes re-uploading 809 MB already on the share.
         if marker.exists():
             continue
+        # A DIRECTORY SNAPSHOT STILL GOES TO THE SHARE, SAS or not. It is a
+        # rung in the format that came before `.ckpt.zst`, and the container
+        # only takes files -- `publish_rungs_to_blob` skips directories,
+        # because converting one needs `zarr` and this module is imported
+        # before `uv sync`. Skipping the copy here on the strength of a SAS
+        # marked such a rung complete and wrote it NOWHERE.
         _unlink(marker)
         if _publish_snapshot(child, destination / child.name, log):
             _touch(marker)
         else:
             failed = True
 
-    # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded.
+    # Loose files -- .run.json, metrics.jsonl, result json -- manifests excluded,
+    # and SNAPSHOTS excluded: a snapshot is a file now, the branch above has
+    # already decided where its bytes go, and this pass would copy it to the
+    # share regardless of that decision.
     for child in children:
-        if child.is_file() and child.name not in MANIFESTS:
+        if child.is_file() and child.name not in MANIFESTS and not is_snapshot(child.name):
             failed |= not _copy_one(child, destination / child.name, log)
 
     if failed:
@@ -201,8 +246,59 @@ def publish_run(run_dir: Path, destination: Path, log: Log = _quiet) -> bool:
     return True
 
 
+def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quiet) -> int:
+    """PUT every snapshot this run holds that the container does not. Never raises.
+
+    A SEPARATE PASS from `publish_run`, deliberately, though both run on the
+    same tick. The share's short-circuit is its completion MARKER, and a rung
+    already marked there is skipped -- so a Blob publish riding inside that loop
+    would never upload the rungs that landed before the container existed. The
+    two stores answer "do you have this rung" independently, which is also what
+    lets one of them go away.
+
+    Existence is a HEAD against the object itself rather than a marker beside
+    it: one rung is one atomically-committed blob, so there is no half-written
+    state to guard against and nothing to keep in step.
+
+    Returns how many rungs it uploaded. An empty `sas` uploads nothing and
+    returns 0, which is the rollout and the rollback.
+    """
+    if not sas:
+        return 0
+    landed = 0
+    for child in sorted(run_dir.iterdir()):
+        # A snapshot is a FILE now -- the `.ckpt.zst` the trainer wrote. The
+        # directory form is a rung published before the format changed, and the
+        # node never produces one, so it is not uploaded here: `migrate-
+        # checkpoints` converts those, because converting needs zarr and this
+        # module is imported before `uv sync`.
+        if not child.is_file() or not is_snapshot(child.name):
+            continue
+        try:
+            if blobstore.exists(sas, f"{run_id}/{child.name}"):
+                continue
+            size = blobstore.put_object(sas, f"{run_id}/{child.name}", child)
+        except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
+            # LOUD, because the alternative is the failure shape this project
+            # keeps paying for: a write that reports success and lands nowhere.
+            # The share still has the rung today, so this costs a copy and not
+            # the run -- which stops being true the moment the share does.
+            log(f"WARN rung {child.name} NOT in the container: {type(error).__name__}: {error}")
+            continue
+        landed += 1
+        log(f"blob {run_id}/{child.name} <- {size:,} bytes")
+    return landed
+
+
 def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
-    """Is every rung this manifest names actually a directory on the share?
+    """Is every rung this manifest names actually somewhere a fetch can get it?
+
+    A DIRECTORY OR A MARKER. The directory is the share holding the bytes; the
+    marker alone means they went to the container instead, which is what a
+    publish with a SAS does. Requiring the directory would freeze manifest
+    publishing for every run the moment the snapshots stopped landing here --
+    the manifest would name rungs, the share would hold none of them, and the
+    run would never advertise a checkpoint again.
 
     ABSENCE only. A rung present but unmarked is refused at FETCH time by
     :func:`require_complete`, which is where that case belongs -- refusing it
@@ -210,13 +306,14 @@ def _rungs_landed(manifest: bytes, destination: Path, log: Log) -> bool:
     a later publish can add a marker to a rung this node no longer has.
     """
     named = _named_rungs(manifest)
-    missing = sorted(name for name in named if not (destination / name).is_dir())
+    missing = sorted(
+        name
+        for name in named
+        if not (destination / name).is_dir() and not (destination / marker_for(name)).exists()
+    )
     if missing:
-        log(f"WARN manifest names {', '.join(missing)}, not on the share -- NOT publishing it")
+        log(f"WARN manifest names {', '.join(missing)}, nowhere to be found -- NOT publishing it")
         return False
-    unmarked = sorted(n for n in named if not (destination / marker_for(n)).exists())
-    if unmarked:
-        log(f"WARN manifest names unmarked rung(s) {', '.join(unmarked)}; a fetch will refuse them")
     return True
 
 
@@ -293,7 +390,7 @@ def _copy_one(source: Path, destination: Path, log: Log) -> bool:
             return True
     except OSError:
         return True
-    partial = destination.with_name(destination.name + ".partial")
+    partial = _partial_path(destination)
     try:
         copy_file(source, partial)
         partial.replace(destination)
@@ -315,7 +412,7 @@ def _read_bytes(path: Path) -> bytes | None:
 
 def _write_one(body: bytes, destination: Path, log: Log) -> bool:
     """:func:`_copy_one` for bytes already in hand -- the captured manifest."""
-    partial = destination.with_name(destination.name + ".partial")
+    partial = _partial_path(destination)
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(body)
@@ -368,8 +465,14 @@ def fetch_metadata(source: Path, destination: Path) -> None:
             copy_file(child, destination / child.name)
 
 
-def fetch_snapshot(source: Path, destination: Path, name: str) -> None:
-    """Copy one snapshot down, replacing whatever is on the node.
+def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") -> None:
+    """Get one snapshot onto the node, replacing whatever is there.
+
+    THE CONTAINER FIRST, the share as the fallback, and that order is the whole
+    read flip: while both stores hold rungs this prefers the one that is a
+    single request, and when the share stops holding them the fallback simply
+    stops finding anything. `source.name` IS the run id -- the archive
+    directory is named for it -- so nothing has to thread one.
 
     Remove first, and no update check. A cancelled task leaves partial rungs on
     the node, and treating those as already-present means the next task
@@ -377,12 +480,27 @@ def fetch_snapshot(source: Path, destination: Path, name: str) -> None:
     to rung 10000000: "fetched" in one second, then a read error. Node-local
     state is never evidence of a complete copy.
     """
-    target = destination / name
-    shutil.rmtree(target, ignore_errors=True)
-    copy_tree(source / name, target, update=False)
+    stored = records.object_name(name)
+    destination.mkdir(parents=True, exist_ok=True)
+    # BOTH SPELLINGS, not merely the one asked for. The container holds the
+    # object and the share may still hold the directory it was converted from,
+    # so a node that fetched under one name can be holding the other from a
+    # cancelled task -- and a loader that finds the stale one loads a rung this
+    # fetch did not fetch.
+    for stale in {name, stored}:
+        path = destination / stale
+        shutil.rmtree(path, ignore_errors=True)
+        path.unlink(missing_ok=True)
+    if sas and blobstore.get_object(sas, f"{source.name}/{stored}", destination):
+        return
+    published = source / name
+    if published.is_file():
+        copy_file(published, destination / name)
+        return
+    copy_tree(published, destination / name, update=False)
 
 
-def require_complete(source: Path, name: str) -> None:
+def require_complete(source: Path, name: str, sas: str = "") -> None:
     """A rung without its marker is either pre-marker or was interrupted.
 
     The two are indistinguishable from here, and loading a truncated one yields
@@ -394,7 +512,12 @@ def require_complete(source: Path, name: str) -> None:
     and the answer to that is to publish it again from the node that has it,
     not to bless whatever reached the share.
     """
-    if not (source / name).is_dir():
+    # IN THE CONTAINER IS COMPLETE, with nothing else to check. One rung is one
+    # atomically-committed blob: it is either there whole or not there, so the
+    # marker this function exists to demand has no counterpart and needs none.
+    if sas and blobstore.exists(sas, f"{source.name}/{records.object_name(name)}"):
+        return
+    if not (source / name).exists():
         raise FetchRefusedError(f"the manifest names {name} but it is not on the share")
     if not (source / marker_for(name)).exists():
         raise FetchRefusedError(
@@ -403,7 +526,7 @@ def require_complete(source: Path, name: str) -> None:
         )
 
 
-def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> str:
+def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: str = "") -> str:
     """Fetch the one rung the manifest calls current. Returns its name, or "".
 
     What both continuing a run and scoring "the latest checkpoint" need, and in
@@ -435,33 +558,141 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet) -> st
         raise FetchRefusedError(
             f"{records.STATIC_CHECKPOINT} on the share names no current snapshot"
         )
-    require_complete(source, current)
-    fetch_snapshot(source, destination, current)
+    require_complete(source, current, sas)
+    fetch_snapshot(source, destination, current, sas)
     copy_file(source / records.STATIC_CHECKPOINT, destination / records.STATIC_CHECKPOINT)
     log(f"fetched current rung {current} (ladder left on the share)")
     return current
 
 
+ABSTRACTIONS_CONTAINER = "abstractions"
+ABSTRACTION_SUFFIX = ".tar.zst"
+
+
+def abstraction_object(name: str) -> str:
+    """The object one abstraction lives at. `name` is its directory name."""
+    return f"{name}{ABSTRACTION_SUFFIX}"
+
+
+def pack_abstraction(source: Path, destination: Path) -> int:
+    """Tar+zstd one abstraction directory into a single object.
+
+    ONE OBJECT, for the reason a rung is one object: an abstraction is ~10
+    files and a half-uploaded tree is something a node might try to load, where
+    a half-uploaded blob is simply absent.
+    """
+    import subprocess  # noqa: PLC0415 -- stdlib, and only when publishing
+
+    # `tar --zstd` rather than a Python codec: the node closure is stdlib-only
+    # and `zstandard` is not importable before `uv sync`.
+    subprocess.run(
+        ["tar", "--zstd", "-cf", str(destination), "-C", str(source.parent), source.name],
+        check=True,
+    )
+    return destination.stat().st_size
+
+
+def unpack_abstraction(archive_file: Path, destination: Path) -> None:
+    """Extract one packed abstraction into `destination`."""
+    import subprocess  # noqa: PLC0415 -- stdlib, and only when fetching
+
+    destination.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["tar", "--zstd", "-xf", str(archive_file), "-C", str(destination)], check=True)
+
+
+def fetch_abstractions(sas: str, destination: Path, log: Log = _quiet) -> int:
+    """Bring every abstraction the container holds onto this node.
+
+    MERGES, like the share copy it replaces: a node cannot know which
+    abstraction a task will resolve against until the trainer reads its config,
+    and there are ten of them. An abstraction already on the node is not
+    re-fetched, so the steady-state cost is one HEAD each rather than 2.83 GiB.
+    """
+    fetched = 0
+    for name in blobstore.list_container(sas):
+        if not name.endswith(ABSTRACTION_SUFFIX):
+            continue
+        directory = destination / name.removesuffix(ABSTRACTION_SUFFIX)
+        if directory.is_dir():
+            continue
+        packed = destination / name
+        if not blobstore.get_object(sas, name, destination):
+            log(f"  WARN {name} vanished from the container")
+            continue
+        try:
+            unpack_abstraction(packed, destination)
+            fetched += 1
+            log(f"  fetched abstraction {directory.name}")
+        finally:
+            packed.unlink(missing_ok=True)
+    return fetched
+
+
+def manifest_entries(source: Path) -> list[tuple[int, str]]:
+    """Every (iteration, snapshot name) the manifest CLAIMS, ascending.
+
+    The claim is what a fetch resolves and what a migration has to reproduce.
+    Listing the share's directories answers a different question and cannot see
+    a rung whose bytes are gone: six runs hold 316 marked rungs with no
+    directory at all, and a directory-driven check reported nothing to do.
+    """
+    manifest = read_manifest(source / records.STATIC_CHECKPOINT)
+    if not manifest:
+        return []
+    entries = [*manifest.get("retained", [])]
+    if manifest.get("zarr"):
+        entries.append({"iteration": manifest.get("iteration"), "zarr": manifest["zarr"]})
+    claimed: dict[int, str] = {}
+    for entry in entries:
+        iteration, name = entry.get("iteration"), entry.get("zarr")
+        if iteration is None or not name:
+            continue
+        claimed[int(iteration)] = str(name)
+    return sorted(claimed.items())
+
+
+def _ladder_names(source: Path) -> dict[str, str]:
+    """Iteration (as a string) -> the snapshot name the manifest gives it.
+
+    Keyed on the string because that is what a `--at` flag carries; an int key
+    would make every caller convert, and one of them would forget.
+    """
+    return {str(iteration): name for iteration, name in manifest_entries(source)}
+
+
 def fetch_for_evaluation(
-    source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet
+    source: Path, destination: Path, rungs: Sequence[str], log: Log = _quiet, sas: str = ""
 ) -> list[str]:
     """Fetch only the rungs being scored. Returns the ones that arrived.
 
     Selective because the whole ladder is thirty ~540 MB rungs, ~16 GB, to
     score three of them. A rung that cannot be fetched is skipped and named
     rather than fatal: a partial curve beats none.
+
+    THE MANIFEST NAMES THE RUNG, and this used to build `static-<rung>.zarr` by
+    hand instead. That is a second opinion about a name the manifest already
+    holds, and it survives only as long as every snapshot is a zarr directory:
+    a run whose manifest was repointed to the new format would have every rung
+    "missing" here while sitting on the share untouched.
     """
     fetch_metadata(source, destination)
+    ladder = _ladder_names(source)
     fetched = []
     for rung in rungs:
-        name = f"static-{rung}.zarr"
+        name = ladder.get(str(rung), "")
+        if not name:
+            # Skipped rather than guessed. There is no name to try: the manifest
+            # is what says a rung was published, so a rung it does not name has
+            # no bytes to fetch under any spelling.
+            log(f"  WARN rung {rung}: the manifest names no snapshot at that iteration")
+            continue
         try:
-            require_complete(source, name)
+            require_complete(source, name, sas)
         except FetchRefusedError as refusal:
             log(f"  WARN rung {rung}: {refusal}")
             continue
         try:
-            fetch_snapshot(source, destination, name)
+            fetch_snapshot(source, destination, name, sas)
         except OSError as error:
             # Reported, not swallowed: a silent copy failure becomes a
             # confusing load error minutes later, in a different subsystem.

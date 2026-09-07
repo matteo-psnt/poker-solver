@@ -48,6 +48,36 @@ UNVERSIONED = 0
 # solver. Spelled once, so a rename cannot leave a copy behind.
 STATIC_CHECKPOINT = "STATIC_CHECKPOINT.json"
 
+# The snapshot format's own extension, named here for the reason above: the
+# node wrapper resolves a rung's file name and cannot import `snapshot_format`,
+# which is what defines it.
+SNAPSHOT_SUFFIX = ".ckpt.zst"
+
+LEGACY_SNAPSHOT_SUFFIX = ".zarr"
+
+
+def object_name(snapshot: str) -> str:
+    """The name a rung is STORED under, whatever a manifest happens to call it.
+
+    `static-100.zarr` and `static-100.ckpt.zst` both name one rung; only the
+    second is a thing the container holds. A manifest written before the
+    migration still spells the old name and is never rewritten -- repointing
+    would mutate 300+ manifests on the durable share and destroy the share
+    fallback for exactly the runs whose only other copy is the container. So
+    the two spellings coexist permanently, and the mapping between them exists
+    HERE and nowhere else, because the sweep that writes the object and the
+    check that looks for it have to agree or the object is unreachable. They
+    did not agree: 1,081 rungs were uploaded that no reader could resolve.
+
+    IDEMPOTENT, because a repointed manifest already names the object and the
+    same lookups run against both. Appending unconditionally produced
+    `static-100.ckpt.zst.ckpt.zst`, which is a 404 that reads as a missing rung.
+    """
+    if snapshot.endswith(SNAPSHOT_SUFFIX):
+        return snapshot
+    return snapshot.removesuffix(LEGACY_SNAPSHOT_SUFFIX) + SNAPSHOT_SUFFIX
+
+
 Kind = Literal["snapshot", "log"]
 Scope = Literal["local", "share"]
 
@@ -120,19 +150,6 @@ REGISTRY: dict[str, Artifact] = {
         what="a precomputed card abstraction's config, hash and per-street shape",
         where="<abstraction_dir>/metadata.json",
         growth="one per abstraction; rewritten in place",
-    ),
-    "telemetry/invocations.jsonl": Artifact(
-        name="telemetry/invocations.jsonl",
-        kind="log",
-        scope="local",
-        version=1,
-        what="one row per command that ran: how long, from which surface, how it ended",
-        where="$POKER_SOLVER_CACHE/telemetry/invocations.jsonl (never the share)",
-        growth="one row per invocation, so a console tab adds ~1,200/hour -- rotated at "
-        "8 MB keeping one generation. The ONLY entry here that is disposable by "
-        "design: it is a cache in the `shared.cache` sense, not a record. On the "
-        "share it would be an append with no atomic rename, a per-document scheme "
-        "outgrowing legs/ in hours, and a round trip added to every command",
     ),
     "legs/*.start.json": Artifact(
         name="legs/*.start.json",

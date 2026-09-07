@@ -69,7 +69,6 @@ export type Cost = S["CostPayload"];
 export type Billed = S["BilledPayload"];
 
 /** This tool's own behaviour, and the local reads. */
-export type Activity = S["ActivityPayload"];
 export type Configs = S["ConfigsPayload"];
 export type Autoscale = S["AutoscalePayload"];
 
@@ -81,9 +80,7 @@ export type Autoscale = S["AutoscalePayload"];
  * specific halves were invisible in the schema.
  */
 export type Dispatched = S["SubmitPayload"] | S["ScorePayload"] | S["PrecomputeDispatchPayload"];
-export type DispatchedVector = S["SubmitVectorPayload"];
 export type PushedCode = S["PushedCodePayload"];
-export type PushedData = S["PushedDataPayload"];
 export type Compacted = S["CompactedPayload"];
 export type Cancelled = S["CancelledPayload"];
 export type Box = S["BoxPayload"];

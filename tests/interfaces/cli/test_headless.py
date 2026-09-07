@@ -1,6 +1,7 @@
 """Tests for the headless (non-interactive) CLI transport."""
 
 import argparse
+import contextlib
 import json
 from datetime import UTC
 from types import SimpleNamespace
@@ -10,17 +11,16 @@ import pytest
 
 from src.interfaces.cli import headless
 from src.interfaces.commands import _base
+from src.interfaces.commands import evaluate as evaluate_cmd
 from src.interfaces.commands import ledger as ledger_cmd
 from src.interfaces.commands import train_static as train_static_cmd
 from src.interfaces.errors import CommandError
-from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.services import (
     LBR_ESTIMATOR_LABEL,
     StaticTrainingOutput,
 )
 from src.pipeline.services import scoring as services_scoring
 from src.shared.jsonio import json_default
-from tests.test_helpers import seed_ledger
 
 
 def test_json_default_coerces_numpy_scalar():
@@ -65,6 +65,19 @@ def test_no_command_writes_a_self_overwriting_result_file():
     assert not hasattr(_base, "write_result")
 
 
+def _no_record(monkeypatch, command_module):
+    """The work is faked, so the record it would write to is too: these tests
+    must never reach a real server through the store state."""
+
+    @contextlib.contextmanager
+    def _sink():
+        yield None
+
+    monkeypatch.setattr(command_module.connect, "record_sink", _sink)
+    monkeypatch.setattr(command_module.connect, "eval_sink_from_environment", lambda: None)
+    monkeypatch.setattr(command_module.connect, "record_source_from_environment", lambda: None)
+
+
 def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
     """With --json, log noise must go to stderr and stdout must be parseable JSON."""
     out = StaticTrainingOutput(
@@ -87,6 +100,7 @@ def test_main_train_json_stdout_is_clean(monkeypatch, tmp_path, capsys):
         return out
 
     monkeypatch.setattr(train_static_cmd.services, "train_static", _fake_train)
+    _no_record(monkeypatch, train_static_cmd)
 
     rc = headless.main(["train-static", "--config", "quick_test", "--json"])
 
@@ -114,6 +128,7 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     # Patched on the owning submodule: `evaluate_and_record` dispatches through its
     # own namespace, which the re-export in the package __init__ does not stand in for.
     monkeypatch.setattr(services_scoring, "evaluate_run_lbr", lambda *a, **kw: fake_out)
+    _no_record(monkeypatch, evaluate_cmd)
 
     rc = headless.main(["evaluate", "--run", "run-xyz", "--runs-dir", str(tmp_path), "--json"])
 
@@ -124,108 +139,45 @@ def test_main_evaluate_defaults_to_lbr(monkeypatch, tmp_path, capsys):
     assert payload["infosets"] == 42
 
 
-def _seed_eval(led_path, run_dir, run_id, *, base_seed, mbb, samples, method="lbr", timestamp=None):
-    """Write a per-eval DOCUMENT (and a ledger row, for tests that read one).
+def _rows(monkeypatch, *documents):
+    """The page the server would cut: every document, oldest first."""
+    monkeypatch.setattr(ledger_cmd.connect, "engine_from_environment", lambda: object())
+    monkeypatch.setattr(
+        ledger_cmd.queries, "ledger_page", lambda _e, **_f: (len(documents), list(documents))
+    )
 
-    The document is what matters now: with no local runs directory the index is
-    rebuilt from the published documents on every read, so a test that seeded
-    only a ledger row was seeding something nothing reads.
-    """
-    knobs = {
-        "scorer": "myopic",
-        "opponent": "blueprint",
-        "hands": len(samples or []),
-        "runouts": 12,
-        "include_off_tree": False,
-        "base_seed": base_seed,
+
+def _document(run_id, *, mbb=100.0, timestamp=None):
+    return {
+        "run_id": run_id,
+        "method": "lbr",
+        "timestamp": timestamp,
+        "knobs": {"scorer": "myopic", "opponent": "blueprint", "hands": 3, "base_seed": 7},
+        "results": {"exploitability_mbb": mbb, "std_error_mbb": 1.0, "num_hands": 3},
     }
-    results = {
-        "exploitability_mbb": mbb,
-        "std_error_mbb": 1.0,
-        "num_hands": len(samples or []),
-        "base_seed": base_seed,
-    }
-    # `samples=None` seeds an eval with NO per-hand vector, which is what the
-    # paired comparison refuses on -- a real shape, not a malformed record.
-    if samples is not None:
-        results["pair_samples_mbb"] = samples
-    slug = eval_ledger.eval_slug(knobs)
-    provenance = eval_ledger.RunProvenance(
-        run_id=run_id,
-        git_commit="cafebabe" * 5,
-        git_dirty=False,
-        config_name="quick_test",
-        card_abstraction_hash="hash",
-        action_config_hash="beefcafe",
-    )
-    record = eval_ledger.build_record(
-        provenance=provenance,
-        method=method,
-        estimator=LBR_ESTIMATOR_LABEL,
-        infosets=10,
-        knobs=knobs,
-        results=results,
-        result_path=run_dir / "evals" / f"{slug}.json",
-        timestamp=timestamp or "2026-07-17T00:00:00",
-    )
-    eval_ledger.write_eval(run_dir, record, slug)
-    seed_ledger(led_path, eval_ledger.ledger_row(record))
 
 
-def test_cmd_ledger_lists_rows(tmp_path, published):
-    led = tmp_path / "ledger.jsonl"
-    run_dir = tmp_path / "run-a"
-    run_dir.mkdir()
-    _seed_eval(led, run_dir, "run-a", base_seed=7, mbb=100.0, samples=[1.0, 2.0, 3.0])
+def _ledger_ns(**over):
+    base = {"run": None, "limit": 25, "experiment": None, "method": None, "since": None}
+    return argparse.Namespace(**(base | over))
 
-    payload = ledger_cmd.run(
-        argparse.Namespace(
-            ledger=str(led),
-            run=None,
-            limit=25,
-            experiment=None,
-            method=None,
-            since=None,
-            rebuild=False,
-            migrate=False,
-            runs_dir=str(tmp_path),
-        )
-    )
+
+def test_cmd_ledger_lists_rows(monkeypatch):
+    _rows(monkeypatch, _document("run-a"))
+    payload = ledger_cmd.run(_ledger_ns())
     assert payload.op == "ledger"
     assert len(payload.rows) == 1
     assert payload.rows[0].run_id == "run-a"
 
 
-def _ledger_ns(led, tmp_path, **over):
-    base = {
-        "ledger": str(led),
-        "run": None,
-        "limit": 25,
-        "experiment": None,
-        "method": None,
-        "since": None,
-        "rebuild": False,
-        "migrate": False,
-        "runs_dir": str(tmp_path),
-    }
-    base.update(over)
-    return argparse.Namespace(**base)
-
-
-def test_since_filter_compares_instants_not_strings(tmp_path, published):
+def test_since_filter_compares_instants_not_strings(monkeypatch):
     """The ledger holds naive-local legacy rows beside UTC-aware ones; a
     lexicographic cutoff skews them by the writer's UTC offset."""
     from datetime import datetime, timedelta
 
-    led = tmp_path / "ledger.jsonl"
     now = datetime.now().astimezone()
     old_naive = (now - timedelta(hours=2)).replace(tzinfo=None).isoformat()
     new_utc = (now + timedelta(hours=2)).astimezone(UTC).isoformat()
-    for run_id, ts in (("old", old_naive), ("new", new_utc)):
-        (tmp_path / run_id).mkdir()
-        _seed_eval(
-            led, tmp_path / run_id, run_id, base_seed=1, mbb=1.0, samples=[1.0], timestamp=ts
-        )
-
-    payload = ledger_cmd.run(_ledger_ns(led, tmp_path, since=now.isoformat()))
+    _rows(monkeypatch, _document("old", timestamp=old_naive), _document("new", timestamp=new_utc))
+    payload = ledger_cmd.run(_ledger_ns(since=now.isoformat()))
     assert [r.run_id for r in payload.rows] == ["new"]

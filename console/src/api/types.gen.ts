@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/api/activity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Activity */
-        get: operations["_activity_api_activity_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/autoscale": {
         parameters: {
             query?: never;
@@ -277,6 +260,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/experiments/{experiment_id}/arms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Arms */
+        get: operations["_arms_api_experiments__experiment_id__arms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -345,6 +345,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profiles */
+        get: operations["_profiles_api_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/push-code": {
         parameters: {
             query?: never;
@@ -356,23 +373,6 @@ export interface paths {
         put?: never;
         /** Push Code */
         post: operations["_push_code_api_push_code_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/push-data": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Push Data */
-        post: operations["_push_data_api_push_data_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -481,40 +481,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/submit-coupling": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Submit Coupling */
-        post: operations["_submit_coupling_api_submit_coupling_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/submit-vector": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Submit Vector */
-        post: operations["_submit_vector_api_submit_vector_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -543,6 +509,23 @@ export interface paths {
         put?: never;
         /** Cancel */
         post: operations["_cancel_api_tasks__job_id___task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Profile */
+        post: operations["_profile_api_tasks__task_id__profile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -605,55 +588,6 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * ActivityPayload
-         * @description The local activity log, summarised.
-         *
-         *     The only payload here that describes THIS TOOL rather than the solver or the
-         *     cloud. `exists`/`enabled` are two different empty states with different fixes
-         *     -- nothing has run yet, versus recording is switched off -- and collapsing
-         *     them would send someone hunting for a bug in the writer.
-         */
-        ActivityPayload: {
-            /** By Surface */
-            by_surface?: {
-                [key: string]: number;
-            };
-            /** Commands */
-            commands?: components["schemas"]["CommandActivity"][];
-            /** Days */
-            days: number;
-            /** Enabled */
-            enabled: boolean;
-            /** Exists */
-            exists: boolean;
-            /** Failures */
-            failures?: components["schemas"]["Failure"][];
-            /**
-             * Failures Only
-             * @default false
-             */
-            failures_only: boolean;
-            /** First At */
-            first_at?: string | null;
-            /** Log */
-            log: string;
-            /**
-             * Op
-             * @default activity
-             * @constant
-             */
-            op: "activity";
-            /** Rows */
-            rows: number;
-            /**
-             * Total Failures
-             * @default 0
-             */
-            total_failures: number;
-            /** Total Rows */
-            total_rows: number;
-        };
-        /**
          * ApiError
          * @description A refusal (422) or an outage (503). The only non-payload body served.
          */
@@ -662,6 +596,79 @@ export interface components {
             error: string;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * ArmPoint
+         * @description One arm's score at one checkpoint, inside one tier.
+         */
+        ArmPoint: {
+            /** Arm */
+            arm: string;
+            /** Exploitability Mbb */
+            exploitability_mbb: number;
+            /** Iteration */
+            iteration: number;
+            /** Run Id */
+            run_id: string | null;
+            /** Std Error Mbb */
+            std_error_mbb: number;
+            /** Vs Control Mbb */
+            vs_control_mbb?: number | null;
+            /** Vs Control Stderr Mbb */
+            vs_control_stderr_mbb?: number | null;
+        };
+        /**
+         * ArmTier
+         * @description Every arm scored with ONE instrument, and their differences.
+         *
+         *     A tier is the unit of comparison, so it is also the unit of rendering. Two
+         *     arms scored at different board budgets are two numbers about different
+         *     games; they appear in separate tiers and are never subtracted.
+         */
+        ArmTier: {
+            /** Arms */
+            arms: string[];
+            /** Control */
+            control: string | null;
+            /** Points */
+            points: components["schemas"]["ArmPoint"][];
+            /** Tier */
+            tier: string;
+            /** Unmatched Iterations */
+            unmatched_iterations: number[];
+        };
+        /**
+         * ArmsOutput
+         * @description What `arms` answers: one experiment's arms, grouped by instrument.
+         */
+        ArmsOutput: {
+            /** Experiment Id */
+            experiment_id: string;
+            /** Tiers */
+            tiers: components["schemas"]["ArmTier"][];
+            /**
+             * Tiers Without Control
+             * @default 0
+             */
+            tiers_without_control: number;
+            /**
+             * Unplaceable Records
+             * @default 0
+             */
+            unplaceable_records: number;
+        };
+        /**
+         * ArmsPayload
+         * @description What `arms` answers. The console can read this unchanged.
+         */
+        ArmsPayload: {
+            /**
+             * Op
+             * @default arms
+             * @constant
+             */
+            op: "arms";
+            result: components["schemas"]["ArmsOutput"];
         };
         /**
          * AutoscalePayload
@@ -918,28 +925,6 @@ export interface components {
         Combos: {
             /** Combos */
             combos: string[];
-        };
-        /**
-         * CommandActivity
-         * @description One command's cost, over the window.
-         */
-        CommandActivity: {
-            /** Calls */
-            calls: number;
-            /** Command */
-            command: string;
-            /** Errors */
-            errors: number;
-            /** Max Seconds */
-            max_seconds: number;
-            /** P50 Seconds */
-            p50_seconds: number;
-            /** P95 Seconds */
-            p95_seconds: number;
-            /** Refusals */
-            refusals: number;
-            /** Total Seconds */
-            total_seconds: number;
         };
         /** CompactBody */
         CompactBody: {
@@ -1210,28 +1195,6 @@ export interface components {
             /** Type */
             type: string;
         };
-        /**
-         * Failure
-         * @description One recorded failure, with what was asked for when it happened.
-         */
-        Failure: {
-            /** Asked */
-            asked?: {
-                [key: string]: unknown;
-            };
-            /** At */
-            at?: string | null;
-            /** Command */
-            command?: string | null;
-            /** Error */
-            error?: string | null;
-            /** Error Type */
-            error_type?: string | null;
-            /** Outcome */
-            outcome?: string | null;
-            /** Surface */
-            surface?: string | null;
-        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1345,8 +1308,6 @@ export interface components {
          * @description Recorded evaluations, derived from the published per-run documents.
          */
         LedgerPayload: {
-            /** Ledger */
-            ledger: string;
             /** Matched */
             matched: number;
             /**
@@ -1707,6 +1668,11 @@ export interface components {
              * @constant
              */
             op: "submit-precompute";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /** Target Name */
             target_name: string;
             /**
@@ -1714,6 +1680,34 @@ export interface components {
              * @default []
              */
             tasks: string[];
+        };
+        /**
+         * ProfilePayload
+         * @description What was asked for, and what came back.
+         *
+         *     `landed` is null for `--no-wait` and for a wait that timed out; the two are
+         *     told apart by `waited`, because a request that was served slowly and one
+         *     that was never served are different problems.
+         */
+        ProfilePayload: {
+            /** Available */
+            available?: string[] | null;
+            /** Downloaded */
+            downloaded?: string | null;
+            /** Landed */
+            landed?: string | null;
+            /**
+             * Op
+             * @default profile
+             * @constant
+             */
+            op: "profile";
+            /** Seconds */
+            seconds?: number | null;
+            /** Task */
+            task?: string | null;
+            /** Waited */
+            waited?: number | null;
         };
         /**
          * ProgressPayload
@@ -1775,13 +1769,6 @@ export interface components {
             /** Root */
             root?: string | null;
         };
-        /** PushDataBody */
-        PushDataBody: {
-            /** Name */
-            name?: string | null;
-            /** Source */
-            source?: string | null;
-        };
         /**
          * PushedCodePayload
          * @description The snapshot that was sealed. Its id is what a task executes.
@@ -1795,25 +1782,6 @@ export interface components {
              * @constant
              */
             op: "push-code";
-        };
-        /**
-         * PushedDataPayload
-         * @description Abstraction name to files uploaded. Empty means everything was current.
-         */
-        PushedDataPayload: {
-            /**
-             * Op
-             * @default push-data
-             * @constant
-             */
-            op: "push-data";
-            /**
-             * Uploaded
-             * @default {}
-             */
-            uploaded: {
-                [key: string]: number;
-            };
         };
         /**
          * ResizeError
@@ -1897,6 +1865,10 @@ export interface components {
              * @default 0
              */
             total_progress_rows: number;
+            /** Trainer Knobs */
+            trainer_knobs: {
+                [key: string]: unknown;
+            };
             /** Training Tasks */
             training_tasks?: number | null;
         };
@@ -2029,6 +2001,8 @@ export interface components {
             flags?: string[] | null;
             /** Method */
             method?: string | null;
+            /** Pool */
+            pool?: string | null;
             /** Run */
             run: string;
             /** Timeout */
@@ -2051,6 +2025,11 @@ export interface components {
              * @constant
              */
             op: "score";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /** Run Id */
             run_id: string;
             /** Rungs */
@@ -2100,8 +2079,6 @@ export interface components {
             checkpoint_every?: number | null;
             /** Config */
             config?: string | null;
-            /** Dtype */
-            dtype?: string | null;
             /** Equity Prior Temperature */
             equity_prior_temperature?: number | null;
             /** Equity Prior Weight */
@@ -2124,10 +2101,6 @@ export interface components {
             timeout?: string | null;
             /** To */
             to: number;
-            /** Universe Boards */
-            universe_boards?: number | null;
-            /** Universe Seed */
-            universe_seed?: number | null;
             /** Warm Start At */
             warm_start_at?: number | null;
             /** Warm Start From */
@@ -2138,49 +2111,6 @@ export interface components {
             warm_start_weight?: number | null;
             /** Workers */
             workers?: number | null;
-        };
-        /** SubmitCouplingBody */
-        SubmitCouplingBody: {
-            /** Abstractions */
-            abstractions: string[];
-            /** Board Relative */
-            board_relative?: boolean | null;
-            /** Boards */
-            boards?: number | null;
-            /** Classes */
-            classes?: string | null;
-            /** Seed */
-            seed?: number | null;
-            /** Timeout */
-            timeout?: string | null;
-        };
-        /**
-         * SubmitCouplingPayload
-         * @description A dispatch, plus which abstractions it priced.
-         */
-        SubmitCouplingPayload: {
-            /** Abstractions */
-            abstractions?: string[];
-            /**
-             * Boards
-             * @default 0
-             */
-            boards: number;
-            /** Code Snapshot */
-            code_snapshot: string;
-            /** Job Id */
-            job_id: string;
-            /**
-             * Op
-             * @default submit-coupling
-             * @constant
-             */
-            op: "submit-coupling";
-            /**
-             * Tasks
-             * @default []
-             */
-            tasks: string[];
         };
         /**
          * SubmitPayload
@@ -2197,60 +2127,13 @@ export interface components {
              * @constant
              */
             op: "submit";
+            /**
+             * Records To Database
+             * @default false
+             */
+            records_to_database: boolean;
             /** Target Iteration */
             target_iteration: number;
-            /**
-             * Tasks
-             * @default []
-             */
-            tasks: string[];
-        };
-        /** SubmitVectorBody */
-        SubmitVectorBody: {
-            /** Abstractions */
-            abstractions: string[];
-            /** Board Relative */
-            board_relative?: boolean | null;
-            /** Checkpoints */
-            checkpoints?: string | null;
-            /** Config */
-            config?: string | null;
-            /** Derive Boards */
-            derive_boards?: number[] | null;
-            /** Kernels */
-            kernels?: string[] | null;
-            /** Score Boards */
-            score_boards?: number | null;
-            /** Score Seeds */
-            score_seeds?: number[] | null;
-            /** Stack */
-            stack?: number | null;
-            /** Timeout */
-            timeout?: string | null;
-            /** Train Boards */
-            train_boards?: number | null;
-        };
-        /**
-         * SubmitVectorPayload
-         * @description A dispatch, plus WHICH ARMS it queued.
-         *
-         *     The arms are the part worth reading back: which abstractions and kernels to
-         *     compare IS the experiment, and a payload that reported only "3 tasks queued"
-         *     could not say what was being measured.
-         */
-        SubmitVectorPayload: {
-            /** Arms */
-            arms?: components["schemas"]["VectorArm"][];
-            /** Code Snapshot */
-            code_snapshot: string;
-            /** Job Id */
-            job_id: string;
-            /**
-             * Op
-             * @default submit-vector
-             * @constant
-             */
-            op: "submit-vector";
             /**
              * Tasks
              * @default []
@@ -2491,20 +2374,6 @@ export interface components {
             /** Error Type */
             type: string;
         };
-        /** VectorArm */
-        VectorArm: {
-            /** Abstraction */
-            abstraction: string;
-            /** Derive Boards */
-            derive_boards: number;
-            /** Kernel */
-            kernel: string;
-            /**
-             * Score Seed
-             * @default 999
-             */
-            score_seed: number;
-        };
     };
     responses: never;
     parameters: never;
@@ -2514,47 +2383,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    _activity_api_activity_get: {
-        parameters: {
-            query?: {
-                days?: number;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     _autoscale_api_autoscale_get: {
         parameters: {
             query?: never;
@@ -3109,6 +2937,48 @@ export interface operations {
             };
         };
     };
+    _arms_api_experiments__experiment_id__arms_get: {
+        parameters: {
+            query?: {
+                control?: string;
+            };
+            header?: never;
+            path: {
+                experiment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArmsPayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     _jobs_api_jobs_get: {
         parameters: {
             query?: {
@@ -3272,18 +3142,14 @@ export interface operations {
             };
         };
     };
-    _push_code_api_push_code_post: {
+    _profiles_api_profiles_get: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PushCodeBody"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3291,7 +3157,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PushedCodePayload"];
+                    "application/json": components["schemas"]["ProfilePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3314,7 +3180,7 @@ export interface operations {
             };
         };
     };
-    _push_data_api_push_data_post: {
+    _push_code_api_push_code_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3323,7 +3189,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PushDataBody"];
+                "application/json": components["schemas"]["PushCodeBody"];
             };
         };
         responses: {
@@ -3333,7 +3199,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PushedDataPayload"];
+                    "application/json": components["schemas"]["PushedCodePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */
@@ -3602,90 +3468,6 @@ export interface operations {
             };
         };
     };
-    _submit_coupling_api_submit_coupling_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitCouplingBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmitCouplingPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _submit_vector_api_submit_vector_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitVectorBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmitVectorPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     _tasks_api_tasks_get: {
         parameters: {
             query?: {
@@ -3746,6 +3528,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancelledPayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    _profile_api_tasks__task_id__profile_post: {
+        parameters: {
+            query?: {
+                seconds?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfilePayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

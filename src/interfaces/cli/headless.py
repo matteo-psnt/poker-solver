@@ -24,7 +24,8 @@ import sys
 import textwrap
 from typing import TYPE_CHECKING
 
-from src.interfaces import telemetry
+from src.adapters.postgres.connect import NoRecordError, unreachable_hint
+from src.interfaces.cloud.config import export_record_dsn
 from src.interfaces.commands import BY_NAME, COMMANDS, GROUPS
 from src.interfaces.errors import CommandError
 from src.shared import jsonio
@@ -132,6 +133,10 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_logging()
+    # The record's address comes from the store state, once, before any command
+    # asks. Sealed into a task at dispatch under the same name, so a node --
+    # which has no Terraform -- finds it already set.
+    export_record_dsn()
     # Resolved before the parser is built, not by it: which subcommand was asked
     # for is what decides how much of the tool has to be imported.
     argv = sys.argv[1:] if argv is None else argv
@@ -142,23 +147,18 @@ def main(argv: list[str] | None = None) -> int:
         # their level from the run config, and the flag must outrank it there.
         pin_level_for_children(args.log_level)
         configure_logging(args.log_level)
-    # `execute` rather than `run`: it is the seam both surfaces share, and the
-    # only place a command's duration and outcome are observed. Calling the
-    # handler directly here would make the command line -- the surface that runs
-    # the expensive things -- the one absent from its own activity log.
     try:
-        with telemetry.surface("cli"):
-            if args.json:
-                # Library layers log to stderr, but third-party writers (numba,
-                # zarr) can still print to stdout; redirect so the JSON blob is
-                # the ONLY thing on stdout and machine consumers can parse it.
-                with contextlib.redirect_stdout(sys.stderr):
-                    payload = command.execute(args)
-                print(jsonio.dumps(payload, indent=2))
-            else:
-                payload = command.execute(args)
-                command.render(payload)
-    except CommandError as error:
+        if args.json:
+            # Library layers log to stderr, but third-party writers (numba,
+            # zarr) can still print to stdout; redirect so the JSON blob is
+            # the ONLY thing on stdout and machine consumers can parse it.
+            with contextlib.redirect_stdout(sys.stderr):
+                payload = command.run(args)
+            print(jsonio.dumps(payload, indent=2))
+        else:
+            payload = command.run(args)
+            command.render(payload)
+    except (CommandError, NoRecordError) as error:
         # This is where the command line puts back what the core no longer
         # assumes. A bad request used to `raise SystemExit(msg)` from wherever
         # it was detected, which printed to stderr and exited 1; that is
@@ -166,6 +166,12 @@ def main(argv: list[str] | None = None) -> int:
         # it. Anything that is NOT a CommandError still tracebacks -- a bug
         # should look like one.
         print(f"error: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        hint = unreachable_hint(error)
+        if hint is None:
+            raise
+        print(f"error: {hint}", file=sys.stderr)
         return 1
     return 0
 

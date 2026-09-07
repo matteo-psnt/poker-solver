@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.ledger import tiers
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
@@ -39,6 +40,10 @@ from src.pipeline.services.scoring.matches import (
 )
 from src.shared import records
 
+# At runtime, not under TYPE_CHECKING: this module has no postponed
+# annotations, and `ports` is Protocols with no imports of its own.
+from src.shared.ports.record import EvalSink, RecordSource
+
 PROGRESS_ARTIFACT = "evaluate-progress.json"
 
 logger = logging.getLogger(__name__)
@@ -48,9 +53,9 @@ class EvaluationPayload(BaseModel):
     """What one evaluation of one checkpoint measured.
 
     NODE-ONLY: `score` is the console's door, and the durable record is the
-    per-run document this writes, not this payload. `ledger_result_path` is
-    absent when recording failed -- which is deliberate and must stay possible,
-    because a failed WRITE must never lose the measurement that was made.
+    document this hands the sink, not this payload. `eval_id` is absent when
+    recording failed -- deliberate, and it must stay possible: a failed RECORD
+    must never lose the measurement that was made.
     """
 
     op: Literal["evaluate"] = "evaluate"
@@ -60,7 +65,9 @@ class EvaluationPayload(BaseModel):
     infosets: int
     checkpoint_iteration: int | None = None
     results: dict[str, Any] = Field(default_factory=dict)
-    ledger_result_path: str | None = None
+    # The slug the document is stored under. Was `ledger_result_path`, which
+    # named a file; there is no file.
+    eval_id: str | None = None
     tree_fingerprint: str | None = None
 
 
@@ -83,6 +90,8 @@ def evaluate_and_record(
     at_iteration: int | None = None,
     progress_file: Path | None = None,
     policy_profile: bool = False,
+    sink: EvalSink | None = None,
+    record_source: RecordSource | None = None,
 ) -> EvaluationPayload:
     """Evaluate a run and persist the result to the eval ledger (best-effort).
 
@@ -91,8 +100,8 @@ def evaluate_and_record(
     here once, so a cloud eval and a local eval cannot drift.
 
     Returns the portable evaluate payload; when recording succeeded it carries
-    ``ledger_result_path``. Recording failures print a warning but never fail
-    the evaluation itself — the ledger is a research convenience.
+    ``eval_id``. Recording failures print a warning but never fail the
+    evaluation itself — the ledger is a research convenience.
 
     ``at_iteration`` scores a retained ladder rung rather than the published
     snapshot; each rung records its own ``checkpoint_iteration``, so a run's
@@ -111,6 +120,7 @@ def evaluate_and_record(
             # minutes and made a long score look exactly like a hung one.
             on_branch=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             policy_profile=policy_profile,
+            record_source=record_source,
         )
         estimator = EXACT_BR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_exact_br_knobs_from_params(
@@ -128,6 +138,9 @@ def evaluate_and_record(
             mix_run=br_config.mix_run.name if br_config.mix_run else None,
             mix_at=br_config.mix_at,
             mix_weight=br_config.mix_weight,
+            deployed=br_config.deployed,
+            resolver_iterations=br_config.resolver_iterations,
+            resolver_prior_weight=br_config.resolver_prior_weight,
         )
     elif method == "resolver_match":
         # Not an exploitability estimate at all: a head-to-head chip edge of
@@ -144,6 +157,7 @@ def evaluate_and_record(
             leaf_rollouts=resolver_leaf_rollouts,
             workers=resolver_gate_workers,
             allin_runouts=resolver_allin_runouts,
+            record_source=record_source,
         )
         estimator = RESOLVER_GATE_ESTIMATOR_LABEL
         knobs = eval_ledger.build_resolver_match_knobs(out.results)
@@ -157,6 +171,7 @@ def evaluate_and_record(
             resolver_blend_alpha=resolver_blend_alpha,
             abstraction_hash=abstraction_hash,
             at_iteration=at_iteration,
+            record_source=record_source,
         )
         estimator = LBR_ESTIMATOR_LABEL
         knobs = eval_ledger.build_lbr_knobs(config, out.results)
@@ -170,8 +185,8 @@ def evaluate_and_record(
         tree_fingerprint=out.tree_fingerprint,
     )
     try:
-        metadata = load_run_metadata(run_dir)
-        result_path, _ = eval_ledger.record_evaluation(
+        metadata = load_run_metadata(run_dir, record_source)
+        eval_id, document = eval_ledger.record_evaluation(
             run_dir=run_dir,
             payload=payload.model_dump(),
             provenance=eval_ledger.RunProvenance(
@@ -193,8 +208,16 @@ def evaluate_and_record(
             estimator=estimator,
             knobs=knobs,
         )
-        payload.ledger_result_path = str(result_path)
-        logger.info(f"  Recorded:      {result_path}")
+        payload.eval_id = eval_id
+        # The SINK is the record now; there is no file to fall back to, so a
+        # sink that is None means this measurement is not kept. Said plainly
+        # rather than logged as a success. The digest is derived HERE because
+        # `tiers` owns the rule and a sink may not import it.
+        if sink is None:
+            logger.warning(f"  Ledger:        NOT RECORDED ({eval_id}): no eval sink")
+        else:
+            sink.scored(eval_id, run_dir.name, document, tiers.tier_digest(document))
+            logger.info(f"  Recorded:      {eval_id}")
     except Exception as exc:  # recording must never break the eval  # noqa: BLE001 -- recording must never break the eval it records
         logger.warning(f"  Ledger:        skipped ({type(exc).__name__}: {exc})")
     return payload

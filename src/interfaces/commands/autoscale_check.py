@@ -54,7 +54,14 @@ def run(args: argparse.Namespace) -> AutoscalePayload:  # noqa: ARG001
     # half-blind failure the payload docstring warns about (train-big was once
     # missing here; train-huge repeated it).
     wanted = [
-        pool_id for pool_id in (config.pool_id, config.pool_big_id, config.pool_huge_id) if pool_id
+        pool_id
+        for pool_id in (
+            config.pool_id,
+            config.pool_big_id,
+            config.pool_huge_id,
+            config.pool_mem_id,
+        )
+        if pool_id
     ]
     with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
         evaluated = list(

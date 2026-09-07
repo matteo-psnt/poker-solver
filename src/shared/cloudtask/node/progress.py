@@ -23,7 +23,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from src.shared.cloudtask import kinds, task_log
-from src.shared.cloudtask.node import archive
+from src.shared.cloudtask.node import archive, legmirror
 from src.shared.cloudtask.node.plan import TaskPlan, parse_environment
 from src.shared.cloudtask.node.process import GRACE_SECONDS
 
@@ -116,8 +116,21 @@ class ProgressWatcher:
         work actually ended rather than wherever it was up to a tick before.
         """
         self._stop.set()
+        started = time.monotonic()
         self._thread.join(timeout=GRACE_SECONDS)
+        joined = time.monotonic() - started
+        alive = self._thread.is_alive()
         self._sample()
+        # The last unsplit piece of a task's tail. `run_guarded` now reports the
+        # child gone 25.7s in and the pump joined with it, while the handler
+        # returns 374s in -- so 348 of those seconds are HERE, and this says
+        # whether they are the join giving up on a tick still in flight or the
+        # final sample itself.
+        self._log(
+            f"watcher stopped: joined after {joined:.1f}s"
+            + (" (THREAD STILL RUNNING)" if alive else "")
+            + f", final sample after {time.monotonic() - started - joined:.1f}s"
+        )
 
     def _loop(self) -> None:
         # Progress goes out immediately and then on its OWN, much finer cadence
@@ -147,7 +160,7 @@ class ProgressWatcher:
         if self._plan is not None:
             state = node_state(self._paths, self._plan)
             state.update(self._noted)
-            publish(self._paths, self._plan, state)
+            publish(self._plan, state)
 
     def _send_log(self) -> None:
         """Here rather than on `LadderWatcher`, which is training-only: an
@@ -163,7 +176,17 @@ class ProgressWatcher:
             self._publish_log()
 
     def _coarse(self) -> None:
-        """The slow tick. Progress alone has nothing to do on it."""
+        """The slow tick. NOTHING to do at this level any more.
+
+        It used to re-read the task's files off the share and upsert whatever it
+        found, which was self-healing while records had files. Every record now
+        writes its own row where it is made, so there is nothing to reconcile
+        and no directory to list.
+
+        The hook stays because the CADENCE is still needed: `LadderWatcher`
+        publishes the retained ladder on it, and that is minutes-worth work that
+        must not run on the fifteen-second sample tick.
+        """
 
 
 class LadderWatcher(ProgressWatcher):
@@ -188,10 +211,24 @@ class LadderWatcher(ProgressWatcher):
     _seen = ""
 
     def _coarse(self) -> None:
+        # Training's watcher, so it does the base tick's work too -- an override
+        # that forgot this is a training task that mirrors nothing.
+        super()._coarse()
         state = archive.ladder_state(self._run_dir)
         if state and state != self._seen:
             self._log(f"retained ladder changed -> {state}")
-            archive.publish_run(self._run_dir, self._paths.archive / self._run_dir.name, self._log)
+            archive.publish_run(
+                self._run_dir,
+                self._paths.archive / self._run_dir.name,
+                self._log,
+                self._plan.checkpoint_sas if self._plan else "",
+            )
+            archive.publish_rungs_to_blob(
+                self._run_dir,
+                self._run_dir.name,
+                self._plan.checkpoint_sas if self._plan else "",
+                self._log,
+            )
             self._seen = state
 
 
@@ -264,21 +301,37 @@ def units_done(paths: NodePaths) -> float:
     return 0.0
 
 
-def publish(paths: NodePaths, plan: TaskPlan, state: Mapping[str, object]) -> None:
-    """Sample the kind and write it to the share. NEVER fatal.
+def publish(plan: TaskPlan, state: Mapping[str, object]) -> None:
+    """Sample the kind and store the row. NEVER fatal.
 
     A task must not die because the thing describing it could not be written --
-    the share can be slow, a sample can be torn, and none of that is a reason to
+    the database can be slow or briefly unreachable, and neither is a reason to
     lose the work. The reader treats a missing sample as "no bar", which is what
     it was before this existed.
+
+    No `paths`: it took one to find the share directory it wrote into, and there
+    is no file to write. The `_record` START claim is the one write on this path
+    allowed to fail, and it is not this one.
     """
     with contextlib.suppress(Exception):
         progress = kinds.kind(plan.op).sample(plan, state)
         if progress is not None:
-            task_log.write_progress_record(
-                paths.share,
+            # THE ROW, AND NO FILE. Progress is the first record to stop being
+            # published: `tasks` reads it from the database, it is replaced
+            # every fifteen seconds, and a sample that is superseded that fast
+            # is the one whose loss costs least. Writing it to a share with
+            # 14,000 files in one directory was also the single most expensive
+            # thing a running task did.
+            written = task_log.progress_record(
                 task_id=task_log.current_task_id("local"),
                 progress=_windowed(progress),
+            )
+            legmirror.record(
+                str(written["task_id"]),
+                task_log.TASK_SCOPED,
+                "progress",
+                written,
+                dsn=plan.record_dsn,
             )
 
 

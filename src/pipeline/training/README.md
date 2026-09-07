@@ -93,8 +93,11 @@ A checkpoint is those arrays plus a **16-byte tree fingerprint**, and nothing
 else — the tree already says which infoset each row is. (Carrying that mapping
 explicitly was ~83% of the old write cost.)
 
-    <dir>/STATIC_CHECKPOINT.json     manifest: current + retained ladder
-    <dir>/static-<iteration>.zarr    the arrays
+    <dir>/STATIC_CHECKPOINT.json         manifest: current + retained ladder
+    <run>/static-<iteration>.ckpt.zst    the arrays, one object in the `checkpoints` container
+
+(The manifest still names a rung `static-<iteration>.zarr`; `shared.records.object_name`
+maps that to the object. Manifests are never repointed.)
 
 The fingerprint is load-bearing, not defensive: a checkpoint carries no
 self-describing row identity, so loading one against a different tree would not

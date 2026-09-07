@@ -14,7 +14,7 @@ failure is ever visible.
 Layout on disk::
 
     <dir>/STATIC_CHECKPOINT.json     manifest: current + retained ladder
-    <dir>/static-<iteration>.zarr    the five arrays
+    <dir>/static-<iteration>.ckpt.zst    the five arrays, one object
 
 The manifest is published with an atomic ``Path.replace`` after the arrays are
 fully written, so a snapshot is either current or absent, never half-current.
@@ -27,35 +27,28 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numcodecs
 import numpy as np
-import zarr
 
+from src.engine.solver.storage import snapshot_format
 from src.engine.solver.storage.static_array import _ARRAYS, StaticArrayStorage
 from src.shared import records
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = "static-1"
 
-# clevel=1: benchmarked as both fastest and smallest for these arrays. The
-# chunk size is set by FILE COUNT, not by the write: a snapshot is copied to
-# the share one file at a time over SMB, and at 50k rows a production table
-# was 5,507 files and 20+ minutes per rung. Measured 08-22 at production
-# size with ~85%-coverage content (838 MiB either way):
-#     50k  5,507 files  write 2.6 s  read 3.4 s
-#     4M      79 files  write 0.6 s  read 1.7 s     <- this
-#    16M      27 files  write 1.0 s  read 3.7 s
-DEFAULT_COMPRESSION_LEVEL = 1
-DEFAULT_CHUNK_SIZE = 4_000_000
+# The chunk size these constants tuned is GONE with the format. It was set by
+# FILE COUNT rather than by the write -- a snapshot was copied to the share one
+# file at a time over SMB, and at 50k rows a production table was 5,507 files
+# and 20+ minutes per rung, which 4M chunks cut to 79 files. One object per rung
+# retires the whole question; compression now lives in `snapshot_format`.
 
 
 class FingerprintMismatchError(RuntimeError):
@@ -130,9 +123,8 @@ def save_checkpoint(
     *,
     retain_every: int = 0,
     abstraction_id: str | None = None,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> Path:
-    """Write a snapshot and atomically publish it. Returns the zarr path.
+    """Write a snapshot and atomically publish it. Returns the snapshot path.
 
     ``abstraction_id`` identifies the bucket ASSIGNMENT, which the tree
     fingerprint deliberately does not cover: the fingerprint pins node identity,
@@ -143,26 +135,24 @@ def save_checkpoint(
     """
     checkpoint_dir = Path(checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    zarr_path = checkpoint_dir / f"static-{iteration}.zarr"
+    snapshot_path = checkpoint_dir / f"static-{iteration}{snapshot_format.SUFFIX}"
 
-    compressor = numcodecs.Blosc(
-        cname="zstd", clevel=DEFAULT_COMPRESSION_LEVEL, shuffle=numcodecs.Blosc.BITSHUFFLE
+    # A trainer's own scaffolding rides along beside the five. It is not part of
+    # the answer and nothing reading a checkpoint needs it, but a run reaching
+    # its target in several tasks would otherwise restart it from zero at every
+    # task boundary -- and CFR-BR's opponent lives in there.
+    arrays = {name: np.asarray(getattr(storage, name)) for name in (*_ARRAYS, *storage.extra)}
+    snapshot_format.write_snapshot(
+        snapshot_path,
+        arrays,
+        {
+            "iteration": iteration,
+            "fingerprint": storage.tree.fingerprint(),
+            "format_version": FORMAT_VERSION,
+            "num_rows": storage.tree.num_rows,
+            "num_slots": storage.tree.num_slots,
+        },
     )
-    root = zarr.open(zarr.DirectoryStore(zarr_path), mode="w")
-    for name in _ARRAYS:
-        array = getattr(storage, name)
-        root.create_dataset(
-            name,
-            data=np.asarray(array),
-            chunks=(min(chunk_size, max(1, array.shape[0])),),
-            compressor=compressor,
-            dtype=array.dtype,
-        )
-    root.attrs["iteration"] = iteration
-    root.attrs["fingerprint"] = storage.tree.fingerprint()
-    root.attrs["format_version"] = FORMAT_VERSION
-    root.attrs["num_rows"] = storage.tree.num_rows
-    root.attrs["num_slots"] = storage.tree.num_slots
 
     previous = StaticCheckpointManifest.read(checkpoint_dir)
     if (
@@ -179,11 +169,14 @@ def save_checkpoint(
 
     manifest = {
         "iteration": iteration,
-        "zarr": zarr_path.name,
+        # STILL SPELLED `zarr`, and deliberately: it is the field every
+        # published manifest already carries and every reader already looks up.
+        # Renaming it would make 1,081 existing rungs unreadable to buy a word.
+        "zarr": snapshot_path.name,
         "fingerprint": storage.tree.fingerprint(),
         "abstraction_id": abstraction_id,
         "format_version": FORMAT_VERSION,
-        "retained": _extend_ladder(previous, iteration, zarr_path.name, retain_every),
+        "retained": _extend_ladder(previous, iteration, snapshot_path.name, retain_every),
     }
     # Through the substrate, which keeps the atomic replace this has always
     # relied on and adds the envelope's schema_version beside `format_version`
@@ -196,7 +189,7 @@ def save_checkpoint(
     )
 
     _prune(checkpoint_dir, manifest)
-    return zarr_path
+    return snapshot_path
 
 
 def _extend_ladder(
@@ -221,11 +214,19 @@ def _extend_ladder(
 
 
 def _prune(checkpoint_dir: Path, manifest: dict) -> None:
-    """Delete snapshots that are neither current nor retained."""
-    keep = {manifest["zarr"]} | {entry["zarr"] for entry in manifest["retained"]}
-    for path in checkpoint_dir.glob("static-*.zarr"):
+    """Delete snapshots that are neither current nor retained.
+
+    THROUGH `object_name` ON BOTH SIDES. The manifest of a run that started
+    before the format changed names `static-N.zarr` while the file beside it is
+    `static-N.ckpt.zst`, so comparing the two literally kept nothing: the rung
+    a resume had just fetched matched no entry and was deleted as surplus.
+    """
+    keep = {records.object_name(manifest["zarr"])} | {
+        records.object_name(entry["zarr"]) for entry in manifest["retained"]
+    }
+    for path in checkpoint_dir.glob(f"static-*{snapshot_format.SUFFIX}"):
         if path.name not in keep:
-            shutil.rmtree(path, ignore_errors=True)
+            path.unlink(missing_ok=True)
 
 
 #: What a PLAYER reads. `regrets`, `reach_counts` and `cumulative_utility` exist
@@ -281,17 +282,22 @@ def load_checkpoint(
         )
 
     entry = manifest.entry_for(at_iteration)
-    root = _open_snapshot(checkpoint_dir, entry, legacy if translate else expected)
+    # Push the restriction DOWN to the read. The rung is one compressed object
+    # now, so filtering after the fact would decompress every array and throw
+    # most of them away -- which is the whole cost a play-only load avoids.
+    root = _open_snapshot(checkpoint_dir, entry, legacy if translate else expected, arrays)
 
     row_source, slot_source = _legacy_index_maps(storage.tree) if translate else (None, None)
     if translate:
         logger.info("Checkpoint is v1 node-major; permuting arrays into the bucket-major layout.")
+    # `arrays` restricts WHAT is read; `storage.extra` widens it. They compose:
+    # a play-only load wants two of the base arrays and none of a trainer's.
     wanted = set(arrays) if arrays is not None else None
-    for name in _ARRAYS:
+    for name in (*_ARRAYS, *(name for name in storage.extra if name in root)):
         if wanted is not None and name not in wanted:
             continue
         target = getattr(storage, name)
-        source = root[name][:]
+        source = root[name]
         if source.shape != target.shape:
             raise ValueError(
                 f"Checkpoint array {name!r} has shape {source.shape}, storage expects "
@@ -311,16 +317,25 @@ def load_checkpoint(
     return loaded
 
 
-def _open_snapshot(checkpoint_dir: Path, entry: dict, expected: str):
-    """One rung's zarr group, refusing arrays the manifest disagrees with."""
-    root = zarr.open(zarr.DirectoryStore(Path(checkpoint_dir) / entry["zarr"]), mode="r")
-    stored = root.attrs.get("fingerprint")
+def _open_snapshot(
+    checkpoint_dir: Path, entry: dict, expected: str, names: Iterable[str] | None = None
+) -> dict[str, np.ndarray]:
+    """One rung's arrays, refusing any the manifest disagrees with.
+
+    THE NAME IS MAPPED, NOT TRUSTED. A manifest written before the format
+    changed still spells `static-N.zarr` and is never repointed -- rewriting
+    them would have mutated the durable share -- so `records.object_name` is
+    what turns the claim into the file that exists.
+    """
+    path = Path(checkpoint_dir) / records.object_name(entry["zarr"])
+    arrays, attrs = snapshot_format.read_snapshot(path, names)
+    stored = attrs.get("fingerprint")
     if stored != expected:
         raise FingerprintMismatchError(
             f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected {expected}. "
-            "The manifest and the arrays disagree; the directory is corrupt."
+            "The manifest and the arrays disagree; the snapshot is corrupt."
         )
-    return root
+    return arrays
 
 
 def read_strategy_sum(storage: StaticArrayStorage, checkpoint_dir: Path, iteration: int):
@@ -346,7 +361,7 @@ def read_strategy_sum(storage: StaticArrayStorage, checkpoint_dir: Path, iterati
     root = _open_snapshot(
         checkpoint_dir, manifest.entry_for(iteration), legacy if translate else expected
     )
-    values = root["strategy_sum"][:]
+    values = root["strategy_sum"]
     if values.shape != storage.strategy_sum.shape:
         raise ValueError(
             f"Rung {iteration} holds {values.shape} slots, storage expects "

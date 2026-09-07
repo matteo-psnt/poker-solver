@@ -82,21 +82,6 @@ TRAIN_CASES = {
     "reporting": _plan(progress_path=REPORTING),
 }
 
-VECTOR_CASES = {
-    "bare": _plan(op=TaskName.TRAIN_VECTOR, universe_boards=2000),
-    "full": _plan(
-        op=TaskName.TRAIN_VECTOR,
-        universe_boards=2000,
-        universe_seed=7,
-        checkpoint_every=25,
-        dtype="float32",
-        experiment="exp-7",
-        arm="control",
-        parent="run-x",
-        sets=("solver__dcfr=1.5",),
-    ),
-    "reporting": _plan(op=TaskName.TRAIN_VECTOR, universe_boards=2000, progress_path=REPORTING),
-}
 
 PCS_CASES = {
     "bare": _plan(op=TaskName.TRAIN_PCS, workers=8),
@@ -133,16 +118,6 @@ def test_every_flag_a_training_task_passes_is_declared(task):
     argv = task.commands[0]
     assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
     assert not _undeclared(argv), _message(argv)
-
-
-@pytest.mark.parametrize("task", VECTOR_CASES.values(), ids=list(VECTOR_CASES))
-def test_every_flag_a_board_free_task_passes_is_declared(task):
-    """The kind this file was WRITTEN for: `train-vector` died four seconds in,
-    three times, on a `--workers` it does not declare. It had no case here."""
-    argv = task.commands[0]
-    assert _declared(argv[0]), f"`{argv[0]}` is not a registered command"
-    assert not _undeclared(argv), _message(argv)
-    assert "--workers" not in argv, "the board-free kernel is ONE process"
 
 
 @pytest.mark.parametrize("task", PCS_CASES.values(), ids=list(PCS_CASES))

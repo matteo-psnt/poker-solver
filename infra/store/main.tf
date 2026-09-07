@@ -29,6 +29,8 @@ provider "azurerm" {
   features {}
 }
 
+data "azurerm_client_config" "current" {}
+
 locals {
   tags = {
     project    = "poker-solver"
@@ -74,12 +76,151 @@ resource "azurerm_storage_account" "store" {
   }
 }
 
+# WHERE THE CHECKPOINTS GO. A rung is ~4,200 zarr chunk files on the share and
+# takes minutes to copy over SMB; as ONE tar object it is a single request, and
+# object existence becomes completeness -- which is what `checkpoints` in the
+# record already claims to be a cache OF.
+#
+# A container rather than a second share because Azure Files cannot TIER. One
+# rung per run is current and the rest are scored evidence nobody reads; the
+# lifecycle policy below moves those toward Cold at a fraction of the price.
+resource "azurerm_storage_container" "checkpoints" {
+  name                  = var.checkpoints_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# WHERE A DISPATCH SEALS THE TREE. One tarball per submission, fetched by the
+# task command line over HTTPS with a read-only SAS for that one blob -- so a
+# node needs no mount, no key and no SDK to get its code. On the share this
+# directory grew without bound (80 snapshots in 6 days); here the policy below
+# expires them.
+resource "azurerm_storage_container" "code" {
+  name                  = var.code_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# NO LIFECYCLE RULE, deliberately. The policy below is prefix-matched to the
+# checkpoints container and must stay that way: an abstraction is read by EVERY
+# node at boot, so tiering it toward Cold would put a cold-read on the critical
+# path of every task rather than on evidence nobody opens. There are ten of
+# them and they total 2.83 GiB; the tiering is not worth the read.
+resource "azurerm_storage_container" "abstractions" {
+  name                  = var.abstractions_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# COLD, NOT ARCHIVE, and the distinction is operational rather than thrifty:
+# rehydrating an archived blob takes HOURS, and a rung is exactly the thing a
+# resume or a score reaches for without warning. Cold is milliseconds to read
+# and still a fraction of Hot.
+#
+# Keyed on the blob's own age, which is a proxy for the rung's: a run publishes
+# its ladder as it trains, so an old blob is an old rung. The CURRENT rung of an
+# active run is republished on every publish pass, which keeps it warm for as
+# long as the run is alive.
+resource "azurerm_storage_management_policy" "checkpoints" {
+  storage_account_id = azurerm_storage_account.store.id
+
+  rule {
+    name    = "cool-then-cold"
+    enabled = true
+    filters {
+      prefix_match = ["${var.checkpoints_container_name}/"]
+      blob_types   = ["blockBlob"]
+    }
+    actions {
+      base_blob {
+        # 14 days: longer than any arm has taken to go from training to scored,
+        # so a rung is never chilled while its own experiment is still reading it.
+        tier_to_cool_after_days_since_modification_greater_than = 14
+        tier_to_cold_after_days_since_modification_greater_than = 90
+      }
+    }
+  }
+
+  # A second RULE, not a second resource: Azure allows one policy per account.
+  rule {
+    name    = "expire-code-snapshots"
+    enabled = true
+    filters {
+      prefix_match = ["${var.code_container_name}/"]
+      blob_types   = ["blockBlob"]
+    }
+    actions {
+      base_blob {
+        # 14 days: a job's max wall clock is P2D and a task's P1D, so no task can still be extracting a snapshot older than that.
+        delete_after_days_since_modification_greater_than = 14
+      }
+    }
+  }
+}
+
 resource "azurerm_storage_share" "data" {
   name               = var.share_name
   storage_account_id = azurerm_storage_account.store.id
   quota              = var.share_quota_gb
 
+  # HOT, not TransactionOptimized. The premium tier buys cheap transactions at
+  # roughly twice the per-GiB price, and it was the right trade when the record
+  # was written to this share a document at a time: 241 MILLION transactions on
+  # 2026-08-25, where Hot's per-operation rate would have dominated everything.
+  #
+  # The record moved to Postgres on 09-03 and the share stopped being written
+  # per-record. Measured the same day: 1.3 million transactions, a ~200x drop,
+  # against ~830 GiB of mostly-cold checkpoints. The premium now buys nothing
+  # and is charged on every GiB.
+  #
+  # Hot rather than Cool because a resume still FETCHES a rung: Cool halves
+  # storage again but multiplies the read, and this share exists to be read from
+  # by nodes. Checkpoints are moving to Blob, where lifecycle tiering can do
+  # what Files cannot -- this is the right tier for what REMAINS.
+  access_tier = "Hot"
+
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# TERRAFORM STATE for all three roots (`infra/`, `infra/store/`, `infra/serve/`),
+# one blob each. Here rather than in the compute account for the same reason
+# everything else here is: `just destroy` must not be able to reach the record
+# of what the compute IS. Contains resource detail, hence private, and the
+# backends authenticate with AAD rather than the account key.
+#
+# This root stores ITS OWN state in this container, so the container has to
+# exist before `backend.tf.disabled` is renamed -- see "State" in infra/README.md.
+resource "azurerm_storage_container" "tfstate" {
+  name                  = "tfstate"
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# The operator's blob rights on the account, ONE assignment. `use_azuread_auth`
+# on the state backends needs Storage Blob Data Contributor, and that role
+# already covers reading `checkpoints` -- a separate Storage Blob Data Reader
+# would grant nothing this one does not. Scoped to the account rather than the
+# `tfstate` container so it is that single grant and not one per container.
+resource "azurerm_role_assignment" "operator_blob_contributor" {
+  scope                = azurerm_storage_account.store.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
 }

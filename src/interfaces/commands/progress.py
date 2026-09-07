@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.adapters.postgres import connect, queries
 from src.interfaces.commands._base import (
     Command,
     num,
     pct,
-    records_root,
-    resolve_run_dir,
+    resolve_run_id,
 )
 from src.interfaces.errors import CommandError
 from src.shared import records, run_events
@@ -77,17 +77,17 @@ def run(args: argparse.Namespace) -> ProgressPayload:
     The run record holds a start and an end; this is the only thing that can say
     where coverage plateaued or whether throughput decayed over wall clock.
     """
-    with records_root(args) as root:
-        run_dir = resolve_run_dir(args.run, str(root))
-        rows = run_events.checkpoints(run_events.read(run_dir))
+    engine = connect.engine_from_environment()
+    run_id = resolve_run_id(args.run, engine)
+    rows = queries.checkpoint_series(engine, run_id)
     if not rows:
         raise CommandError(
-            f"No checkpoint history in {run_dir}. It is recorded per checkpoint, so "
+            f"No checkpoint history for {run_id}. It is recorded per checkpoint, so "
             "the run must have reached one under a version that records it."
         )
     low, high = records.version_span(rows)
     return ProgressPayload(
-        run_id=run_dir.name,
+        run_id=run_id,
         total_rows=len(rows),
         schema_version_min=low,
         schema_version_max=high,

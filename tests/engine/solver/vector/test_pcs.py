@@ -27,6 +27,7 @@ from tests.engine.solver.vector.contexts import (
     MIN_SHOWDOWN_SIGNAL,
     ordered_context,
     showdown_signal,
+    sparse_context,
 )
 from tests.test_helpers import make_test_config
 
@@ -216,3 +217,44 @@ class TestConvergence:
             pcs.iterate([contexts[rng.integers(len(contexts))]], iteration)
         later = score()
         assert 0 < later < early / 3
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_it_keeps_falling_when_a_board_occupies_only_part_of_the_bucket_space(self):
+        """The fixtures above give every board every bucket. Production gives one
+        runout 48 of 100 flop, 58 of 300 turn and 81 of 600 river buckets, so a row
+        is written by a MINORITY of boards and the per-visit DCFR discount reaches
+        each street at its own rate. Nothing else here exercises that, and the
+        failure it would hide is a plateau -- which is why the late window is
+        asserted separately from the overall drop."""
+        buckets = {Street.FLOP: 12, Street.TURN: 12, Street.RIVER: 16}
+        counts = {Street.PREFLOP: 169, **buckets}
+        config = make_test_config(seed=42, small_blind=1, big_blind=2, starting_stack=STACK)
+        rules = GameRules(small_blind=1, big_blind=2)
+        tree = BettingTree(
+            rules, ActionModel(config), starting_stack=STACK, buckets_per_street=buckets
+        )
+        compiled = compile_tree(tree, rules)
+        rng = np.random.default_rng(23)
+        contexts = [sparse_context(rng, counts, occupancy=0.25, num_cards=DECK) for _ in range(6)]
+        assert showdown_signal(contexts, counts) > MIN_SHOWDOWN_SIGNAL
+        occupied = len(np.unique(contexts[0].buckets_for(Street.RIVER)))
+        assert occupied < buckets[Street.RIVER], "the fixture fills every row; nothing is sparse"
+
+        pcs, _, strategy_sum = _pcs(compiled, weighting="dcfr", cfr_plus=False)
+        scorer = BoardMixtureCFR(compiled, contexts)
+        initial = np.ones(contexts[0].num_hands, dtype=np.float32)
+        pairs = float(np.mean([(~c.blocks).sum() for c in contexts]))
+        draw = np.random.default_rng(11)
+
+        def score() -> float:
+            scorer.strategy_sum[:] = strategy_sum
+            return scorer.exploitability(initial, pairs)
+
+        marks = {}
+        for iteration in range(384):
+            pcs.iterate([contexts[draw.integers(len(contexts))]], iteration)
+            if iteration + 1 in (1, 128, 384):
+                marks[iteration + 1] = score()
+        assert 0 < marks[384] < marks[1] / 5
+        assert marks[384] < marks[128] / 1.3, "the drop stalled after the first hundred boards"

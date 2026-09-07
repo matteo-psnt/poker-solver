@@ -156,15 +156,19 @@ def record_evaluation(
     estimator: str,
     knobs: dict[str, Any],
     timestamp: str | None = None,
-) -> tuple[Path, dict[str, Any]]:
-    """Persist one evaluation as a single non-clobbering document under the run dir.
+) -> tuple[str, dict[str, Any]]:
+    """Build one evaluation document. Returns ``(eval_id, document)``.
 
     The single recording path shared by every caller (local CLI and node), so a
-    cloud eval and a local eval produce the same on-disk provenance and can be paired
-    by :func:`tier_mismatches` without either surface reimplementing the schema.
+    cloud eval and a local eval produce the same provenance and can be paired by
+    :func:`tier_mismatches` without either surface reimplementing the schema.
 
-    ``payload`` must carry ``results`` (with the per-hand ``pair_samples_mbb``) and
-    ``infosets``. Returns the document path and the document.
+    WRITES NOTHING. The document goes to `EvalSink.scored`, and the slug that
+    used to name its file is now the identity it is stored under -- the same
+    string either way, because `eval_id` was always `result_path.stem`.
+
+    ``payload`` must carry ``results`` (with the per-hand ``pair_samples_mbb``)
+    and ``infosets``.
     """
     slug = eval_slug(knobs)
     document = build_record(
@@ -179,8 +183,12 @@ def record_evaluation(
         checkpoint_iteration=payload.get("checkpoint_iteration"),
         eval_tree_fingerprint=payload.get("tree_fingerprint"),
     )
-    path = write_eval(run_dir, document, slug)
-    return path, document
+    # STILL STAMPED. `write_snapshot` used to stamp on the way out and return
+    # nothing, so the unstamped dict was what every caller got -- and the record
+    # sink stored THAT, leaving 37 evals whose database row had no
+    # `schema_version` while the file it mirrored did. One eval, two answers.
+    # With no file left, this is the only stamp there is.
+    return slug, record_store.stamp(document, record_store.REGISTRY["evals/*.json"])
 
 
 def eval_slug(knobs: dict[str, Any]) -> str:
@@ -219,6 +227,16 @@ def ledger_row(document: dict[str, Any]) -> dict[str, Any]:
 def write_eval(run_dir: Path, document: dict[str, Any], slug: str) -> Path:
     """Write one evaluation to ``evals/<slug>.json``. Never overwrites.
 
+    THE LAST FILE WRITER, and it has exactly one caller: `record_blueprint_match`.
+    A blueprint match is PAIRWISE and `evals` has a single `run_id` foreign key,
+    so its payload -- which carries BOTH runs' abstraction hashes, the only thing
+    that makes a cross-depth chip edge interpretable -- has nowhere to go in that
+    table. Deleting this with the rest of the JSON would not migrate that data,
+    it would discard it.
+
+    Wiring matches to a sink needs a schema that admits two runs; until then this
+    stays, and `record_evaluation` no longer calls it.
+
     The slug is timestamp + knob hash + random suffix, so re-evaluating a run
     under the same settings cannot clobber a prior result and concurrent writers
     on several boxes cannot collide.
@@ -254,12 +272,20 @@ def record_instant(record: dict[str, Any]) -> datetime:
 
 
 def payload_pointer(result_path: Path, run_id: str) -> str:
-    """Portable, run-relative pointer to a payload: ``<run_id>/evals/<file>``.
+    """The eval's NAME, shaped ``<run_id>/evals/<file>``.
 
-    Rows used to store a working-directory-relative path, which resolves to nothing
-    on a machine that mounts its data elsewhere -- or, worse, to a *different*
-    machine's local ``data/``. Anchoring at the run id makes the pointer mean the
-    same thing wherever the runs directory happens to live.
+    It was a pointer to a file, and for every row written before the flip it
+    still resolves to one. Nothing writes that file now, so for a new row this
+    is an identity and not a location -- `load_payload` will not find it, which
+    is correct, because there is nothing to find.
+
+    The SHAPE is kept rather than shortened to the slug: `rebuild_ledger` keys on
+    this string and 2,238 historical documents carry it in this form. Two shapes
+    under one key would pair a new row against nothing.
+
+    (Rows once stored a working-directory-relative path, which resolved to
+    nothing on a machine mounting its data elsewhere -- or worse, to a different
+    machine's local ``data/``. Anchoring at the run id is why it survived.)
     """
     return f"{run_id}/{result_path.parent.name}/{result_path.name}"
 

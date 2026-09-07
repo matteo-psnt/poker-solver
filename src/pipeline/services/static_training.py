@@ -26,18 +26,24 @@ from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.services import equity_prior, warm_start
-from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
+from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
 from src.pipeline.training.static_parallel import train_static_parallel
-from src.shared import records, run_events
+from src.shared import records
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
+    from src.shared.ports.record import RecordSink, RecordSource
 
 PROGRESS_ARTIFACT = "train-progress.json"
 
 logger = logging.getLogger(__name__)
+
+# What the scalar trainer IS, for the resume guard. No `pcs` section: this
+# trainer never reads one, so a difference there is not a lineage break. `game`
+# is one, though -- it sizes the tree the checkpoint is shaped for.
+TRAINER_BLOCKS = ("game", "solver")
 
 
 class StaticTrainingOutput(BaseModel):
@@ -76,6 +82,12 @@ def train_static(
     warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
     warm_start_at: int | None = None,
     progress_file: Path | None = None,
+    # Dual write. `None` writes files only, which is what every task did
+    # before the database existed and what one dispatched without a DSN
+    # still does. Constructed by the COMMAND, never here: the composition
+    # root is the only layer allowed to know which adapter this is.
+    sink: RecordSink | None = None,
+    record_source: RecordSource | None = None,
     warm_start_shape: str = "flat",
     equity_prior_weight: int = 0,
     equity_prior_temperature: float = equity_prior.DEFAULT_TEMPERATURE,
@@ -139,12 +151,17 @@ def train_static(
     # fresh metadata over a live run, skips verify_action_config_hash, and
     # restarts training from zero into a directory holding a real ladder --
     # which save_checkpoint then extends with mixed-lineage rungs and prunes.
-    resuming = run_events.log_path(run_dir).exists() or (run_dir / ".run.json").exists()
+    # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
+    # written, so a directory check answers `False` for every run created
+    # after the flip -- which mints fresh metadata over a live ladder and
+    # restarts training from zero.
+    resuming = has_run_record(run_dir, record_source)
 
     action_model = ActionModel(config)
     if resuming:
-        tracker = RunTracker.load(run_dir)
+        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
+        tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()
@@ -165,6 +182,8 @@ def train_static(
                 f"'{config_name}' is stale (config hash mismatch). Recompute it. ({e})"
             ) from e
         tracker = RunTracker(
+            sink=sink,
+            source=record_source,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,
@@ -275,6 +294,7 @@ def train_static(
             checkpoint_every=checkpoint_every,
             resume=resuming or seeded,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
+            on_checkpoint=tracker.record_checkpoint,
         )
     except Exception:
         # cleanup_if_empty so a run that died before writing anything does not

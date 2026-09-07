@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
     ledger_for,
@@ -73,6 +74,7 @@ def run(args: argparse.Namespace) -> RunInfoPayload:
             ledger_path=ledger_for(root),
             tier_index=args.tier,
             tasks_dir=Path(args.tasks_dir) if args.tasks_dir else None,
+            record_source=connect.record_source_from_environment(),
         )
     fields = digest.model_dump()
     # Trimmed to the tail: a 30M run has thirty checkpoints and the reader wants
@@ -95,6 +97,11 @@ def render(payload: RunInfoPayload) -> None:
     dirty = " (dirty)" if payload.git_dirty else ""
     abstraction = (payload.card_abstraction_hash or "none")[:16]
     print(f"  git {commit}{dirty}   abstraction {abstraction}   status {payload.status}")
+    for group, knobs in payload.trainer_knobs.items():
+        # What `--config` plus `--set` actually produced. Two arms of one
+        # experiment share every other line printed here, so without this the
+        # only record of what they differ in is the arm LABEL.
+        print(f"  {group:<7} " + "  ".join(f"{k}={v}" for k, v in knobs.items()))
     print(
         f"  {payload.iterations:,} iterations over {payload.training_tasks} training task(s), "
         f"{payload.runtime_seconds:.0f}s compute"

@@ -13,6 +13,7 @@ import pytest
 
 from src.interfaces.cloud.tasks import spec
 from src.shared import repo
+from src.shared.cloudtask import wire
 from src.shared.cloudtask.kinds import BadTaskError, TaskName
 
 # Found by walking to the `tests` root, not by counting parents: a count
@@ -71,16 +72,32 @@ class TestTaskIds:
 
 class TestTaskCommand:
     def test_node_side_variables_are_not_expanded_locally(self):
-        """The `$`-names must reach the node's shell intact; only the snapshot
-        is substituted here."""
-        command = spec.task_command("code-20260802_000000")
+        """The `$`-names must reach the node's shell intact."""
+        command = spec.task_command()
         assert "$AZ_BATCH_TASK_ID" in command
-        assert "$AZ_BATCH_NODE_MOUNTS_DIR" in command
-        assert "code-20260802_000000.tar.gz" in command
+        assert f"${spec.CODE_URL_ENV}" in command
+
+    def test_the_snapshot_url_is_read_from_the_environment_not_spelled_here(self):
+        """Batch prints command lines in every task listing, and the URL is a
+        SAS. It is sealed as an environment variable by dispatch, so the one
+        thing the command line may hold is the variable's NAME."""
+        assert spec.CODE_URL_ENV in {key.env for key in wire.KEYS}
+        command = spec.task_command()
+        assert "https://" not in command
+        assert ".tar.gz" not in command
+
+    def test_it_fetches_over_https_and_never_touches_the_share(self):
+        """The wrapper is INSIDE the tarball, so `curl | tar` is the bootstrap
+        and nothing before it can come from the code. `pipefail` is what turns
+        a refused fetch into curl's error rather than a missing `run_task.py`."""
+        command = spec.task_command()
+        assert command.startswith("set -o pipefail && ")
+        assert "curl -fsSL" in command
+        assert "$AZ_BATCH_NODE_MOUNTS_DIR" not in command
 
     def test_it_bootstraps_the_wrapper_from_inside_the_tarball(self):
-        command = spec.task_command("snap")
-        assert command.index("tar xzf") < command.index("run_task.py")
+        command = spec.task_command()
+        assert command.index("| tar xz") < command.index("run_task.py")
 
     def test_the_interpreter_is_the_one_the_start_task_installs(self):
         """A contract split across two languages, and nothing else joins them.
@@ -112,7 +129,7 @@ class TestTaskCommand:
     def test_no_uv_at_task_time(self):
         """The wrapper explains failures, so it cannot depend on a resolver that
         can fail. An absolute path to a plain interpreter cannot."""
-        command = spec.task_command("snap")
+        command = spec.task_command()
         assert spec.NODE_PYTHON_BIN in command
         assert "uv " not in command
 
@@ -148,6 +165,9 @@ class TestEnvironment:
         env = spec.TaskSpec(code_snapshot="s", config="p", to=1).environment()
         assert set(env) == {
             "CODE_SNAPSHOT",
+            "POKER_SOLVER_RECORD_DSN",
+            "POKER_SOLVER_CHECKPOINT_SAS",
+            "POKER_SOLVER_CODE_URL",
             "RUN_OP",
             "RUN_CONFIG",
             "RUN_TO",
@@ -158,9 +178,6 @@ class TestEnvironment:
             "RUN_SETS_JSON",
             "RUN_TIMEOUT",
             "RUN_WORKERS",
-            "RUN_UNIVERSE_BOARDS",
-            "RUN_UNIVERSE_SEED",
-            "RUN_DTYPE",
             "RUN_WARM_START_FROM",
             "RUN_WARM_START_WEIGHT",
             "RUN_WARM_START_AT",

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useCompactLegs, usePushCode, usePushData } from "@/api/queries";
+import { useCompactLegs, usePushCode } from "@/api/queries";
 import { Actions, Field, Guard, Outcome, Run, Text } from "@/components/Form";
 import { Panel } from "@/components/Panel";
 import { given } from "@/lib/body";
@@ -7,25 +7,23 @@ import { errorOf } from "@/lib/error";
 import { count } from "@/lib/format";
 
 /**
- * The three commands that write to the share without queueing anything.
+ * The two commands that write to the store without queueing anything.
  *
- * They sit apart from Dispatch because none of them puts work on the pool: two
- * publish something a later task will need, and the third rewrites the account
+ * They sit apart from Dispatch because neither puts work on the pool: one
+ * publishes something a later task will need, the other rewrites the account
  * of tasks already finished.
  *
- * **These are the only commands whose meaning depends on where the server
- * runs.** `push-code` seals the working tree and `push-data` copies local
- * abstractions, and from a browser "the working tree" is wherever `serve` was
- * launched — not the checkout the operator is looking at. That has already gone
- * wrong once in this project, when `submit` sealed its snapshot from the
- * shell's CWD, so both panels say so and both report back what they actually
- * sealed rather than leaving it implicit.
+ * **`push-code` is the one command whose meaning depends on where the server
+ * runs.** It seals the working tree, and from a browser "the working tree" is
+ * wherever `serve` was launched — not the checkout the operator is looking at.
+ * That has already gone wrong once in this project, when `submit` sealed its
+ * snapshot from the shell's CWD, so the panel says so and reports back what it
+ * actually sealed rather than leaving it implicit.
  */
 export function Share() {
   return (
     <div className="space-y-3">
       <PushCode />
-      <PushData />
       <CompactLegs />
     </div>
   );
@@ -55,57 +53,6 @@ function PushCode() {
       </Actions>
       <Outcome error={errorOf(push.error)}>
         {push.data && <span>sealed {push.data.code_snapshot}</span>}
-      </Outcome>
-    </Panel>
-  );
-}
-
-/**
- * `push-data`. Abstractions are COPIED to the share, never recomputed on a
- * node — which is the same rule that says nothing on the laptop reads a card
- * abstraction to decide something about the wrong machine.
- */
-function PushData() {
-  const push = usePushData();
-  const [source, setSource] = useState("");
-  const [name, setName] = useState("");
-
-  const uploaded = Object.entries(push.data?.uploaded ?? {});
-
-  return (
-    <Panel title="Push data — publish card abstractions">
-      <div className="divide-y divide-[var(--border)]/50">
-        <Field label="source" hint="Blank uses the server's default abstractions directory.">
-          <Text value={source} onChange={setSource} placeholder="(default)" />
-        </Field>
-        <Field label="name" hint="Publish one abstraction directory. Blank publishes all of them.">
-          <Text value={name} onChange={setName} placeholder="(all)" />
-        </Field>
-      </div>
-      <Actions>
-        <Run
-          label="Push data"
-          pending={push.isPending}
-          onClick={() => push.mutate(given({ source, name }))}
-        />
-      </Actions>
-      <Outcome error={errorOf(push.error)}>
-        {push.data &&
-          (uploaded.length === 0 ? (
-            // Not an error and not nothing: the share already had every file,
-            // which is the ordinary result of pushing twice.
-            <span className="text-[var(--fg-muted)]">
-              Nothing to upload — the share is already current.
-            </span>
-          ) : (
-            <div className="space-y-0.5">
-              {uploaded.map(([abstraction, files]) => (
-                <div key={abstraction}>
-                  {abstraction} <span className="text-[var(--fg-faint)]">{count(files)} files</span>
-                </div>
-              ))}
-            </div>
-          ))}
       </Outcome>
     </Panel>
   );

@@ -193,6 +193,22 @@ class TestDuration:
 # row here fails `test_every_wire_key_is_exercised`.
 WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "CODE_SNAPSHOT": ("snap-1", "snap-1"),
+    # A DSN-shaped value, so a key decoded into the wrong field is obvious.
+    "POKER_SOLVER_RECORD_DSN": (
+        "postgresql://u:p@h:5432/record?sslmode=require",
+        "postgresql://u:p@h:5432/record?sslmode=require",
+    ),
+    # A SAS-shaped value, query string and all: the `?` is exactly what
+    # `blobstore.rung_uri` has to splice the blob name in FRONT of.
+    "POKER_SOLVER_CHECKPOINT_SAS": (
+        "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
+        "https://acct.blob.core.windows.net/checkpoints?sv=2021-08-06&sig=abc%3D",
+    ),
+    # One blob, read-only: the tarball the command line already fetched.
+    "POKER_SOLVER_CODE_URL": (
+        "https://acct.blob.core.windows.net/code/code-20260904_120000.tar.gz?sp=r&sig=abc%3D",
+        "https://acct.blob.core.windows.net/code/code-20260904_120000.tar.gz?sp=r&sig=abc%3D",
+    ),
     "RUN_OP": ("evaluate", "evaluate"),
     "RUN_CONFIG": ("production", "production"),
     "RUN_TO": (25_000_000, 25_000_000),
@@ -217,9 +233,6 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "RUN_GIT_COMMIT": ("c13dcb7", "c13dcb7"),
     "RUN_GIT_DIRTY": ("1", "1"),
     "RUN_GIT_BRANCH": ("wire-and-share", "wire-and-share"),
-    "RUN_UNIVERSE_BOARDS": (4096, 4096),
-    "RUN_UNIVERSE_SEED": (17, 17),
-    "RUN_DTYPE": ("float32", "float32"),
     "RUN_WARM_START_FROM": ("run-prior", "run-prior"),
     "RUN_WARM_START_WEIGHT": (3000, 3000),
     "RUN_WARM_START_AT": (9, 9),

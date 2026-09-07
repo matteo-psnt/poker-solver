@@ -63,7 +63,7 @@ def render(payload: PrecomputePayload) -> None:
 
 COMMAND = Command(
     name="precompute",
-    help="Precompute a combo abstraction into data/combo_abstraction/.",
+    help="Precompute a combo abstraction (a node builds it; `submit-precompute` is the door).",
     add_arguments=add_arguments,
     run=run,
     render=render,

@@ -11,32 +11,37 @@ paths:
 
 **One solver backend: the statically-enumerated tree.** An infoset is
 `(node_id, bucket)` — an index into a table allocated once at full size, so
-memory is flat in iteration count. The old dynamic backend (hashed `InfoSetKey`)
-is gone, and every checkpoint it wrote is unreadable at HEAD by design. Runs are
-loadable iff they carry `STATIC_CHECKPOINT.json`.
+memory is flat in iteration count. Runs are loadable iff they carry
+`STATIC_CHECKPOINT.json`; checkpoints from the deleted dynamic backend are
+unreadable by design.
 
-- **Never compare arms across knob tiers.** Nothing enforces this now;
-  check `base_seed` and every tier knob before putting two numbers together.
-  Never hand-transcribe scores.
-- **Eval records are per-run files**, not ledger appends: `evaluate` writes the
-  complete row into `<run_dir>/evals/<slug>.json`. There is no stored index —
-  `ledger` DERIVES one on every read, which is what makes concurrent evaluation
-  from several boxes safe.
-- **`eval-*.json` and `record-*.json` are LEGACY** and the rebuild skips both on
-  purpose: a legacy record points at the old filename, so reading both enters
-  one evaluation twice (measured: 63 rows became 110). A sparse `ledger` means
-  un-migrated legacy files on the share, NOT a broken rebuild.
-- **`reference/` may not import the estimators it validates.** The oracles check
-  the production estimators to 1e-9; an oracle importing what it validates makes
-  that agreement circular while the test still passes. This is an import-linter
-  contract and the one that is about correctness rather than tidiness.
-- **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`
-  (`--set k=v` for config overrides). The tags are recorded on every eval;
-  `ledger --json` is what reads them back. `curve --run` is the within-run
-  exploitability-vs-iteration artifact.
-- **Prefer explicit, typed interfaces** between solver, training and evaluation.
-- Keep tests deterministic (fixed seeds, no nondeterministic assertions). Mark
-  expensive tests `@pytest.mark.slow`; intentionally longer ones get a tight
-  explicit `@pytest.mark.timeout(<seconds>)`. Default timeout is 5s.
+- **Never compare arms across knob tiers.** Nothing enforces this; check
+  `base_seed` and every tier knob before putting two numbers together, and
+  never hand-transcribe a score. `poker-solver arms --experiment X --control Y`
+  reads the tags back and subtracts exact_br arms directly — the estimator is
+  deterministic, so no p-value is needed.
+- **Scores live in the record (Postgres), not in per-run files.** `evaluate`
+  writes a row through the record sink; `ledger`, `curve` and `arms` read it.
+  `<run_dir>/evals/*.json` is written only by resolver-match scoring now, so
+  code that reads that directory to decide something sees almost nothing —
+  `prune-checkpoints` protects scored rungs from it and cannot see a DB-scored
+  rung. **Score before pruning**, and fix that reader before trusting it.
+- **Best measured PCS/CFR-BR setup: `--config production_cfrbr`** — 940.1 →
+  756.7 mbb on the gate (3 board seeds, converged). Most of that is plain
+  K-fold averaging: flop-mode `runouts_per_flop=4` alone reaches 820.7 at 2.3x
+  less wall-clock, and R=8 is WORSE than R=4.
+- **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`,
+  with `--set k=v` for config overrides; the tags are recorded on every eval.
+  `--set` flags are dropped on resume — check for a continuation boundary
+  before reading a mid-ladder turn as a result.
+- **`reference/` may not import the estimators it validates.** The oracles
+  check the production estimators to 1e-9; an oracle importing what it
+  validates makes that agreement circular while the test still passes. This is
+  an import-linter contract, and the one that is about correctness.
+- Training and evaluation may not import each other (contract). Keep the
+  interfaces between solver, training and evaluation typed and explicit.
+- Tests are deterministic: fixed seeds, no wall-clock assertions. Expensive
+  tests are `@pytest.mark.slow`; the default timeout is 5s and a longer one is
+  declared with `@pytest.mark.timeout(<seconds>)`.
 - Run the **full** suite when a change touches training, abstraction/bucketing,
   evaluator logic, config loading, or shared infrastructure.

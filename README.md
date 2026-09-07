@@ -46,7 +46,7 @@ flag-driven subcommand of it:
 uv run poker-solver submit --config production --to 25000000   # queue a leg
 uv run poker-solver jobs                                       # what is running
 uv run poker-solver score --run <id> --at 10000000,20000000    # one task per rung
-uv run poker-solver ledger                                     # every evaluation, from the share
+uv run poker-solver ledger                                     # every evaluation, from the record
 ```
 
 **The web console is the one a human reads** — `just console`, then
@@ -60,12 +60,12 @@ just console-dev   # Vite on :5173 with hot reload, proxying /api to :8765
 
 ### Training Your First Solver
 
-1. `just create` once, then `just cli push-data` to publish the card abstractions.
+1. `just create` once, then `poker-solver submit-precompute` to build the card abstractions on a node.
 2. `uv run poker-solver submit --config quick_test --to 3000`
 3. Watch with `poker-solver jobs`; read the leg with
    `poker-solver logs --task <id>`.
-4. `poker-solver ledger` shows the evaluations. It reads the share and
-   derives the index on every call — there is nothing to fetch and no local copy.
+4. `poker-solver ledger` shows the evaluations. It reads the record
+   (Postgres) — there is nothing to fetch and no local copy.
 
 The iteration target is **absolute**: re-submitting the same run with the same
 number is a no-op, which is what makes a retry converge instead of training
@@ -176,7 +176,7 @@ The primary quality metric is **exploitability**, measured with **Local Best Res
 - `--opponent blueprint|deployed` — raw strategy table vs. blueprint + runtime resolver
 - `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
 
-Every evaluation is written as its own document under `<run_dir>/evals/`, with git provenance and the pinned abstraction hash. There is no stored index: `poker-solver ledger` DERIVES one from the published documents on every read, which is what makes evaluating from several boxes at once safe.
+Every evaluation is one row in the record's `evals` table, with git provenance and the pinned abstraction hash. `poker-solver ledger` reads those rows; several boxes can evaluate at once because each writes its own row and nothing indexes them.
 
 See [Evaluation README](src/pipeline/evaluation/README.md) for methodology and best practices.
 
@@ -225,8 +225,9 @@ poker-solver/
 └── justfile             # Terraform lifecycle, `panic`, `credit-check`
 ```
 
-**There is no `data/` directory and nothing recreates one.** Runs live on the
-share; regenerable caches resolve through `src/shared/cache.py` to
+**There is no `data/` directory and nothing recreates one.** A run's rungs
+live in the `checkpoints` blob container and its record in Postgres;
+regenerable caches resolve through `src/shared/cache.py` to
 `$POKER_SOLVER_CACHE`, else `$XDG_CACHE_HOME`, else `~/.cache/poker-solver`.
 A `data/` path inside `src/` fails `tests/shared/test_cache.py` — which is how
 the directory came back after each of the two previous prunes.

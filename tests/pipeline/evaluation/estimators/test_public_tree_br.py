@@ -562,3 +562,35 @@ class TestPolicyTransforms:
         plain = compute_public_tree_br(trained_solver, CONFIG, starting_stack=STACK)
         assert first.exploitability_mbb == second.exploitability_mbb
         assert first.exploitability_mbb != plain.exploitability_mbb
+
+
+class TestTheBlockedCombosRow:
+    """A combo the board blocks must contribute NOTHING and be marked present.
+
+    `_policy_matrix` gets that from a sentinel row appended to the cached table:
+    a blocked combo carries bucket -1, and numpy reads -1 as the last row. The
+    property is worth its own test because the mechanism is an indexing trick --
+    read the append off by one and every blocked combo silently adopts the
+    strategy of the highest bucket instead of folding out of the sum.
+    """
+
+    def test_the_sentinel_is_zeros_and_not_missing(self):
+        rows = np.array([[0.5, 0.5], [0.2, 0.8]])
+        missing = np.array([False, True])
+        rows_ext = np.vstack([rows, np.zeros((1, rows.shape[1]))])
+        missing_ext = np.append(missing, False)
+
+        assert np.array_equal(rows_ext[-1], [0.0, 0.0])
+        assert not missing_ext[-1]
+        # A real bucket still reads its own row, and -1 does not alias one.
+        assert np.array_equal(rows_ext[1], rows[1])
+        assert not np.array_equal(rows_ext[-1], rows_ext[1])
+
+    def test_a_bucket_vector_of_minus_one_gathers_zeros(self):
+        rows_ext = np.vstack([np.array([[0.5, 0.5], [0.2, 0.8]]), np.zeros((1, 2))])
+        bucket_vec = np.array([0, -1, 1, -1])
+        gathered = rows_ext[bucket_vec]
+        assert np.array_equal(gathered[1], [0.0, 0.0])
+        assert np.array_equal(gathered[3], [0.0, 0.0])
+        assert np.array_equal(gathered[0], [0.5, 0.5])
+        assert np.array_equal(gathered[2], [0.2, 0.8])

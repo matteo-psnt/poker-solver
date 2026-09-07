@@ -84,12 +84,41 @@ variable "pool_huge_max_nodes" {
     Autoscale ceiling for `train-huge`: 4 x D64als_v6 is ~$11.01/hr. The big
     box won and the work moved here, so this is no longer probe-sized.
 
-    PAID FOR OUT OF `max_nodes`, not out of new quota -- the three caps share
+    PAID FOR OUT OF `max_nodes`, not out of new quota -- the pool caps share
     one 1024 vCPU allowance and must clear the +8 offset described there.
-    40/2/4 = 960 is deliberate; raise this only by lowering another.
+    36/2/4/1 = 960 is deliberate; raise this only by lowering another.
   EOT
   type        = number
   default     = 4
+}
+
+variable "pool_mem_vm_size" {
+  description = <<-EOT
+    SKU of the `train-mem` pool. E64ds_v6 = 64 vCPU / 512 GB, ~$5.565/hr
+    (retail, swedencentral, Linux).
+
+    THIS POOL EXISTS FOR ONE MEASURED REASON. A PCS/CFR-BR worker on the 200 bb
+    tree holds 10.85 GB, so `train-huge` -- D64als_v6, a LOW-MEMORY SKU at
+    2 GiB/vCPU -- fits only 11 of its 64 cores and one of them was OOM-killed at
+    that. The als_v6 pools were sized for the scalar trainer's ~773 MB worker,
+    where RAM genuinely was not the constraint. 512 GB fits ~46.
+
+    Intel, not the cheaper AMD E64as_v6 ($4.083/hr): the Easv6 and Eadsv6
+    quota families are not granted on this subscription, while `Standard Edsv6
+    Family vCPUs` is 350 and unused. Nothing here needs a quota request.
+  EOT
+  type        = string
+  default     = "Standard_E64ds_v6"
+}
+
+variable "pool_mem_max_nodes" {
+  description = <<-EOT
+    Autoscale ceiling for `train-mem`: 1 x E64ds_v6 is ~$5.57/hr. One node,
+    because a training run is single-node -- more nodes buy parallel ARMS, not
+    a faster run, and this pool's whole point is fitting one run's workers.
+  EOT
+  type        = number
+  default     = 1
 }
 
 variable "max_nodes" {
@@ -119,12 +148,17 @@ variable "max_nodes" {
     carrying a persisted `AllocationFailed: core limit has reached` that read
     like a live fault. Do not size this to consume the quota exactly.
 
-    THE THREE POOL CAPS SHARE ONE QUOTA, so this number is not free to raise.
-    40 x 16 + 2 x 32 + 4 x 64 = 960 vCPU of 1024, which the +8 offset above
-    leaves reachable. The previous 60/2/2 summed to 1152 -- the whole quota,
-    exactly the mistake the paragraph above records. `train` carries scoring,
-    which is throwaway; the D64s carry the critical path. Re-do this
-    arithmetic before changing ANY of the three.
+    THE FOUR POOL CAPS SHARE ONE QUOTA, so this number is not free to raise.
+    36 x 16 + 2 x 32 + 4 x 64 + 1 x 64 = 960 vCPU of 1024, which the +8 offset
+    above leaves reachable. The previous 60/2/2 summed to 1152 -- the whole
+    quota, exactly the mistake the paragraph above records. `train` carries
+    scoring, which is throwaway; the D64s carry the critical path. Re-do this
+    arithmetic before changing ANY of the four.
+
+    WAS 40, lowered to 36 to fund `train-mem`'s single 64-vCPU node. Taken from
+    here rather than from `pool_huge_max_nodes` because `train-huge` runs at its
+    cap for hours at a time while `train` has been sitting at 2 of 40 -- and
+    those D64 nodes belong to whoever dispatched them, not to this session.
 
     `infra/credit_watch.py --daily-burn` is the other half and is NOT derived
     from here -- 1152.00 accompanies this, and still bounds it: 40 D16 + 2 D32
@@ -134,7 +168,7 @@ variable "max_nodes" {
     not a day. Drop this back to 20-30 when the programme ends.
   EOT
   type        = number
-  default     = 40
+  default     = 36
 }
 
 variable "data_disk_gb" {
@@ -239,6 +273,7 @@ variable "allowed_vm_skus" {
     "Standard_D16als_v6",
     "Standard_D32als_v6",
     "Standard_D64als_v6",
+    "Standard_E64ds_v6",
     "Standard_D16_v5",
     "Standard_E16-4ads_v5",
     "Standard_NC24ads_A100_v4",
@@ -254,6 +289,9 @@ variable "allowed_locations" {
   type        = list(string)
   default = [
     "swedencentral",
+    # The record database only (infra/store): it sits with its readers, not
+    # with the boxes. Nothing else may land here.
+    "canadacentral",
     "northeurope",
     "uksouth",
     "germanywestcentral",
@@ -262,4 +300,14 @@ variable "allowed_locations" {
     "eastus2",
     "westus2",
   ]
+}
+
+variable "pool_identity_enabled" {
+  description = <<-EOT
+    Attach `azurerm_user_assigned_identity.pool` to every pool. MEASURED to
+    plan as an in-place update on all four (2026-09-04, azurerm 4.81.0), not
+    a replacement. Off until the identity has a role assignment to use.
+  EOT
+  type        = bool
+  default     = false
 }

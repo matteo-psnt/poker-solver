@@ -107,6 +107,7 @@ def render(payload: BlueprintServePayload) -> None:
 
     import uvicorn  # noqa: PLC0415 -- see above
 
+    from src.adapters.postgres import connect  # noqa: PLC0415 -- see above
     from src.interfaces.blueprint.app import create_app  # noqa: PLC0415 -- see above
     from src.interfaces.blueprint.idle import IDLE_EXIT_CODE  # noqa: PLC0415 -- see above
     from src.interfaces.blueprint.staging import stage_run  # noqa: PLC0415 -- see above
@@ -117,10 +118,13 @@ def render(payload: BlueprintServePayload) -> None:
 
     run_dir = Path(payload.run_dir)
     runs_dir = Path(payload.runs_dir)
+    # The serving box needs the DSN in its environment once the log stops
+    # being published; without one this falls back to the file, as before.
+    source = connect.record_source_from_environment()
 
     def _build(directory: Path, at_iteration: int | None):
         """A run directory on local disk -> a blueprint. ~1 min in production."""
-        metadata = RunTracker.load(directory).metadata
+        metadata = RunTracker.load(directory, source).metadata
         solver, _storage, _policy = build_blueprint_for(
             directory,
             metadata,

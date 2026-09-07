@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel
 
@@ -25,14 +25,15 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.vector import compile_tree
 from src.pipeline import blueprint
 from src.pipeline.training import pcs_parallel
-from src.pipeline.training.run_tracker import ExperimentTag, RunTracker
+from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
 from src.pipeline.training.static_parallel import train_static_parallel
-from src.shared import records, run_events
+from src.shared import records
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
     from src.shared.config import Config
+    from src.shared.ports.record import RecordSink, RecordSource
 
 PROGRESS_ARTIFACT = "train-progress.json"
 KERNEL = "pcs"
@@ -62,6 +63,40 @@ class PcsTrainingOutput(BaseModel):
     status: str
 
 
+# The config sections that decide what the PCS trainer IS. `--set` overrides do
+# not carry into a continuation, so the run's own record is the only thing that
+# knows; RunTracker.verify_trainer_knobs is where that is enforced.
+#
+# `game` is in here because it sizes the TREE: a dropped
+# `--set game__starting_stack=400` rebuilds a 100 bb tree and appends its rungs
+# to a 200 bb checkpoint, and the action hash, the abstraction hash and the
+# kernel name all still match.
+TRAINER_BLOCKS = ("game", "solver", "pcs")
+
+
+class WorkerFootprint(TypedDict):
+    br_streets: str
+    runouts: int
+    kernels: int
+    showdown: str
+
+
+def worker_footprint(config: Config) -> WorkerFootprint:
+    """The kwargs describing one worker's memory, for the clamp AND the log line.
+
+    ``runout_mode='turn'`` holds one kernel per runout, because the joint
+    maximisation needs their values at the same time; sizing the clamp for a
+    single kernel oversubscribes the node by that factor. ``showdown`` is here
+    because `matmul` stacks both seats before its product and `walk` does not.
+    """
+    return {
+        "br_streets": config.pcs.cfr_br,
+        "runouts": config.pcs.runouts_per_flop,
+        "kernels": config.pcs.runouts_per_flop if config.pcs.runout_mode == "turn" else 1,
+        "showdown": config.pcs.showdown,
+    }
+
+
 def train_pcs(
     config_name: str,
     *,
@@ -75,6 +110,12 @@ def train_pcs(
     retain_every: int = 0,
     run_id: str | None = None,
     progress_file: Path | None = None,
+    # Dual write. `None` writes files only, which is what every task did
+    # before the database existed and what one dispatched without a DSN
+    # still does. Constructed by the COMMAND, never here: the composition
+    # root is the only layer allowed to know which adapter this is.
+    sink: RecordSink | None = None,
+    record_source: RecordSource | None = None,
 ) -> PcsTrainingOutput:
     """Train to an ABSOLUTE iteration target; continuing past it is a no-op.
 
@@ -93,23 +134,30 @@ def train_pcs(
     if run_id is None:
         run_id = f"pcs-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
-    resuming = run_events.log_path(run_dir).exists() or (run_dir / ".run.json").exists()
+    # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
+    # written, so a directory check answers `False` for every run created
+    # after the flip -- which mints fresh metadata over a live ladder and
+    # restarts training from zero.
+    resuming = has_run_record(run_dir, record_source)
 
     action_model = ActionModel(config)
     abstraction = blueprint.build_card_abstraction(config)
     abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
     if resuming:
-        tracker = RunTracker.load(run_dir)
+        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(
                 f"Run '{run_id}' was trained by the {tracker.metadata.kernel!r} kernel; "
                 "continuing it by public chance sampling would mix two lineages in one ladder."
             )
+        tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()
         tracker = RunTracker(
+            sink=sink,
+            source=record_source,
             run_dir=run_dir,
             config_name=config.system.config_name,
             config=config,
@@ -128,17 +176,49 @@ def train_pcs(
         rules, action_model, abstraction, starting_stack=config.game.starting_stack
     )
     compiled = compile_tree(tree, rules)
-    shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1)
-    safe = pcs_parallel.ram_safe_workers(tree, compiled.num_terminals, shared_bytes=shared)
+    if config.pcs.cfr_br != "off" and config.pcs.alternating:
+        raise ValueError(
+            "pcs.alternating and pcs.cfr_br cannot both be on: CFR-BR already updates one "
+            "seat at a time against that seat's own best-responding opponent, and alternating "
+            "on top of it would halve each seat's updates for nothing."
+        )
+    if config.pcs.runout_mode == "turn" and config.pcs.runouts_per_flop < 2:
+        raise ValueError(
+            "pcs.runout_mode='turn' shares one turn across the iteration's runouts so a turn "
+            "best response can maximise over them; with runouts_per_flop=1 there is nothing to "
+            "maximise over and the sampler is just a slower way to draw one board."
+        )
+    if config.pcs.cfr_br in ("turn_river", "postflop") and config.pcs.runout_mode != "turn":
+        raise ValueError(
+            f"pcs.cfr_br={config.pcs.cfr_br!r} best-responds on the turn, but "
+            "pcs.runout_mode='flop' gives every runout its own turn -- the argmax would read a "
+            "river that has not been dealt. Set pcs__runout_mode=turn, or use cfr_br=river."
+        )
+    extra = pcs_parallel.trunk_arrays(config, tree)
+    shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1) + 4 * sum(extra.values())
+    footprint = worker_footprint(config)
+    safe = pcs_parallel.ram_safe_workers(
+        tree, compiled.num_terminals, shared_bytes=shared, **footprint
+    )
     requested = num_workers or (os.cpu_count() or 1)
     workers = min(requested, safe)
     logger.info(
-        "[pcs] %d workers (%d requested, %d RAM-safe at %.2f GB each), %d runouts per flop",
+        "[pcs] %d workers (%d requested, %d RAM-safe at %.2f GB each), %d runouts per flop, "
+        "cfr_br=%s",
         workers,
         requested,
         safe,
-        pcs_parallel.worker_bytes(tree, compiled.num_terminals) / 1e9,
+        pcs_parallel.worker_bytes(tree, compiled.num_terminals, **footprint) / 1e9,
         config.pcs.runouts_per_flop,
+        config.pcs.cfr_br,
+    )
+    # The RESOLVED knobs, not the flags someone meant to pass. A run's identity
+    # is what `--config` plus its `--set` list actually produced, and reading it
+    # back off a finished run used to mean unpacking the metadata by hand.
+    logger.info(
+        "[pcs] resolved trainer knobs: solver=%r pcs=%r",
+        config.solver.model_dump(),
+        config.pcs.model_dump(),
     )
     # The kernel is numpy and numba on one core per worker; BLAS threads on
     # top of that only oversubscribe the node.
@@ -159,8 +239,10 @@ def train_pcs(
             checkpoint_every=checkpoint_every,
             resume=resuming,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
+            on_checkpoint=tracker.record_checkpoint,
             worker=pcs_parallel.pcs_worker,
             before_checkpoint=pcs_parallel.mark_visited_from_strategy,
+            extra_arrays=extra,
         )
     except Exception:
         tracker.mark_failed(cleanup_if_empty=True)
@@ -190,4 +272,4 @@ def train_pcs(
     )
 
 
-__all__ = ("KERNEL", "PcsTrainingOutput", "train_pcs")
+__all__ = ("KERNEL", "TRAINER_BLOCKS", "PcsTrainingOutput", "train_pcs")

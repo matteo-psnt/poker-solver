@@ -3,7 +3,7 @@
 One executor per kind, and a registry keyed by the kind's own name -- so a kind
 with no executor is a ``KeyError`` naming it rather than a task that silently
 does nothing. The lifecycle around them (the guard, the tee, the exit account)
-is deliberately not here: it is identical for all three, and mixing the two is
+is deliberately not here: it is identical for every kind, and mixing the two is
 what made the shell version impossible to reason about.
 """
 
@@ -11,25 +11,16 @@ from __future__ import annotations
 
 import itertools
 import json
-import os
-import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from src.shared import records
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, progress
+from src.shared.cloudtask.node import archive, blobstore, profile, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
-
-# How often a running sweep copies its curve to the share. Two minutes against
-# arms that run for hours: frequent enough to see the first rung land, rare
-# enough that the copy is invisible next to the work.
-PUBLISH_EVERY_SECONDS = 120
-
 
 # The second element is the OUTCOME an exit code cannot carry: an evaluation that
 # scored some rungs and failed others exits 0 for Batch's retry economics.
@@ -52,7 +43,7 @@ def _reporting(plan: TaskPlan, paths: NodePaths) -> TaskPlan:
     return replace(plan, progress_path=str(paths.work / declared)) if declared else plan
 
 
-def _refresh_abstractions(paths: NodePaths, log: TaskLogger) -> None:
+def _refresh_abstractions(paths: NodePaths, log: TaskLogger, sas: str = "") -> None:
     """Merge the share's abstractions onto this node before training.
 
     `infra/main.tf`'s START TASK is the only other thing that does this, and it
@@ -62,9 +53,22 @@ def _refresh_abstractions(paths: NodePaths, log: TaskLogger) -> None:
     precompute path exists to serve: build a new abstraction, then train on it.
     Merging here makes the two orderings equivalent.
     """
+    if sas:
+        # THE CONTAINER FIRST, and the share only while it still holds them.
+        # Same order, and for the same reason, as a rung's fetch.
+        try:
+            fetched = archive.fetch_abstractions(
+                blobstore.sibling_container(sas, archive.ABSTRACTIONS_CONTAINER),
+                paths.data / "combo_abstraction",
+                log,
+            )
+            if fetched:
+                log(f"fetched {fetched} abstraction(s) from the container")
+        except Exception as error:  # noqa: BLE001 -- the share may still answer
+            log(f"WARN could not read the abstractions container: {error}")
+
     source = paths.share / "combo_abstraction"
     if not source.is_dir():
-        log(f"WARN no {source} on the share; trusting the node's own copy")
         return
     try:
         # update=True is `cp -u`: an abstraction already on the node is not
@@ -107,21 +111,28 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
         destination = paths.runs / plan.warm_start_from
         if wanted:
             archive.fetch_metadata(prior, destination)
-            name = f"static-{wanted}.zarr"
-            if not (prior / name).is_dir():
-                log(f"FATAL warm-start prior has no rung {wanted} ({name} absent on the share)")
+            # THE PRIOR'S MANIFEST NAMES ITS RUNGS, and asking the share for a
+            # directory is a second opinion that fails for every migrated run:
+            # the rung is in the container and there is no directory to find.
+            name = dict(archive.manifest_entries(prior)).get(int(wanted), "")
+            if not name:
+                log(f"FATAL warm-start prior has no rung {wanted} (its manifest names none)")
                 return 1, "missing-rung"
-            archive.require_complete(prior, name)
-            archive.fetch_snapshot(prior, destination, name)
+            try:
+                archive.require_complete(prior, name, plan.checkpoint_sas)
+            except archive.FetchRefusedError as refusal:
+                log(f"FATAL warm-start rung {wanted}: {refusal}")
+                return 1, "missing-rung"
+            archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas)
             log(f"fetched warm-start rung {name}")
         else:
-            archive.fetch_current_rung(prior, destination, log)
-    _refresh_abstractions(paths, log)
+            archive.fetch_current_rung(prior, destination, log, plan.checkpoint_sas)
+    _refresh_abstractions(paths, log, plan.checkpoint_sas)
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():
         log(f"fetching published checkpoint for {run_id}")
-        archive.fetch_current_rung(published, paths.runs / run_id, log)
+        archive.fetch_current_rung(published, paths.runs / run_id, log, plan.checkpoint_sas)
 
     plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
@@ -141,6 +152,9 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             cwd=paths.code,
             timeout=plan.timeout_seconds,
             log=log,
+            # Training is the long one, and the only task anybody watches for
+            # hours wondering where the time is going.
+            profile_dir=paths.share / profile.PROFILES_DIRNAME,
         )
     finally:
         watcher.stop()
@@ -169,7 +183,7 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     # Same boot-order trap as training: evaluation resolves the abstraction the
     # checkpoint is PINNED to, so a node that predates that abstraction cannot
     # score the run at all.
-    _refresh_abstractions(paths, log)
+    _refresh_abstractions(paths, log, plan.checkpoint_sas)
 
     # WITHOUT THIS the evaluator is never told where to write, so `--progress-file`
     # never reaches its command line and the branch counter it keeps has nowhere
@@ -230,19 +244,26 @@ def _fetch_rungs(
     """
     requested = list(plan.eval_rungs)
     if not requested:
-        if archive.fetch_current_rung(published, paths.runs / plan.run_id, log):
+        if archive.fetch_current_rung(
+            published, paths.runs / plan.run_id, log, plan.checkpoint_sas
+        ):
             return []
         log(f"FATAL {plan.run_id} has no published checkpoint to score")
         return None
     destination = paths.runs / plan.run_id
-    fetched = archive.fetch_for_evaluation(published, destination, requested, log)
+    fetched = archive.fetch_for_evaluation(
+        published, destination, requested, log, plan.checkpoint_sas
+    )
     if not fetched:
         log("FATAL none of the requested rungs could be fetched")
         return None
     support = _support_rungs(plan.eval_flags, destination, fetched)
     if support:
         log(f"eval also READS {len(support)} more rung(s): {', '.join(support)}")
-        if len(archive.fetch_for_evaluation(published, destination, support, log)) != len(support):
+        support_fetched = archive.fetch_for_evaluation(
+            published, destination, support, log, plan.checkpoint_sas
+        )
+        if len(support_fetched) != len(support):
             log("FATAL a rung the reassembled average reads is missing")
             return None
     return fetched
@@ -266,9 +287,15 @@ def _fetch_mix_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
     wanted = [options["--mix-at"]] if "--mix-at" in options else []
     destination = paths.runs / other
     if wanted:
-        fetched = archive.fetch_for_evaluation(source, destination, wanted, log)
+        fetched = archive.fetch_for_evaluation(
+            source, destination, wanted, log, plan.checkpoint_sas
+        )
     else:
-        fetched = ["current"] if archive.fetch_current_rung(source, destination, log) else []
+        fetched = (
+            ["current"]
+            if archive.fetch_current_rung(source, destination, log, plan.checkpoint_sas)
+            else []
+        )
     if not fetched:
         log(f"FATAL could not fetch the mixture partner {other}")
         return False
@@ -300,15 +327,35 @@ def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str])
 
 
 def _retained_ladder(destination: Path) -> list[int]:
-    """Every rung the run's manifest still points at. Parsed, not imported:
-    the storage layer that owns this manifest is not on the node's stdlib-only
-    import path."""
-    raw = archive.read_manifest(destination / records.STATIC_CHECKPOINT)
-    if not raw:
-        return []
-    return sorted(
-        {int(entry["iteration"]) for entry in raw.get("retained", [])} | {int(raw["iteration"])}
-    )
+    """Every rung the run's manifest still points at."""
+    return [iteration for iteration, _name in archive.manifest_entries(destination)]
+
+
+def _publish_abstraction(plan: TaskPlan, output: Path, log: TaskLogger) -> int:
+    """Pack the built abstraction and put it in the container. 0 when it landed.
+
+    REFUSES TO REPLACE, as the share publish does and for the same reason:
+    bucket ASSIGNMENT is not pinned by `card_abstraction_hash`, so republishing
+    under a name that exists would silently change which bucket a hand lands in
+    for every run already trained against it.
+    """
+    sas = blobstore.sibling_container(plan.checkpoint_sas, archive.ABSTRACTIONS_CONTAINER)
+    name = archive.abstraction_object(output.name)
+    if blobstore.exists(sas, name) and not plan.force_publish:
+        log(f"REFUSING to republish: {name} is already in the container.")
+        log("  Set RUN_FORCE_PUBLISH=1 only if no run trained against it matters.")
+        return 1
+    packed = output.parent / name
+    try:
+        size = archive.pack_abstraction(output, packed)
+        blobstore.put_object(sas, name, packed)
+        log(f"published {name} ({size / 1024**2:.0f} MiB) to the container")
+    except Exception as error:  # noqa: BLE001 -- the share publish below still runs
+        log(f"FATAL could not publish {name}: {error}")
+        return 1
+    finally:
+        packed.unlink(missing_ok=True)
+    return 0
 
 
 def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
@@ -349,9 +396,13 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     except (OSError, ValueError, KeyError) as error:
         log(f"FATAL precompute wrote no usable output_dir: {error}")
         return 1, None
-    destination = paths.share / "combo_abstraction" / output.name
     log(f"precomputed {output.name} -> {output}")
+    if plan.checkpoint_sas:
+        code = _publish_abstraction(plan, output, log)
+        if code:
+            return code, None
 
+    destination = paths.share / "combo_abstraction" / output.name
     if destination.is_dir() and not plan.force_publish:
         log(f"REFUSING to republish: {output.name} already exists on the share.")
         log("  Bucket assignment is not pinned by the abstraction hash, so replacing")
@@ -377,100 +428,6 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
 # ``TaskName`` because what arrives from the environment is the wire string.
 
 
-# Where each measurement kind's result lands on the share. Separate folders
-# because they answer different questions and a reader globs one of them.
-MEASUREMENT_OUTPUT: dict[str, str] = {
-    TaskName.VECTOR_SWEEP: "vector-sweeps",
-    TaskName.ABSTRACTION_COUPLING: "abstraction-coupling",
-}
-
-
-def _measurement(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    """Run one abstraction measurement, publishing its result as it grows.
-
-    The result is published on EVERY exit, not only success. A sweep that runs
-    past its timeout is killed mid-checkpoint, and without this it would lose
-    every checkpoint it had already scored -- the same failure this module's
-    training path publishes rungs to avoid, in a different shape.
-
-    Abstractions are read from the share in place: they are ~773 MB each and the
-    node's disk is discarded when the task ends, so a copy would be paid for on
-    every arm and thrown away.
-    """
-    plan = _reporting(plan, paths)
-    result = Path(plan.progress_path)
-    destination = paths.share / MEASUREMENT_OUTPUT[plan.op]
-    # The task id is the node's, not the plan's -- the plan describes the WORK
-    # and several retries of it would share one. Read the same way every other
-    # node module reads it.
-    published = f"{os.environ.get('AZ_BATCH_TASK_ID', 'local')}.json"
-
-    def publish_partial() -> None:
-        if result.is_file() and result.stat().st_size > 0:
-            try:
-                destination.mkdir(parents=True, exist_ok=True)
-                archive.copy_file(result, destination / published)
-            except OSError as error:
-                log(f"could not publish partial result: {error}")
-
-    def publish_as_it_lands(stop: threading.Event) -> None:
-        """Copy the curve up whenever it grows, not only when the task ends.
-
-        The sweep writes the whole result after every checkpoint, but that file
-        is on the node's disk, which is discarded. Publishing only on exit means
-        a six-hour arm shows NOTHING until it stops -- no way to tell a slow
-        sweep from a wedged one, and no early read on a measurement whose first
-        rung landed in minutes. The command prints its table at the end too, so
-        the log is no help either.
-
-        Cheap enough to be unconditional: the curve is a few kilobytes, and a
-        copy is skipped entirely unless the file changed.
-        """
-        seen: tuple[int, float] | None = None
-        while not stop.wait(PUBLISH_EVERY_SECONDS):
-            if not result.is_file():
-                continue
-            stat = result.stat()
-            current = (stat.st_size, stat.st_mtime)
-            if current != seen and stat.st_size > 0:
-                seen = current
-                publish_partial()
-
-    abstractions = paths.share / "combo_abstraction"
-    if not (abstractions / plan.config).is_dir():
-        log(f"FATAL no such abstraction on the share: {plan.config}")
-        log("  publish one with `poker-solver push-data`, or build one with submit-precompute")
-        return 1, None
-
-    log(f"{plan.op}: {plan.arm or 'measure'} on {plan.config} (timeout {plan.timeout_seconds}s)")
-    progress.note_baseline(paths, plan)
-    watcher = progress.ProgressWatcher(paths, log, plan=plan, publish_log=log.publish)
-    watcher.start()
-    stop = threading.Event()
-    publisher = threading.Thread(
-        target=publish_as_it_lands, args=(stop,), name=f"{plan.op}-publish", daemon=True
-    )
-    publisher.start()
-    try:
-        code = run_guarded(
-            _cli([*plan.commands[0], "--abstractions-dir", str(abstractions)]),
-            cwd=paths.code,
-            timeout=plan.timeout_seconds,
-            log=log,
-        )
-    finally:
-        stop.set()
-        publisher.join(timeout=30)
-        watcher.stop()
-        publish_partial()
-
-    if code != 0:
-        log(f"{plan.op} failed rc={code} (partial result published if any was reached)")
-        return code, None
-    log(f"published {MEASUREMENT_OUTPUT[plan.op]}/{published}")
-    return 0, None
-
-
 def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
     """The end-of-task publish: a TRAINING task's own run, and nothing else.
 
@@ -483,18 +440,19 @@ def publish_own_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> None:
         return
     run_dir = paths.runs / plan.train_run_id
     if run_dir.is_dir():
-        archive.publish_run(run_dir, paths.archive / run_dir.name, log)
+        archive.publish_run(run_dir, paths.archive / run_dir.name, log, plan.checkpoint_sas)
+        # BOTH STORES, while there are two. The container is where rungs are
+        # going; the share is what still answers every fetch. Publishing to one
+        # and reading from the other is the state this migration passes through,
+        # not one it stops in.
+        archive.publish_rungs_to_blob(run_dir, run_dir.name, plan.checkpoint_sas, log)
 
 
 HANDLERS: dict[str, Handler] = {
     TaskName.TRAIN: _train,
     # Same executor: the board-free kernel writes ordinary checkpoints, so
     # the fetch, the ladder watcher and the publish path are identical.
-    TaskName.TRAIN_VECTOR: _train,
     TaskName.TRAIN_PCS: _train,
     TaskName.EVALUATE: _evaluate,
     TaskName.PRECOMPUTE: _precompute,
-    TaskName.VECTOR_SWEEP: _measurement,
-    # Same executor: an abstraction off the share, one command, one JSON result.
-    TaskName.ABSTRACTION_COUPLING: _measurement,
 }

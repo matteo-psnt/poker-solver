@@ -22,10 +22,20 @@ from src.interfaces.commands import load_all
 # publishing. `blueprint-serve` and `chipzen-seat` are NOT pool tasks -- they run
 # on the long-lived reader in `infra/serve/` -- but they belong here for the same
 # reason: they mmap a checkpoint and the card abstraction from local disk, which
-# is a place, not a record. `chart` is the same -- it reads one node out of a
-# loaded blueprint, which means having the blueprint.
+# is a place, not a record. `benchmark` and `chipzen-seat` share that shape from
+# the other direction: they FIELD a blueprint against an external opponent, so
+# they must load one off the box they run on. `chart` reads one node out of a
+# loaded blueprint, which again means having the blueprint.
 NODE_SIDE = frozenset(
-    {"train-static", "precompute", "evaluate", "blueprint-serve", "chipzen-seat", "chart"}
+    {
+        "train-static",
+        "precompute",
+        "evaluate",
+        "blueprint-serve",
+        "benchmark",
+        "chipzen-seat",
+        "chart",
+    }
 )
 
 LOCAL_SOURCE_FLAG = "--runs-dir"

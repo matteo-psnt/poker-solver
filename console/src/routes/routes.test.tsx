@@ -67,7 +67,6 @@ describe("the paths that moved", () => {
     ["/dispatch", "dispatch"],
     ["/share", "share"],
     ["/cost", "cost"],
-    ["/activity", "activity"],
   ])("sends %s to the operate page on its tab", async (from, tab) => {
     expect(await at(from)).toMatchObject({ pathname: "/operate", search: { tab } });
   });
@@ -153,14 +152,13 @@ describe("the container pages render", () => {
     expect(play?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("draws the operate page with its four tabs", async () => {
+  it("draws the operate page with its three tabs", async () => {
     mountAt("/operate");
     await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
       "Dispatch",
       "Share",
       "Cost",
-      "Activity",
     ]);
   });
 
