@@ -275,9 +275,9 @@ def publish_rungs_to_blob(run_dir: Path, run_id: str, sas: str, log: Log = _quie
         if not child.is_file() or not is_snapshot(child.name):
             continue
         try:
-            if blobstore.exists(sas, run_id, child.name):
+            if blobstore.exists(sas, f"{run_id}/{child.name}"):
                 continue
-            size = blobstore.put_rung(sas, run_id, child.name, child)
+            size = blobstore.put_object(sas, f"{run_id}/{child.name}", child)
         except Exception as error:  # noqa: BLE001 -- a publish must not kill a live task
             # LOUD, because the alternative is the failure shape this project
             # keeps paying for: a write that reports success and lands nowhere.
@@ -491,7 +491,7 @@ def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") ->
         path = destination / stale
         shutil.rmtree(path, ignore_errors=True)
         path.unlink(missing_ok=True)
-    if sas and blobstore.get_rung(sas, source.name, stored, destination):
+    if sas and blobstore.get_object(sas, f"{source.name}/{stored}", destination):
         return
     published = source / name
     if published.is_file():
@@ -515,7 +515,7 @@ def require_complete(source: Path, name: str, sas: str = "") -> None:
     # IN THE CONTAINER IS COMPLETE, with nothing else to check. One rung is one
     # atomically-committed blob: it is either there whole or not there, so the
     # marker this function exists to demand has no counterpart and needs none.
-    if sas and blobstore.exists(sas, source.name, records.object_name(name)):
+    if sas and blobstore.exists(sas, f"{source.name}/{records.object_name(name)}"):
         return
     if not (source / name).exists():
         raise FetchRefusedError(f"the manifest names {name} but it is not on the share")

@@ -40,19 +40,18 @@ API_VERSION = "2021-08-06"
 TIMEOUT_SECONDS = 900
 
 
-def rung_uri(container_sas: str, run_id: str, snapshot: str) -> str:
-    """The object a rung lives at, as a full SAS URL ready to request.
+def object_uri(container_sas: str, name: str) -> str:
+    """Where one object lives, as a full SAS URL ready to request.
 
-    The object name IS the snapshot's file name -- `run-x/static-100.ckpt.zst`
-    -- so there is one naming convention rather than a stored name and a
-    derived one that can drift.
+    The object name IS the file's name -- `run-x/static-100.ckpt.zst` for a
+    rung, `buckets-....tar.zst` for an abstraction -- so there is one naming
+    convention rather than a stored name and a derived one that can drift.
 
     The SAS is `https://<account>.blob.../<container>?<query>`; the blob name is
     spliced BEFORE the query, which is the one place this is easy to get wrong.
     """
     base, _, query = container_sas.partition("?")
-    name = urllib.parse.quote(f"{run_id}/{snapshot}")
-    return f"{base.rstrip('/')}/{name}" + (f"?{query}" if query else "")
+    return f"{base.rstrip('/')}/{urllib.parse.quote(name)}" + (f"?{query}" if query else "")
 
 
 def _request(url: str, method: str, data: IO[bytes] | None = None) -> urllib.request.Request:
@@ -61,7 +60,7 @@ def _request(url: str, method: str, data: IO[bytes] | None = None) -> urllib.req
     return request
 
 
-def exists(container_sas: str, run_id: str, snapshot: str) -> bool:
+def exists(container_sas: str, name: str) -> bool:
     """Whether the rung is there. A HEAD, so it costs no bytes.
 
     This is what replaces `(source / name).is_dir()` on the mount, and it is a
@@ -69,7 +68,7 @@ def exists(container_sas: str, run_id: str, snapshot: str) -> bool:
     """
     try:
         with urllib.request.urlopen(
-            _request(rung_uri(container_sas, run_id, snapshot), "HEAD"),
+            _request(object_uri(container_sas, name), "HEAD"),
             timeout=TIMEOUT_SECONDS,
         ):
             return True
@@ -79,7 +78,7 @@ def exists(container_sas: str, run_id: str, snapshot: str) -> bool:
         raise
 
 
-def put_rung(container_sas: str, run_id: str, snapshot: str, source: Path) -> int:
+def put_object(container_sas: str, name: str, source: Path) -> int:
     """Upload one rung's FILE as one object. Returns bytes uploaded.
 
     Streamed from the file rather than read into memory: a production rung is
@@ -87,7 +86,7 @@ def put_rung(container_sas: str, run_id: str, snapshot: str, source: Path) -> in
     """
     size = source.stat().st_size
     with source.open("rb") as handle:
-        request = _request(rung_uri(container_sas, run_id, snapshot), "PUT", handle)
+        request = _request(object_uri(container_sas, name), "PUT", handle)
         request.add_header("x-ms-blob-type", "BlockBlob")
         request.add_header("Content-Length", str(size))
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS):
@@ -95,16 +94,16 @@ def put_rung(container_sas: str, run_id: str, snapshot: str, source: Path) -> in
     return size
 
 
-def get_rung(container_sas: str, run_id: str, snapshot: str, destination: Path) -> bool:
+def get_object(container_sas: str, name: str, destination: Path) -> bool:
     """Fetch one rung into `destination/<snapshot>`. False when absent.
 
     Streamed to disk for the same reason the upload is streamed from it.
     """
     import shutil  # noqa: PLC0415 -- stdlib, deferred to keep the wrapper's import light
 
-    url = rung_uri(container_sas, run_id, snapshot)
+    url = object_uri(container_sas, name)
     destination.mkdir(parents=True, exist_ok=True)
-    target = destination / snapshot
+    target = destination / name.rsplit("/", 1)[-1]
     try:
         with (
             urllib.request.urlopen(_request(url, "GET"), timeout=TIMEOUT_SECONDS) as response,
@@ -119,7 +118,7 @@ def get_rung(container_sas: str, run_id: str, snapshot: str, destination: Path) 
     return True
 
 
-def read_head(container_sas: str, run_id: str, snapshot: str, length: int) -> bytes | None:
+def read_head(container_sas: str, name: str, length: int) -> bytes | None:
     """The first `length` bytes of a rung, or None when it is not there.
 
     A HEAD proves an object exists; it cannot prove the object is a snapshot.
@@ -129,7 +128,7 @@ def read_head(container_sas: str, run_id: str, snapshot: str, length: int) -> by
     own header instead, so the check that gates a deletion actually opens what
     it is about to make the only copy.
     """
-    request = _request(rung_uri(container_sas, run_id, snapshot), "GET")
+    request = _request(object_uri(container_sas, name), "GET")
     request.add_header("x-ms-range", f"bytes=0-{length - 1}")
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:

@@ -109,6 +109,21 @@ resource "azurerm_storage_container" "code" {
   }
 }
 
+# NO LIFECYCLE RULE, deliberately. The policy below is prefix-matched to the
+# checkpoints container and must stay that way: an abstraction is read by EVERY
+# node at boot, so tiering it toward Cold would put a cold-read on the critical
+# path of every task rather than on evidence nobody opens. There are ten of
+# them and they total 2.83 GiB; the tiering is not worth the read.
+resource "azurerm_storage_container" "abstractions" {
+  name                  = var.abstractions_container_name
+  storage_account_id    = azurerm_storage_account.store.id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 # COLD, NOT ARCHIVE, and the distinction is operational rather than thrifty:
 # rehydrating an archived blob takes HOURS, and a rung is exactly the thing a
 # resume or a score reaches for without warning. Cold is milliseconds to read

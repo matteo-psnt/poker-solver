@@ -176,7 +176,7 @@ def _with_checkpoint_access(config: CloudConfig, specs: Sequence[TaskSpec]) -> l
     minted: dict[bool, str] = {}
     sealed = []
     for task in specs:
-        write = task.op in blob.WRITES_CHECKPOINTS
+        write = task.op in blob.WRITES_BLOBS
         if write not in minted:
             minted[write] = blob.container_sas(
                 config.storage_account, config.share_key, write=write

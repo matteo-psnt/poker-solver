@@ -31,6 +31,11 @@ output "code_container_name" {
   value = azurerm_storage_container.code.name
 }
 
+output "abstractions_container_name" {
+  description = "Blob container holding one object per precomputed card abstraction."
+  value       = azurerm_storage_container.abstractions.name
+}
+
 # The live server is a CHOICE while both exist: see `record_live`.
 locals {
   live_server = (

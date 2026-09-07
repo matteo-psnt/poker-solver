@@ -25,9 +25,11 @@ from typing import Any
 from src.shared.cloudtask.kinds import TaskName
 
 CONTAINER = "checkpoints"
+ABSTRACTIONS = "abstractions"
 
-# The ops that PUT a rung. Everything else fetches one, and a fetch has no
-# business holding a credential that can overwrite what it read. Kept beside the
+# The ops that PUT anything. Everything else fetches, and a fetch has no
+# business holding a credential that can overwrite what it read. PRECOMPUTE is
+# here because it publishes the card abstraction it builds. Kept beside the
 # minting rather than at the call site so there is one list of who may write.
 #
 # A task that writes checkpoints must be named here, and
@@ -35,7 +37,7 @@ CONTAINER = "checkpoints"
 # once omitted, handed a read-only SAS, and every upload came back 403
 # `AuthorizationPermissionMismatch` -- the scoping worked as designed and the
 # list was wrong.
-WRITES_CHECKPOINTS = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS})
+WRITES_BLOBS = frozenset({TaskName.TRAIN, TaskName.TRAIN_PCS, TaskName.PRECOMPUTE})
 
 # Longer than any job, not any task. A ladder score fans out 30 rungs behind one
 # dispatch and the last of them can start hours after the first; a SAS that
@@ -52,9 +54,15 @@ CLOCK_SKEW = timedelta(minutes=15)
 def container_sas(account: str, key: str, *, write: bool) -> str:
     """A URL for the checkpoint container, carrying its own authorisation.
 
-    `write` is the discriminator between a training task and a reader: a score
-    or an evaluate FETCHES rungs and must not be able to overwrite one. Both
-    need `list`, because a fetch of "the current rung" resolves a name first.
+    `write` is the discriminator between a task that publishes and one that
+    reads: a score or an evaluate FETCHES and must not be able to overwrite what
+    it read. Both need `list`, because a fetch of "the current rung" resolves a
+    name first.
+
+    ONE ACCOUNT SAS, named per container by its URL. `generate_account_sas`
+    authorises the account, so the same token reaches the abstractions
+    container through `abstractions_uri` -- which is what lets a task carry one
+    credential rather than one per store.
     """
     from azure.storage.blob import (  # noqa: PLC0415 -- Azure only when dispatching
         AccountSasPermissions,
@@ -72,6 +80,18 @@ def container_sas(account: str, key: str, *, write: bool) -> str:
         expiry=now + SAS_LIFETIME,
     )
     return f"https://{account}.blob.core.windows.net/{CONTAINER}?{token}"
+
+
+def abstractions_uri(checkpoint_sas: str) -> str:
+    """The abstractions container, from the checkpoint container's SAS.
+
+    The token is an ACCOUNT SAS; only the path names the container. Swapping it
+    here keeps one credential on the wire instead of adding a second key to the
+    task payload for the same authorisation.
+    """
+    base, _, query = checkpoint_sas.partition("?")
+    root = base.rsplit("/", 1)[0]
+    return f"{root}/{ABSTRACTIONS}" + (f"?{query}" if query else "")
 
 
 SNAPSHOT_EXCLUDES = frozenset(
