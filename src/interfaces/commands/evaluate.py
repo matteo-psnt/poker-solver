@@ -453,7 +453,8 @@ def _render_profile(profile: dict) -> None:
             f"    {street:<8} visited {row['visited_fraction']:.4f}  "
             f"H_avg p50 {row['average_entropy']['p50']:.3f}  "
             f"H_cur p50 {row['current_entropy']['p50']:.3f}  "
-            f"pure {row['pure_fraction']:.3f}  no+regret {row['no_positive_regret_fraction']:.3f}"
+            f"pure {row['pure_fraction']:.3f}  no+regret {row['no_positive_regret_fraction']:.3f}  "
+            f"spread p50 {row.get('bucket_spread', {}).get('p50', float('nan')):.3f}"
         )
     for node in profile["preflop"]:
         mix = " ".join(f"{k}:{v:.3f}" for k, v in node["combo_weighted_mix"].items())

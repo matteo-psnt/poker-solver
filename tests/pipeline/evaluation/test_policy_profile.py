@@ -68,3 +68,39 @@ def test_untrained_rows_read_as_uniform(trained_solver):
     width = len(root["actions"])
     assert np.allclose(list(root["mean_mix"].values()), 1.0 / width)
     assert out["streets"]["preflop"]["visited_rows"] == 0
+
+
+def test_bucket_spread_is_bounded(profile):
+    for street, row in profile["streets"].items():
+        if "bucket_spread" not in row:
+            continue
+        q = row["bucket_spread"]
+        assert 0.0 <= q["p10"] <= q["p50"] <= q["p90"] <= 1.0 + 1e-12, (street, q)
+
+
+def test_spread_separates_a_strategy_that_ignores_its_cards_from_one_that_does_not():
+    """Entropy cannot see this, which is why it needed its own number.
+
+    A node whose every bucket plays the SAME mixture has not learned its own hand
+    strength -- air indistinguishable from nuts. Its rows can be exactly as mixed
+    as a well-differentiated node's, so H is identical and only the spread across
+    buckets tells them apart.
+    """
+    width, buckets = 4, 8
+    identical = np.tile(np.linspace(1.0, float(width), width), (buckets, 1))
+    differentiated = identical.copy()
+    differentiated[::2] = differentiated[::2][:, ::-1]
+
+    def spread_of(matrix):
+        rows = matrix / matrix.sum(axis=1, keepdims=True)
+        centre = rows.mean(axis=0, keepdims=True)
+        return float(np.mean(0.5 * np.abs(rows - centre).sum(axis=1)))
+
+    def entropy_of(matrix):
+        rows = matrix / matrix.sum(axis=1, keepdims=True)
+        return float(np.mean(-(rows * np.log(rows)).sum(axis=1) / math.log(width)))
+
+    assert spread_of(identical) == pytest.approx(0.0, abs=1e-12)
+    assert spread_of(differentiated) > 0.1
+    # The blind spot this metric exists to cover: identical entropy, opposite meaning.
+    assert entropy_of(identical) == pytest.approx(entropy_of(differentiated), abs=1e-12)

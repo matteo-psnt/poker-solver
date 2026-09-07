@@ -52,6 +52,7 @@ def _street_profiles(storage: StaticArrayStorage) -> dict[str, dict[str, Any]]:
     current_entropy: dict[Street, list[np.ndarray]] = {street: [] for street in Street}
     top_mass: dict[Street, list[np.ndarray]] = {street: [] for street in Street}
     no_positive_regret: dict[Street, int] = dict.fromkeys(Street, 0)
+    bucket_spread: dict[Street, list[np.ndarray]] = {street: [] for street in Street}
     for node in tree.nodes:
         count = int(tree.buckets_per_node[node.node_id])
         visited = tree.node_row_vector(storage.visited, node.node_id).astype(bool)
@@ -67,6 +68,13 @@ def _street_profiles(storage: StaticArrayStorage) -> dict[str, dict[str, Any]]:
         average_entropy[node.street].append(_entropy(average))
         current_entropy[node.street].append(_entropy(current))
         top_mass[node.street].append(average.max(axis=1))
+        if average.shape[0] > 1:
+            # Total-variation distance from the node's MEAN row. Zero means every
+            # bucket plays the node identically -- the strategy is ignoring its own
+            # cards, which entropy cannot see: 169 identical mixed rows and 169
+            # sharply different ones score the same H.
+            centre = average.mean(axis=0, keepdims=True)
+            bucket_spread[node.street].append(0.5 * np.abs(average - centre).sum(axis=1))
     out: dict[str, dict[str, Any]] = {}
     for street in Street:
         visited_rows = sum(len(chunk) for chunk in top_mass[street])
@@ -83,6 +91,8 @@ def _street_profiles(storage: StaticArrayStorage) -> dict[str, dict[str, Any]]:
             profile["current_entropy"] = _quantiles(current)
             profile["pure_fraction"] = float((top >= PURE_CUTOFF).mean())
             profile["no_positive_regret_fraction"] = no_positive_regret[street] / visited_rows
+            if bucket_spread[street]:
+                profile["bucket_spread"] = _quantiles(np.concatenate(bucket_spread[street]))
         out[str(street)] = profile
     return out
 
