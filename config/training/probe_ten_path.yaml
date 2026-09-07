@@ -1,0 +1,12 @@
+# Recall probe, arm 2: the same ten-bucket artifact as `probe_ten`, keyed on the
+# whole bucket path (perfect recall from the flop on). Same buckets, same tree
+# shape, a different game -- the arm that has CFR's convergence guarantee.
+
+extends: production.yaml
+
+card_abstraction:
+  config: ten
+  recall: path
+
+system:
+  config_name: "probe_ten_path"

@@ -54,6 +54,7 @@ def build_card_abstraction(
     return resolver.load(
         abstraction_config=config.card_abstraction.config,
         abstraction_hash=abstraction_hash,
+        recall=config.card_abstraction.recall,
     )
 
 

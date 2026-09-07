@@ -1,0 +1,18 @@
+# Ten buckets per street. The base of the recall probe: `path` recall over it
+# is 10 / 100 / 1,000 effective buckets, 71.9M rows on the production tree
+# (1.6x production's 45.5M); over production's 100/300/600 it would be 45 TB.
+# Feature settings are production's, so the only thing that differs is count.
+
+buckets:
+  flop: 10
+  turn: 10
+  river: 10
+
+flop_runouts: null
+equity_histogram_bins: 8
+
+kmeans_max_iter: 500
+kmeans_n_init: 20
+
+num_workers: null
+seed: 42

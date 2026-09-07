@@ -104,7 +104,8 @@ def _build_local(config: Config, abstraction: BucketingStrategy | None = None):
     action_model = ActionModel(config)
     if abstraction is None:
         abstraction = ComboAbstractionResolver().load(
-            abstraction_config=config.card_abstraction.config
+            abstraction_config=config.card_abstraction.config,
+            recall=config.card_abstraction.recall,
         )
     rules = GameRules(config.game.small_blind, config.game.big_blind)
     tree = build_betting_tree(

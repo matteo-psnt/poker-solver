@@ -58,6 +58,12 @@ class CardAbstractionConfig(StrictFrozenModel):
     """Card abstraction configuration."""
 
     config: str = Field(default="default")
+    # What a postflop row remembers of the hand's earlier streets. `street` keys
+    # a row on the current street's bucket alone, so the abstract game has
+    # imperfect recall; `path` keys it on the whole bucket path (flop, turn,
+    # river), which multiplies the row count by the earlier streets' bucket
+    # counts and restores CFR's convergence guarantee.
+    recall: Literal["street", "path"] = Field(default="street")
 
 
 class TrainingConfig(StrictFrozenModel):

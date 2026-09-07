@@ -1,0 +1,11 @@
+# Recall probe, arm 1: production's game and trainer over the ten-bucket
+# abstraction with the usual per-street (imperfect) recall. `extends`, so the
+# action hash matches production by construction.
+
+extends: production.yaml
+
+card_abstraction:
+  config: ten
+
+system:
+  config_name: "probe_ten"

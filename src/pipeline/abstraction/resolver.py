@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING
 
 from src.pipeline.abstraction.config import PrecomputeConfig
 from src.pipeline.abstraction.postflop.precompute import PostflopPrecomputer
+from src.pipeline.abstraction.recall import PathRecallBucketer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Literal
 
     from src.engine.solver.protocols import BucketingStrategy
 
@@ -75,7 +77,11 @@ class ComboAbstractionResolver:
         self._loader = loader or PostflopPrecomputer.load
 
     def load(
-        self, *, abstraction_config: str, abstraction_hash: str | None = None
+        self,
+        *,
+        abstraction_config: str,
+        abstraction_hash: str | None = None,
+        recall: Literal["street", "path"] = "street",
     ) -> BucketingStrategy:
         """Load abstraction by config name, optionally pinned to an exact config hash.
 
@@ -84,9 +90,17 @@ class ComboAbstractionResolver:
         pins resolution to the exact abstraction a checkpoint was trained against, so
         evaluating that checkpoint cannot silently bucket hands under a newer
         abstraction whose bucket ids mean something else.
+
+        ``recall`` is applied HERE, the one seam every process resolves through,
+        so a training worker and the parent that sized the shared table agree on
+        the bucket counts. The hash is the artifact's either way: recall is a
+        property of the run's config, not of the buckets.
         """
         resolved_path = self._resolve_config_path(abstraction_config, abstraction_hash)
-        return self._loader(resolved_path)
+        loaded = self._loader(resolved_path)
+        if recall == "path":
+            return PathRecallBucketer(loaded)
+        return loaded
 
     def resolved_hash(
         self, *, abstraction_config: str, abstraction_hash: str | None = None

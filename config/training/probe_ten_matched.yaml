@@ -1,0 +1,10 @@
+# Recall probe, arm 3: imperfect recall at the row count of `probe_ten_path`
+# (10 / 100 / 1,000 per-street buckets). Separates "more rows" from "recall".
+
+extends: production.yaml
+
+card_abstraction:
+  config: ten_matched
+
+system:
+  config_name: "probe_ten_matched"
