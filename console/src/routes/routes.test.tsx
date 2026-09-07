@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the six destinations", () => {
-  it.each(["/", "/runs", "/experiments", "/tasks", "/blueprint", "/operate"])(
+  it.each(["/", "/runs", "/experiments", "/tasks", "/blueprint", "/cost"])(
     "%s resolves to itself",
     async (path) => {
       expect((await at(path)).pathname).toBe(path);
@@ -63,12 +63,11 @@ describe("the paths that moved", () => {
     expect(await at("/play")).toMatchObject({ pathname: "/blueprint", search: { tab: "play" } });
   });
 
-  it.each([
-    ["/dispatch", "dispatch"],
-    ["/share", "share"],
-    ["/cost", "cost"],
-  ])("sends %s to the operate page on its tab", async (from, tab) => {
-    expect(await at(from)).toMatchObject({ pathname: "/operate", search: { tab } });
+  it("sends the old operate page to what is left of it", async () => {
+    // Dispatching and publishing are gone from the console -- queueing cloud
+    // work is what the command line is for -- so the page is its one remaining
+    // subject rather than a tab strip over one tab.
+    expect(await at("/operate")).toMatchObject({ pathname: "/cost" });
   });
 
   it("sends the old evals list to the run list", async () => {
@@ -97,10 +96,6 @@ describe("the search params that had to survive", () => {
     // The default is not written into the URL — it is what the route hands the
     // component, so that is what has to be asserted.
     expect((await at("/blueprint")).validated).toMatchObject({ tab: "chart" });
-  });
-
-  it("defaults the operate page to dispatch", async () => {
-    expect((await at("/operate")).validated).toMatchObject({ tab: "dispatch" });
   });
 
   it("keeps the task cause filter", async () => {
@@ -149,20 +144,9 @@ describe("the container pages render", () => {
     expect(play?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("draws the operate page with its three tabs", async () => {
-    mountAt("/operate");
-    await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
-      "Dispatch",
-      "Share",
-      "Cost",
-    ]);
-  });
-
-  it("shows the tab the URL names rather than always the first", async () => {
-    mountAt("/operate?tab=cost");
-    await waitFor(() => expect(screen.getByRole("tablist")).toBeTruthy());
-    const cost = screen.getAllByRole("tab").find((t) => t.textContent === "Cost");
-    expect(cost?.getAttribute("aria-selected")).toBe("true");
+  it("draws the cost page, which has no tabs to choose between", async () => {
+    mountAt("/cost");
+    await waitFor(() => expect(screen.getAllByText(/Node time/i).length).toBeGreaterThan(0));
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 });

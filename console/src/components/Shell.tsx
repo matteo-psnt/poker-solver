@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, Grid3x3, LayoutDashboard, Rocket, ScrollText } from "lucide-react";
+import { Activity, Grid3x3, LayoutDashboard, Receipt, ScrollText } from "lucide-react";
 import { useNow } from "@/api/queries";
 import type { Phase } from "@/api/types";
 import { count } from "@/lib/format";
@@ -14,7 +14,7 @@ const NAV = [
   { to: "/runs", label: "Runs", icon: Activity },
   { to: "/tasks", label: "Tasks", icon: ScrollText },
   { to: "/blueprint", label: "Blueprint", icon: Grid3x3 },
-  { to: "/operate", label: "Operate", icon: Rocket },
+  { to: "/cost", label: "Cost", icon: Receipt },
 ] as const;
 
 /**

@@ -11,7 +11,7 @@ import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { Shell } from "@/components/Shell";
 import { Blueprint } from "@/routes/Blueprint";
-import { Operate } from "@/routes/Operate";
+import { Cost } from "@/routes/Cost";
 import { Overview } from "@/routes/Overview";
 import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
@@ -70,21 +70,13 @@ const routes = [
   }),
 
   /**
-   * Dispatching, publishing, and accounting for both.
+   * What the work cost, against what Azure actually billed.
    *
-   * No search params beyond the tab: a dispatch form's state is what the
-   * operator is about to DO, and putting that in the URL makes a half-filled
-   * submission bookmarkable and shareable — which is the wrong thing to be able
-   * to hand someone.
+   * No search params: there is one thing on this page. It was a tab of an
+   * `Operate` page beside dispatching and publishing, and those are gone -- a
+   * console is for reading, and queueing work is what the command line is for.
    */
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/operate",
-    component: Operate,
-    validateSearch: z.object({
-      tab: z.enum(["dispatch", "share", "cost"]).default("dispatch"),
-    }),
-  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/cost", component: Cost }),
 ];
 
 /**
@@ -99,9 +91,7 @@ const routes = [
 const MOVED: Record<string, { to: string; search?: Record<string, unknown> }> = {
   "/charts": { to: "/blueprint", search: { tab: "chart" } },
   "/play": { to: "/blueprint", search: { tab: "play" } },
-  "/dispatch": { to: "/operate", search: { tab: "dispatch" } },
-  "/share": { to: "/operate", search: { tab: "share" } },
-  "/cost": { to: "/operate", search: { tab: "cost" } },
+  "/operate": { to: "/cost" },
   "/evals": { to: "/runs" },
 };
 

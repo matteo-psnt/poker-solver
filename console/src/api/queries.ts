@@ -12,14 +12,11 @@ import type {
   BlueprintRun,
   Cancelled,
   Combos,
-  Configs,
   Cost,
-  Dispatched,
   Hand,
   LeftSession,
   LogLines,
   NowView,
-  PushedCode,
   Runs,
   RunsView,
   RunView,
@@ -138,58 +135,7 @@ export const useLog = (taskId: string | null, lines = 400, live = false) =>
   });
 
 /**
- * A local directory read, and the only query here that touches neither Azure
- * nor the share. `staleTime: Infinity` because a config file appearing while
- * the console is open is not a thing worth polling for — the picker has a
- * refresh, and that is the honest cost of a list that changes when someone
- * edits the repo.
- */
-export const useConfigs = () =>
-  useQuery<Configs>({
-    queryKey: ["configs"],
-    queryFn: () => get("/api/configs"),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-
-/**
- * The dispatching writes.
- *
- * Each invalidates what its work will show up in — `jobs` and `tasks` for a
- * queued task, `runs` for a promotion. The click is not the authority on any of
- * it: Batch is, and the invalidation is how the page goes and asks.
- *
- * The bodies are `Record<string, unknown>` rather than mirrored interfaces on
- * purpose. The server's models already declare what each command accepts, and
- * they declare it by DROPPING what the caller omitted — a TypeScript interface
- * that filled in defaults would put them back, which is the exact disagreement
- * that design exists to prevent. The form builds the body it means to send.
- */
-const useDispatch = <T>(path: string) => {
-  const queryClient = useQueryClient();
-  return useMutation<T, Error, Record<string, unknown>>({
-    mutationFn: (body) => send<T>(path, body),
-    onSettled: () => {
-      // `["view"]`, not the `["jobs"]` key the deleted `useJobs` owned: the
-      // Overview and the status bar both read queued work through the composed
-      // view, so invalidating a key nothing subscribes to refreshed nothing.
-      queryClient.invalidateQueries({ queryKey: ["view"] });
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    },
-  });
-};
-
-export const useSubmit = () => useDispatch<Dispatched>("/api/submit");
-export const useScore = () => useDispatch<Dispatched>("/api/score");
-export const usePrecompute = () => useDispatch<Dispatched>("/api/precompute");
-
-export const usePushCode = () =>
-  useMutation<PushedCode, Error, Record<string, unknown>>({
-    mutationFn: (body) => send("/api/push-code", body),
-  });
-
-/**
- * The blueprint server. Never polled: a host serves one run for the life of
- * its process.
+ * The blueprint server.
  *
  * A host serves ONE run for the life of its process, so there is no interval
  * here and no invalidation: the answer cannot change without a deploy, which
