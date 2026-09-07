@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -30,7 +31,7 @@ from src.shared import records
 from src.shared.cloudtask.node import archive
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from azure.storage.fileshare import ShareServiceClient
 
@@ -68,6 +69,7 @@ def pull_metadata(
     *,
     run: str | None = None,
     previous: Path | None = None,
+    published_rungs: Mapping[str, set[str]] | None = None,
 ) -> int:
     """Materialise the published JSON record into ``destination``.
 
@@ -107,13 +109,10 @@ def pull_metadata(
         ):
             relative = remote[len(f"{share.ARCHIVE_DIR}/") :]
             leaf = Path(relative).name
-            # RECREATED, never downloaded: a completion marker's whole content
-            # is that it exists, so its name in this listing is the entire fact
-            # and fetching it would be a round trip per rung. Without them the
-            # local tree cannot tell a rung the share holds from one a manifest
-            # merely names -- which is the gap `runinfo` reports.
             if leaf.startswith(archive.MARKER_PREFIX):
-                markers.append(destination / relative)
+                # Residue: the share stopped being told which rungs are
+                # complete when a rung became one object. The container's
+                # listing answers that below.
                 continue
             if share.is_snapshot_path(relative) or not share.is_metadata(leaf):
                 continue
@@ -125,8 +124,17 @@ def pull_metadata(
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_DOWNLOADS, len(published) or 1)) as pool:
         walked = list(pool.map(_walk, published))
     wanted = [entry for batch, _ in walked for entry in batch]
-    for _, markers in walked:
-        for marker in markers:
+
+    # THE CONTAINER SAYS WHICH RUNGS EXIST, recreated locally as the marker
+    # files every reader already knows how to glob. Written rather than
+    # downloaded: a marker's whole content is that it exists, so one listing
+    # of the container is the entire fact for every run at once. The share
+    # used to hold these, and a marker there could only ever assert something
+    # about a directory it might have half-copied.
+    held = published_rungs or {}
+    for name in published:
+        for rung in held.get(name, ()):
+            marker = destination / name / archive.marker_for(rung)
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
 
@@ -458,7 +466,14 @@ def _materialise(root: Path, *, run: str | None, previous: Path | None = None) -
     """Pull the published record into ``root``, reusing ``previous`` where it can."""
     config = CloudConfig.load()
     service = share.share_client(config)
-    pull_metadata(service, config.share_name, root, run=run, previous=previous)
+    pull_metadata(
+        service,
+        config.share_name,
+        root,
+        run=run,
+        previous=previous,
+        published_rungs=blob.published_rungs(config),
+    )
 
 
 def _require_published(root: Path, run: str) -> None:

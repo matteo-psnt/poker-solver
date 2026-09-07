@@ -106,13 +106,23 @@ class TestPullMetadata:
         workspace.pull_metadata(fake, "s", tmp_path)
         assert not (tmp_path / "run-a" / "static-1000.zarr").exists()
 
-    def test_completion_markers_are_recreated_rather_than_downloaded(self, fake, tmp_path):
-        """A marker's whole content is that it exists, so its name in the
-        listing is the entire fact -- and it is what says whether a rung the
-        manifest advertises can actually be scored."""
-        workspace.pull_metadata(fake, "s", tmp_path)
-        marker = tmp_path / "run-a" / ".complete-static-1000.zarr"
-        assert marker.is_file()
+    def test_completion_markers_come_from_the_container(self, fake, tmp_path):
+        """A marker's whole content is that it exists, and what it says is
+        whether a rung the manifest advertises can actually be scored. The
+        CONTAINER answers that now: a rung is one atomically-committed object,
+        so its presence is the completeness the share could only assert about a
+        directory it might have half-copied."""
+        workspace.pull_metadata(
+            fake, "s", tmp_path, published_rungs={"run-a": {"static-1000.ckpt.zst"}}
+        )
+        assert (tmp_path / "run-a" / ".complete-static-1000.ckpt.zst").is_file()
+
+    def test_a_share_marker_is_not_recreated(self, fake, tmp_path):
+        """The share still holds ~1,500 of them and they are residue: nothing
+        writes one any more, so trusting them would resurrect a claim the
+        container has already answered."""
+        workspace.pull_metadata(fake, "s", tmp_path, published_rungs={})
+        assert not list((tmp_path / "run-a").glob(".complete-*"))
 
     def test_one_run_pulls_only_that_run(self, fake, tmp_path):
         workspace.pull_metadata(fake, "s", tmp_path, run="run-a")

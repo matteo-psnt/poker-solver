@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from src.shared import records
 from src.shared.cloudtask.kinds import TaskName
 
 CONTAINER = "checkpoints"
@@ -222,6 +223,31 @@ def _client(config: Any, run_id: str, object_name: str) -> Any:
         credential=config.share_key,
     )
     return service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
+
+
+def published_rungs(config: Any) -> dict[str, set[str]]:
+    """Every rung the container holds, as `{run_id: {object name}}`.
+
+    ONE listing for the whole container rather than one per run: the readers
+    ask about every published run at once, and a per-run call is a round trip
+    each against a store in another country.
+
+    This is what replaced the share's completion markers. A rung is one
+    atomically-committed object, so its PRESENCE is the completeness a marker
+    used to assert about a directory that could be half-copied.
+    """
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+    service = BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    )
+    found: dict[str, set[str]] = {}
+    for entry in service.get_container_client(CONTAINER).list_blobs():
+        run, _, name = entry.name.partition("/")
+        if name and name != records.STATIC_CHECKPOINT:
+            found.setdefault(run, set()).add(name)
+    return found
 
 
 def rung_size(config: Any, run_id: str, object_name: str) -> int:
