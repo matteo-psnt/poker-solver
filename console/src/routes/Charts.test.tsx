@@ -201,33 +201,35 @@ describe("the line, as columns", () => {
     expect(screen.getAllByText("BB").length).toBe(1);
   });
 
-  it("keeps every option a past spot had, so the other branch is one click", async () => {
+  it("shows a past spot's whole menu, and touching it changes nothing", async () => {
     mountAt(SPOT);
     await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
-    // `fold` was on offer at the first spot and was not taken. It is drawn
-    // anyway, and clicking it replays the line to there and folds instead.
-    const fold = screen.getAllByText("fold")[0];
-    expect(fold).toBeTruthy();
-    fireEvent.click(fold as HTMLElement);
-    // Replayed to that spot and folded instead: the new line is `f`, not
-    // `c/x/f`. A memory history has no `window.location`, so the round trip the
-    // click causes is what says where the page went.
+
+    // `fold` was on offer at the first spot and was not taken. It is drawn --
+    // the menu is what makes a column worth reading -- and clicking it asks for
+    // the SPOT, not for a line in which the fold happened. Looking is not
+    // editing: you step back into a spot first, and take an action from there.
+    fireEvent.click(screen.getAllByText("fold")[0] as HTMLElement);
     await waitFor(() =>
       expect(
         (globalThis.fetch as unknown as { mock: { calls: string[][] } }).mock.calls.some(
-          ([url]) => String(url).includes("node") && String(url).includes("path=f&"),
+          ([url]) => String(url).includes("node") && String(url).includes("path=&"),
         ),
       ).toBe(true),
     );
+    expect(
+      (globalThis.fetch as unknown as { mock: { calls: string[][] } }).mock.calls.some(
+        ([url]) => String(url).includes("node") && String(url).includes("path=f&"),
+      ),
+    ).toBe(false);
   });
 
-  it("goes BACK to a spot when you click the action that was taken there", async () => {
+  it("goes BACK to a spot when you click the column for it", async () => {
     mountAt(SPOT);
     await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
 
-    // `call` was taken at the first spot, so clicking it asks for the chart as
-    // it stood when that call was being decided -- the line BEFORE the token,
-    // which for the first column is the preflop root.
+    // The chart as it stood when that spot was being decided: the line BEFORE
+    // its token, which for the first column is the preflop root.
     fireEvent.click(screen.getAllByTitle("read the chart at this spot")[0] as HTMLElement);
     await waitFor(() =>
       expect(

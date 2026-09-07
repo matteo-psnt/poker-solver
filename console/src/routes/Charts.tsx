@@ -204,10 +204,10 @@ function Sequence({
   }
 
   // A column's path is the tokens BEFORE it -- the line that leads TO this
-  // spot. Clicking the action that was taken goes there, which is how you read
-  // the chart as it stood when that decision was made; clicking any other one
-  // replays to the same spot and branches instead. Deals carry no token, which
-  // is why this counts spots rather than using the column index.
+  // spot, which is where clicking it goes. Looking at a spot never changes the
+  // line: you step back into one and then take an action, rather than editing a
+  // decision in place. Deals carry no token, which is why this counts spots
+  // rather than using the column index.
   const tokens: string[] = [];
   const columns = (node.line ?? []).map((step) => {
     const before = tokens.join("/");
@@ -224,9 +224,7 @@ function Sequence({
             spot={step}
             button={node.button ?? 0}
             bigBlind={bigBlind}
-            onPick={(token) =>
-              onGo(token === step.chosen ? before : before ? `${before}/${token}` : token)
-            }
+            onGo={() => onGo(before)}
           />
         ) : (
           <DealColumn
@@ -279,30 +277,32 @@ function SpotColumn({
   spot,
   button,
   bigBlind,
-  onPick,
+  onGo,
 }: {
   spot: Spot;
   button: number;
   bigBlind: number;
-  onPick: (token: string) => void;
+  /** Read the chart at this spot. The line is not changed by looking at it. */
+  onGo: () => void;
 }) {
   const colours = actionColours(spot.options.map((option) => option.token));
   return (
-    <Column label={seatName(spot.actor, button)} note={`${inBlinds(spot.stack, bigBlind)}`}>
-      {spot.options.map((option, index) => {
-        const label = describeAction(option.token, bigBlind).text;
-        const taken = option.token === spot.chosen;
-        return (
-          <ActionRow
-            key={option.token}
-            label={label}
-            colour={colours[index] ?? "transparent"}
-            chosen={taken}
-            title={taken ? "read the chart at this spot" : `${label} here instead`}
-            onClick={() => onPick(option.token)}
-          />
-        );
-      })}
+    <Column
+      label={seatName(spot.actor, button)}
+      note={inBlinds(spot.stack, bigBlind)}
+      onGo={onGo}
+      title="read the chart at this spot"
+    >
+      {spot.options.map((option, index) => (
+        <span
+          key={option.token}
+          className={rowClass(option.token === spot.chosen, false)}
+          style={rowStyle(option.token === spot.chosen, colours[index] ?? "transparent")}
+        >
+          <Dot colour={colours[index] ?? "transparent"} show={false} />
+          {describeAction(option.token, bigBlind).text}
+        </span>
+      ))}
     </Column>
   );
 }
@@ -342,8 +342,6 @@ function HereColumn({
             key={option.token}
             label={label}
             colour={colours[index] ?? "transparent"}
-            chosen={false}
-            live
             title={`${label}, and read the spot after it`}
             onClick={() => onPick(option.token)}
           />
@@ -407,30 +405,39 @@ function DealColumn({
   );
 }
 
-/** The frame every column shares: a header, then rows. */
+/**
+ * The frame every column shares: a header, then rows.
+ *
+ * A PAST column is one button covering the whole card, because every part of it
+ * means the same thing -- show me this spot. Only the column you are standing in
+ * has per-action controls, and that is where taking an action lives.
+ */
 function Column({
   label,
   note,
   here = false,
+  onGo,
+  title,
   children,
 }: {
   label: string;
   note: string;
   /** This is the spot being read, or the street being dealt. */
   here?: boolean;
+  /** Makes the whole card a link to one spot. Omit for the current column. */
+  onGo?: () => void;
+  title?: string;
   children: React.ReactNode;
 }) {
-  return (
-    <div
-      className={cn(
-        "flex min-w-[8.75rem] shrink-0 flex-col rounded-[4px] border",
-        // Every column is a card, so the line reads as columns rather than as
-        // one wide table; the spot being READ is the lit one among them.
-        here
-          ? "border-[var(--fg-faint)] bg-white/[0.05]"
-          : "border-[var(--border)] bg-white/[0.015]",
-      )}
-    >
+  const frame = cn(
+    "flex min-w-[8.75rem] shrink-0 flex-col rounded-[4px] border text-left",
+    // Every column is a card, so the line reads as columns rather than as
+    // one wide table; the spot being READ is the lit one among them.
+    here ? "border-[var(--fg-faint)] bg-white/[0.05]" : "border-[var(--border)] bg-white/[0.015]",
+    onGo && "hover:border-[var(--fg-faint)] hover:bg-white/[0.05]",
+  );
+  const inside = (
+    <>
       <div className="flex items-baseline justify-between gap-2 border-b border-[var(--border)] px-2 py-1.5">
         <span
           className={cn(
@@ -443,58 +450,58 @@ function Column({
         <span className="font-mono text-[11px] tabular-nums text-[var(--fg-faint)]">{note}</span>
       </div>
       <div className="flex flex-1 flex-col gap-0.5 p-1">{children}</div>
-    </div>
+    </>
+  );
+  return onGo ? (
+    <button type="button" onClick={onGo} title={title} className={frame}>
+      {inside}
+    </button>
+  ) : (
+    <div className={frame}>{inside}</div>
   );
 }
 
-/**
- * One action in a column.
- *
- * Three states, and the contrast is the information: what was TAKEN is filled,
- * what is on offer HERE is legible because it is the move you are about to make,
- * and the branches not taken further back are dim -- present, clickable, and not
- * competing with the spot you are reading.
- */
+/** The look of one action row, shared by the past columns and the live one. */
+function rowClass(chosen: boolean, live: boolean): string {
+  return cn(
+    "flex items-center gap-2 rounded-[3px] border-l-2 py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",
+    chosen && "font-medium text-[var(--fg)]",
+    !chosen && live && "border-l-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
+    !chosen && !live && "border-l-transparent text-[var(--fg-faint)]",
+    live && !chosen && "hover:bg-white/[0.05]",
+  );
+}
+
+/** The action's own colour, so a fold reads blue here as it does in the grid. */
+function rowStyle(chosen: boolean, colour: string) {
+  return chosen ? { borderLeftColor: colour, backgroundColor: `${colour}26` } : undefined;
+}
+
+/** Drawn on every row so the text starts at the same x, coloured only when live. */
+function Dot({ colour, show }: { colour: string; show: boolean }) {
+  return (
+    <span
+      className="size-1.5 shrink-0 rounded-full"
+      style={{ backgroundColor: show ? colour : "transparent" }}
+    />
+  );
+}
+
+/** One action you can take from the spot being read. */
 function ActionRow({
   label,
   colour,
-  chosen,
-  live = false,
   title,
   onClick,
 }: {
   label: string;
   colour: string;
-  chosen: boolean;
-  /** An action available from the spot being read, rather than a past branch. */
-  live?: boolean;
-  /** What the click does -- the two past-column meanings differ and look alike. */
   title: string;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-2 rounded-[3px] border-l-2 py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",
-        chosen && "font-medium text-[var(--fg)]",
-        !chosen && live && "border-l-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
-        !chosen && !live && "border-l-transparent text-[var(--fg-faint)] hover:text-[var(--fg)]",
-        !chosen && "hover:bg-white/[0.05]",
-      )}
-      // The colour is the action's own, so a fold reads blue and a shove red
-      // here exactly as it does in the grid below and the rail beside it.
-      style={chosen ? { borderLeftColor: colour, backgroundColor: `${colour}26` } : undefined}
-    >
-      {/* Always drawn, so every row's text starts at the same x whether or not
-          it carries a dot. Coloured only where it means something: a move you
-          can make from here. */}
-      <span
-        className="size-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: live && !chosen ? colour : "transparent" }}
-      />
+    <button type="button" title={title} onClick={onClick} className={rowClass(false, true)}>
+      <Dot colour={colour} show />
       {label}
     </button>
   );
