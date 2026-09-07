@@ -449,6 +449,16 @@ class _LeafSpec:
     opp_payoff: float
     pot: float  # showdown / depth-limit leaves (after completing a pending call)
     invested: tuple[float, float]
+    #: The hand really is over here, so there is no rest-of-hand to assume
+    #: anything about and a continuation MUST NOT be applied. True for folds and
+    #: for real showdowns (all-in, or the river checked through); False only for
+    #: the depth-limit and chance-node leaves the continuation model exists for.
+    #:
+    #: REQUIRED, deliberately. A default either silently suppresses the
+    #: continuation at a depth-limit leaf or silently applies one at a terminal,
+    #: and both read as "the knob does nothing" rather than as a mistake -- a
+    #: default of True did exactly that to two tests here while being written.
+    is_exact: bool
 
 
 @dataclass(frozen=True)
@@ -479,6 +489,7 @@ def _prepare_nodes(
                 opp_payoff=float(state.get_payoff(1 - hero, rules)),
                 pot=0.0,
                 invested=(0.0, 0.0),
+                is_exact=True,
             )
         else:
             call_state = _complete_pending_call(state)
@@ -488,6 +499,7 @@ def _prepare_nodes(
                 opp_payoff=0.0,
                 pot=float(call_state.pot),
                 invested=rules.invested_chips(call_state),
+                is_exact=state.is_terminal,
             )
         return
 
@@ -609,11 +621,16 @@ def _leaf_values(
         )
 
     hero, opp = ctx.hero, 1 - ctx.hero
+    # An EXACT leaf is the hand actually being over, so nothing may be added to
+    # it; a continuation applies only where the tree was cut short. Latent until
+    # now purely because the shipped continuation is 0.0 -- a non-zero one put
+    # chips into a terminal pot that nobody could still be asked for.
+    fraction = 0.0 if spec.is_exact else continuation.pot_fraction
     # Both players are assumed to put in the same extra amount and see the
     # showdown, so the pot grows by twice what each commits. Symmetric on
     # purpose: an asymmetric continuation would encode a read, and everything
     # here must stay a function of public state + ranges.
-    extra = continuation.pot_fraction * spec.pot
+    extra = fraction * spec.pot
     pot = spec.pot + 2.0 * extra
     invested = (spec.invested[0] + extra, spec.invested[1] + extra)
     # A runout deals two more cards, so the opponent mass that survives it falls

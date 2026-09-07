@@ -249,14 +249,26 @@ class TestShowdownAndFoldLeavesShareOneScale:
         net = self.POT - self.INVESTED[0]
         showdown = _leaf_values(
             _LeafSpec(
-                is_fold=False, hero_payoff=0.0, opp_payoff=0.0, pot=self.POT, invested=self.INVESTED
+                is_fold=False,
+                hero_payoff=0.0,
+                opp_payoff=0.0,
+                pot=self.POT,
+                invested=self.INVESTED,
+                is_exact=True,
             ),
             ctx,
             hero,
             opp,
         )[0]
         uncalled = _leaf_values(
-            _LeafSpec(is_fold=True, hero_payoff=net, opp_payoff=-net, pot=0.0, invested=(0.0, 0.0)),
+            _LeafSpec(
+                is_fold=True,
+                hero_payoff=net,
+                opp_payoff=-net,
+                pot=0.0,
+                invested=(0.0, 0.0),
+                is_exact=True,
+            ),
             ctx,
             hero,
             opp,
@@ -279,8 +291,14 @@ class TestLeafContinuations:
     BOARD = (Card.new("Kh"), Card.new("8d"), Card.new("3c"), Card.new("Qs"), Card.new("2d"))
 
     def _leaf(self, *, is_fold: bool = False, pot: float = 100.0, invested=(30.0, 30.0)):
+        """A DEPTH-LIMIT leaf: the continuation model is what this class tests."""
         return _LeafSpec(
-            is_fold=is_fold, hero_payoff=pot, opp_payoff=-pot, pot=pot, invested=invested
+            is_fold=is_fold,
+            hero_payoff=pot,
+            opp_payoff=-pot,
+            pot=pot,
+            invested=invested,
+            is_exact=False,
         )
 
     def _ctx(self):
@@ -358,3 +376,45 @@ class TestLeafContinuations:
             self._leaf(), ctx, hero, opp, Continuation(name="pot-called", pot_fraction=1.0)
         )[0]
         assert large.std() > small.std()
+
+
+class TestAnExactLeafTakesNoContinuation:
+    """A real showdown has no rest-of-hand, so nothing may be added to its pot.
+
+    Undetectable before `is_exact` existed, because the only shipped
+    continuation is 0.0 and 0.0 is a no-op on every leaf. It would have
+    surfaced the moment anyone set the knob: a terminal all-in would have been
+    valued as though both players could still put in another pot.
+    """
+
+    BOARD = (Card.new("Kh"), Card.new("8d"), Card.new("3c"), Card.new("Qs"), Card.new("2d"))
+
+    def _values(self, *, is_exact: bool, fraction: float):
+        ctx = _PassContext(
+            hero=0, evaluators=[RunoutEvaluator(self.BOARD)], node_data={}, leaf_specs={}
+        )
+        spec = _LeafSpec(
+            is_fold=False,
+            hero_payoff=0.0,
+            opp_payoff=0.0,
+            pot=100.0,
+            invested=(30.0, 30.0),
+            is_exact=is_exact,
+        )
+        reach = np.ones(NUM_COMBOS)
+        return _leaf_values(
+            spec, ctx, reach, reach, Continuation(name="probe", pot_fraction=fraction)
+        )
+
+    def test_a_terminal_ignores_the_continuation(self):
+        checked = self._values(is_exact=True, fraction=0.0)
+        loaded = self._values(is_exact=True, fraction=1.0)
+        np.testing.assert_array_equal(checked[0], loaded[0])
+        np.testing.assert_array_equal(checked[1], loaded[1])
+
+    def test_a_depth_limit_leaf_still_honours_it(self):
+        """The guard must not disarm the knob everywhere -- that is the other
+        way to make it silently do nothing."""
+        checked = self._values(is_exact=False, fraction=0.0)
+        loaded = self._values(is_exact=False, fraction=1.0)
+        assert not np.array_equal(checked[0], loaded[0])
