@@ -9,8 +9,10 @@ has its own region, `postgres_location`, and the share stays where it was.
 The Sweden server is not moved, it is REPLACED: a location change recreates a
 Flexible Server, and this one is the only copy. So the old server stays in
 state as the retired `azurerm_postgresql_flexible_server.record`, the new one
-is `record_ca`, the data crosses by dump and restore, and `record_live` says
-which one the readers see. Three stages: build and validate, switch, delete.
+is `record_ca`, the data crosses by dump and restore, and a `record_live`
+variable said which one the readers saw until Sweden was deleted. Three
+stages: build and validate, switch, delete. All three ran on 2026-09-06; what
+follows is the record of them, and the procedure if it is ever done again.
 
 ## Stage 1 -- build and validate, readers still on Sweden
 
@@ -86,19 +88,11 @@ Terraform's database resource is by name and is unaffected.
 
 ## Stage 3 -- delete Sweden, right after
 
-The data is not worth a second server: once stage 2 reads correctly, delete.
-In `infra/store/postgres.tf` remove the retired section and `record_live`
-with its `locals`; point the outputs at `record_ca`; then
-
-```sh
-terraform -chdir=infra/store plan      # expect: 5 to destroy, nothing else
-```
-
-`prevent_destroy` on the Sweden server and its database refuses this until
-those two lifecycle lines go too -- that is the guard doing its job; remove
-them in the same change. Apply, then add `moved { from =
-azurerm_postgresql_flexible_server.record_ca, to = ...record }` (and the same
-for its four dependents) so the live server gets the plain name back.
+Done 2026-09-06, the same sitting as stage 2: the retired section, `record_live`
+and its `locals` are gone from `infra/store`, and the apply destroyed the five
+Sweden resources. The live server keeps the address `record_ca`; renaming it
+to `record` is a `moved` block and one more apply, and was not worth a third
+one that day.
 
 ## After
 
