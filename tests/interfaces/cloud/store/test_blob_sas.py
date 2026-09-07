@@ -26,13 +26,6 @@ class TestOnlyATrainerMayWrite:
         assert TaskName.TRAIN in blob.WRITES_CHECKPOINTS
         assert TaskName.TRAIN_PCS in blob.WRITES_CHECKPOINTS
 
-    def test_the_migration_writes(self):
-        """Moving the history IS writing rungs. Omitted from this set, the sweep
-        was handed a read-only SAS and every upload came back 403
-        `AuthorizationPermissionMismatch` -- the scoping working exactly as
-        designed against a list that was wrong."""
-        assert TaskName.MIGRATE_CHECKPOINTS in blob.WRITES_CHECKPOINTS
-
     @pytest.mark.parametrize("op", [TaskName.EVALUATE, TaskName.PRECOMPUTE])
     def test_everything_else_only_reads(self, op):
         assert op not in blob.WRITES_CHECKPOINTS

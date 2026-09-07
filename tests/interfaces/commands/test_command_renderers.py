@@ -40,7 +40,6 @@ from src.interfaces.commands.curve import CurvePayload
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
-from src.interfaces.commands.migrate_checkpoints import MigratedPayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.profile import ProfilePayload
@@ -49,7 +48,7 @@ from src.interfaces.commands.prune_checkpoints import PrunePlan
 from src.interfaces.commands.push_code import PushedCodePayload
 from src.interfaces.commands.reconcile_runs import Closure, ReconcilePlan
 from src.interfaces.commands.record_admit import AdmittedPayload
-from src.interfaces.commands.record_migrate import MigratedPayload as SchemaMigratedPayload
+from src.interfaces.commands.record_migrate import MigratedPayload
 from src.interfaces.commands.runinfo import RunInfoPayload
 from src.interfaces.commands.runs import RunsPayload, RunSummary
 from src.interfaces.commands.score import ScorePayload
@@ -57,7 +56,6 @@ from src.interfaces.commands.serve import ServePayload
 from src.interfaces.commands.serve_box import BoxPayload
 from src.interfaces.commands.status import StatusPanel, StatusPayload
 from src.interfaces.commands.submit import SubmitPayload
-from src.interfaces.commands.submit_migrate import SubmitMigratePayload
 from src.interfaces.commands.submit_precompute import PrecomputeDispatchPayload
 from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.commands.train_pcs import PcsTrainingPayload
@@ -111,19 +109,6 @@ PAYLOADS: dict[str, Any] = {
         ],
         unsettled=["run-pcs-production-to4k-turn-river-072201-7245"],
         no_evidence=["run-production-025433-1095"],
-    ),
-    "migrate-checkpoints": MigratedPayload(
-        runs_considered=343,
-        rungs_present=1269,
-        phantom=["run-a/static-100.zarr"],
-        failures=["run-a/static-200.zarr: HTTPError: 503"],
-    ),
-    "submit-migrate": SubmitMigratePayload(
-        code_snapshot="code-20260903_230001",
-        job_id="poker-20260903",
-        tasks=["migrate-checkpoints-230001-9545"],
-        records_to_database=True,
-        flags=["--limit", "50"],
     ),
     "precompute": PrecomputePayload(
         abstraction_config="production",
@@ -260,7 +245,7 @@ PAYLOADS: dict[str, Any] = {
         gaps=["unscored ladder rungs: 5,000,000, 20,000,000"],
     ),
     "record-admit": AdmittedPayload(server="poker-solver-record", address="203.0.113.7"),
-    "record-migrate": SchemaMigratedPayload(before="", after="9eb7f485ecad", applied=True),
+    "record-migrate": MigratedPayload(before="", after="9eb7f485ecad", applied=True),
     "serve-box": BoxPayload(
         action="status",
         vm="blueprint-server",
