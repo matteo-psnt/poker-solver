@@ -159,10 +159,14 @@ def leg_row(task_id: str, attempt: int, leg: str, document: Mapping[str, Any]) -
     }
 
 
-def rows_from_documents(
-    documents: dict[str, dict[str, Any]],
-) -> list[tuple[str, int, str, dict[str, Any]]]:
-    """Filename-keyed documents as `(task_id, attempt, leg, body)`.
+def split_name(name: str) -> tuple[str, int, str] | None:
+    """`<name>.json` as `(task_id, attempt, leg)`, or `None` if it is neither shape.
+
+    THE NAME IS WHERE AN ATTEMPT NUMBER LIVES, and the only place a reader may
+    take one from. A start document's body carries `attempt: 0` -- the claim
+    assigns the real number inside its own INSERT and cannot stamp the body it
+    is writing -- so a reader that believes the body files every start under 0,
+    away from the exit record that shares its execution.
 
     TWO NAME SHAPES, and requiring the first silently dropped 4,591 of 13,440
     documents -- a third of the record, including every one of the 1,823
@@ -174,18 +178,26 @@ def rows_from_documents(
         <task>.progress.json             per TASK
         <task>.observed.json             per TASK, written by the READER
     """
+    stem = name.removesuffix(".json")
+    parts = stem.rsplit(".", 2)
+    if len(parts) == 3 and parts[1].isdigit():
+        return parts[0], int(parts[1]), parts[2]
+    if len(parts) >= 2:
+        return stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
+    return None
+
+
+def rows_from_documents(
+    documents: dict[str, dict[str, Any]],
+) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Filename-keyed documents as `(task_id, attempt, leg, body)`."""
     rows: list[tuple[str, int, str, dict[str, Any]]] = []
     seen: set[tuple[str, int, str]] = set()
     for name, document in documents.items():
-        stem = name.removesuffix(".json")
-        parts = stem.rsplit(".", 2)
-        if len(parts) == 3 and parts[1].isdigit():
-            task_id, attempt, leg = parts[0], int(parts[1]), parts[2]
-        elif len(parts) >= 2:
-            task_id, attempt, leg = stem.rsplit(".", 1)[0], TASK_SCOPED, parts[-1]
-        else:
+        split = split_name(name)
+        if split is None:
             continue
-        key = (task_id, attempt, leg)
+        key = task_id, attempt, leg = split
         if key in seen:
             continue
         seen.add(key)

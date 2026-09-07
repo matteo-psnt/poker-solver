@@ -45,6 +45,7 @@ from src.shared.cloudtask.task_log import (
     PROGRESS_SUFFIX,
     START_SUFFIX,
     read_documents,
+    split_name,
     tasks_dir,
     utcnow,
 )
@@ -221,10 +222,13 @@ def compactable(directory: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
             sealed.add(task_id)
     # A task is sealed only if EVERY attempt of it is: a retry in flight shares
     # the id with the failed attempt before it.
-    for name, document in documents.items():
+    for name in documents:
         if not name.endswith(START_SUFFIX):
             continue
-        task_id, attempt = document.get("task_id"), int(document.get("attempt", 1))
+        split = split_name(name)
+        if split is None:
+            continue
+        task_id, attempt = split[0], split[1]
         exit_name = f"{task_id}.{attempt}{EXIT_SUFFIX}"
         exit_record = documents.get(exit_name, {})
         if exit_record.get("cause") not in TERMINAL_CAUSES:
@@ -270,14 +274,24 @@ def bundle_document(
     }
 
 
-def _with_suffix(documents: dict[str, dict[str, Any]], suffix: str) -> list[dict[str, Any]]:
+def _named_with_suffix(
+    documents: dict[str, dict[str, Any]], suffix: str
+) -> list[tuple[str, dict[str, Any]]]:
     """The documents whose filename ends in ``suffix``, in filename order.
 
     Order is preserved because it decided ties: two records claiming the same
     slot resolved to whichever sorted last, and a bundle must not quietly
-    reshuffle that.
+    reshuffle that. The name comes back with the document because it carries the
+    attempt number -- see :func:`~src.shared.cloudtask.task_log.split_name`.
     """
-    return [document for name, document in sorted(documents.items()) if name.endswith(suffix)]
+    return [
+        (name, document) for name, document in sorted(documents.items()) if name.endswith(suffix)
+    ]
+
+
+def _with_suffix(documents: dict[str, dict[str, Any]], suffix: str) -> list[dict[str, Any]]:
+    """The documents alone, for the callers that do not need the name."""
+    return [document for _name, document in _named_with_suffix(documents, suffix)]
 
 
 def _by_task_id(documents: dict[str, dict[str, Any]], suffix: str) -> dict[str, dict[str, Any]]:
@@ -488,13 +502,14 @@ def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:
     latest, how `cause` resolves, what an ETA is -- is here and nowhere else.
     """
     # Keyed by (task_id, attempt): a Batch retry reuses the task id, and the
-    # failed attempt is the one worth keeping.
+    # failed attempt is the one worth keeping. The attempt comes from the NAME
+    # -- `split_name` says why the body cannot be believed.
     attempts: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
     for suffix, slot in ((START_SUFFIX, "start"), (EXIT_SUFFIX, "exit")):
-        for record in _with_suffix(documents, suffix):
-            if record.get("task_id"):
-                key = (record["task_id"], int(record.get("attempt", 1)))
-                attempts.setdefault(key, {})[slot] = record
+        for name, record in _named_with_suffix(documents, suffix):
+            split = split_name(name)
+            if split is not None and record.get("task_id"):
+                attempts.setdefault((split[0], split[1]), {})[slot] = record
 
     observed = _by_task_id(documents, OBSERVED_SUFFIX)
     running = _by_task_id(documents, PROGRESS_SUFFIX)
