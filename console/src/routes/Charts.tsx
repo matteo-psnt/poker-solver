@@ -203,9 +203,11 @@ function Sequence({
     );
   }
 
-  // A column's path is the tokens BEFORE it, so a click replays to this spot and
-  // then takes the branch you clicked. Deals carry no token, which is why this
-  // counts spots rather than using the column index.
+  // A column's path is the tokens BEFORE it -- the line that leads TO this
+  // spot. Clicking the action that was taken goes there, which is how you read
+  // the chart as it stood when that decision was made; clicking any other one
+  // replays to the same spot and branches instead. Deals carry no token, which
+  // is why this counts spots rather than using the column index.
   const tokens: string[] = [];
   const columns = (node.line ?? []).map((step) => {
     const before = tokens.join("/");
@@ -222,7 +224,9 @@ function Sequence({
             spot={step}
             button={node.button ?? 0}
             bigBlind={bigBlind}
-            onPick={(token) => onGo(before ? `${before}/${token}` : token)}
+            onPick={(token) =>
+              onGo(token === step.chosen ? before : before ? `${before}/${token}` : token)
+            }
           />
         ) : (
           <DealColumn
@@ -266,16 +270,6 @@ function Sequence({
           hand over
         </div>
       )}
-
-      {node.path !== "" && (
-        <button
-          type="button"
-          onClick={() => onGo("")}
-          className="ml-auto shrink-0 self-center rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-muted)] hover:border-[var(--fg-faint)] hover:text-[var(--fg)]"
-        >
-          back to preflop
-        </button>
-      )}
     </div>
   );
 }
@@ -295,15 +289,20 @@ function SpotColumn({
   const colours = actionColours(spot.options.map((option) => option.token));
   return (
     <Column label={seatName(spot.actor, button)} note={`${inBlinds(spot.stack, bigBlind)}`}>
-      {spot.options.map((option, index) => (
-        <ActionRow
-          key={option.token}
-          label={describeAction(option.token, bigBlind).text}
-          colour={colours[index] ?? "transparent"}
-          chosen={option.token === spot.chosen}
-          onClick={() => onPick(option.token)}
-        />
-      ))}
+      {spot.options.map((option, index) => {
+        const label = describeAction(option.token, bigBlind).text;
+        const taken = option.token === spot.chosen;
+        return (
+          <ActionRow
+            key={option.token}
+            label={label}
+            colour={colours[index] ?? "transparent"}
+            chosen={taken}
+            title={taken ? "read the chart at this spot" : `${label} here instead`}
+            onClick={() => onPick(option.token)}
+          />
+        );
+      })}
     </Column>
   );
 }
@@ -336,16 +335,20 @@ function HereColumn({
       {options.length === 0 && (
         <span className="px-1.5 py-1 text-[11px] text-[var(--fg-faint)]">no actions</span>
       )}
-      {options.map((option, index) => (
-        <ActionRow
-          key={option.token}
-          label={describeAction(option.token, bigBlind).text}
-          colour={colours[index] ?? "transparent"}
-          chosen={false}
-          live
-          onClick={() => onPick(option.token)}
-        />
-      ))}
+      {options.map((option, index) => {
+        const label = describeAction(option.token, bigBlind).text;
+        return (
+          <ActionRow
+            key={option.token}
+            label={label}
+            colour={colours[index] ?? "transparent"}
+            chosen={false}
+            live
+            title={`${label}, and read the spot after it`}
+            onClick={() => onPick(option.token)}
+          />
+        );
+      })}
     </Column>
   );
 }
@@ -457,6 +460,7 @@ function ActionRow({
   colour,
   chosen,
   live = false,
+  title,
   onClick,
 }: {
   label: string;
@@ -464,11 +468,14 @@ function ActionRow({
   chosen: boolean;
   /** An action available from the spot being read, rather than a past branch. */
   live?: boolean;
+  /** What the click does -- the two past-column meanings differ and look alike. */
+  title: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       className={cn(
         "flex items-center gap-2 rounded-[3px] border-l-2 py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",

@@ -221,6 +221,23 @@ describe("the line, as columns", () => {
     );
   });
 
+  it("goes BACK to a spot when you click the action that was taken there", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+
+    // `call` was taken at the first spot, so clicking it asks for the chart as
+    // it stood when that call was being decided -- the line BEFORE the token,
+    // which for the first column is the preflop root.
+    fireEvent.click(screen.getAllByTitle("read the chart at this spot")[0] as HTMLElement);
+    await waitFor(() =>
+      expect(
+        (globalThis.fetch as unknown as { mock: { calls: string[][] } }).mock.calls.some(
+          ([url]) => String(url).includes("node") && String(url).includes("path=&"),
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("shows the flop's cards where the flop happened", async () => {
     mountAt(SPOT);
     await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
@@ -339,8 +356,9 @@ describe("the chart, drawn", () => {
     fireEvent.click(screen.getByText("AA").closest("button") as HTMLButtonElement);
     await waitFor(() => expect(screen.getByText("pinned")).toBeTruthy());
 
-    // Step into a different line: same page, different spot.
-    fireEvent.click(screen.getByText("back to preflop"));
+    // Step to a different spot: same page, different chart. The first column's
+    // taken action is the way back now.
+    fireEvent.click(screen.getAllByTitle("read the chart at this spot")[0] as HTMLElement);
     await waitFor(() => expect(screen.getByText(/Hover a hand, or click to pin it/)).toBeTruthy());
     expect(screen.queryByText("pinned")).toBeNull();
   });
