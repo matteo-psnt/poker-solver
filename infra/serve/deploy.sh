@@ -163,7 +163,17 @@ stage_run() {
     local run="$1" at="$2" dest="$WORK/data/runs/$1"
     mkdir -p "$dest"
     chmod -R u+w "$dest" 2>/dev/null || true
-    cp -u "$SHARE/archive/$run/STATIC_CHECKPOINT.json" "$dest/"
+    # THE MANIFEST: container first, share second -- the same order and the same
+    # reason as a rung. It now lives beside the rungs it names, and the share
+    # copy, while it still lands, is explicitly slated to stop. Reading a store
+    # that is being emptied is the bug this script has already hit twice, so
+    # take the one that is becoming authoritative and keep the other as the
+    # fallback rather than the source.
+    if ! az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+        --container-name checkpoints --name "$run/STATIC_CHECKPOINT.json" \
+        --file "$dest/STATIC_CHECKPOINT.json" --output none 2>/dev/null; then
+        cp -u "$SHARE/archive/$run/STATIC_CHECKPOINT.json" "$dest/"
+    fi
     cp -ru "$SHARE/archive/$run/evals" "$dest/" 2>/dev/null || true
     for small in run.jsonl .run.json progress.jsonl; do
         cp -u "$SHARE/archive/$run/$small" "$dest/" 2>/dev/null || true
@@ -178,8 +188,11 @@ stage_run() {
     # extracted above: `src.shared.records` is stdlib-only, so the system
     # interpreter can read it without the venv.
     local object
+    # Resolved from the manifest just STAGED, not the share's: resolving against
+    # one store and fetching from another is how a rung gets named that the
+    # container does not hold.
     object=$(AT="$at" PYTHONPATH="$WORK/code" python3 - \
-        "$SHARE/archive/$run/STATIC_CHECKPOINT.json" <<'PY'
+        "$dest/STATIC_CHECKPOINT.json" <<'PY'
 import json, os, sys
 
 from src.shared import records
