@@ -54,10 +54,47 @@ def object_uri(container_sas: str, name: str) -> str:
     return f"{base.rstrip('/')}/{urllib.parse.quote(name)}" + (f"?{query}" if query else "")
 
 
+def sibling_container(container_sas: str, container: str) -> str:
+    """The same account SAS, addressing a different container.
+
+    `container_sas` carries an ACCOUNT token and only the path names a
+    container, so a task holds ONE credential and reaches both the rungs and
+    the abstractions through it. Defined here rather than beside the minting
+    because the node needs it and cannot import `interfaces`.
+    """
+    base, _, query = container_sas.partition("?")
+    root = base.rstrip("/").rsplit("/", 1)[0]
+    return f"{root}/{container}" + (f"?{query}" if query else "")
+
+
 def _request(url: str, method: str, data: IO[bytes] | None = None) -> urllib.request.Request:
     request = urllib.request.Request(url, method=method, data=data)
     request.add_header("x-ms-version", API_VERSION)
     return request
+
+
+def list_container(container_sas: str) -> list[str]:
+    """Every blob name in the container, following continuation markers.
+
+    XML because that is what the REST API answers; the SDK that would hide it
+    is exactly what the node cannot import. `<Name>` is the only element read,
+    so a schema that grows around it does not matter.
+    """
+    import xml.etree.ElementTree as ET  # noqa: PLC0415 -- stdlib, only when listing
+
+    base, _, query = container_sas.partition("?")
+    names: list[str] = []
+    marker = ""
+    while True:
+        url = f"{base.rstrip('/')}?restype=container&comp=list&{query}"
+        if marker:
+            url += f"&marker={urllib.parse.quote(marker)}"
+        with urllib.request.urlopen(_request(url, "GET"), timeout=TIMEOUT_SECONDS) as response:
+            root = ET.fromstring(response.read())
+        names += [node.text or "" for node in root.iter("Name")]
+        marker = (root.findtext("NextMarker") or "").strip()
+        if not marker:
+            return names
 
 
 def exists(container_sas: str, name: str) -> bool:

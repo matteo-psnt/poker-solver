@@ -17,7 +17,7 @@ from pathlib import Path
 
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
-from src.shared.cloudtask.node import archive, profile, progress
+from src.shared.cloudtask.node import archive, blobstore, profile, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
@@ -43,7 +43,7 @@ def _reporting(plan: TaskPlan, paths: NodePaths) -> TaskPlan:
     return replace(plan, progress_path=str(paths.work / declared)) if declared else plan
 
 
-def _refresh_abstractions(paths: NodePaths, log: TaskLogger) -> None:
+def _refresh_abstractions(paths: NodePaths, log: TaskLogger, sas: str = "") -> None:
     """Merge the share's abstractions onto this node before training.
 
     `infra/main.tf`'s START TASK is the only other thing that does this, and it
@@ -53,9 +53,22 @@ def _refresh_abstractions(paths: NodePaths, log: TaskLogger) -> None:
     precompute path exists to serve: build a new abstraction, then train on it.
     Merging here makes the two orderings equivalent.
     """
+    if sas:
+        # THE CONTAINER FIRST, and the share only while it still holds them.
+        # Same order, and for the same reason, as a rung's fetch.
+        try:
+            fetched = archive.fetch_abstractions(
+                blobstore.sibling_container(sas, archive.ABSTRACTIONS_CONTAINER),
+                paths.data / "combo_abstraction",
+                log,
+            )
+            if fetched:
+                log(f"fetched {fetched} abstraction(s) from the container")
+        except Exception as error:  # noqa: BLE001 -- the share may still answer
+            log(f"WARN could not read the abstractions container: {error}")
+
     source = paths.share / "combo_abstraction"
     if not source.is_dir():
-        log(f"WARN no {source} on the share; trusting the node's own copy")
         return
     try:
         # update=True is `cp -u`: an abstraction already on the node is not
@@ -114,7 +127,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             log(f"fetched warm-start rung {name}")
         else:
             archive.fetch_current_rung(prior, destination, log, plan.checkpoint_sas)
-    _refresh_abstractions(paths, log)
+    _refresh_abstractions(paths, log, plan.checkpoint_sas)
     run_id = plan.train_run_id
     published = paths.archive / run_id
     if published.is_dir():
@@ -170,7 +183,7 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     # Same boot-order trap as training: evaluation resolves the abstraction the
     # checkpoint is PINNED to, so a node that predates that abstraction cannot
     # score the run at all.
-    _refresh_abstractions(paths, log)
+    _refresh_abstractions(paths, log, plan.checkpoint_sas)
 
     # WITHOUT THIS the evaluator is never told where to write, so `--progress-file`
     # never reaches its command line and the branch counter it keeps has nowhere
@@ -318,6 +331,33 @@ def _retained_ladder(destination: Path) -> list[int]:
     return [iteration for iteration, _name in archive.manifest_entries(destination)]
 
 
+def _publish_abstraction(plan: TaskPlan, output: Path, log: TaskLogger) -> int:
+    """Pack the built abstraction and put it in the container. 0 when it landed.
+
+    REFUSES TO REPLACE, as the share publish does and for the same reason:
+    bucket ASSIGNMENT is not pinned by `card_abstraction_hash`, so republishing
+    under a name that exists would silently change which bucket a hand lands in
+    for every run already trained against it.
+    """
+    sas = blobstore.sibling_container(plan.checkpoint_sas, archive.ABSTRACTIONS_CONTAINER)
+    name = archive.abstraction_object(output.name)
+    if blobstore.exists(sas, name) and not plan.force_publish:
+        log(f"REFUSING to republish: {name} is already in the container.")
+        log("  Set RUN_FORCE_PUBLISH=1 only if no run trained against it matters.")
+        return 1
+    packed = output.parent / name
+    try:
+        size = archive.pack_abstraction(output, packed)
+        blobstore.put_object(sas, name, packed)
+        log(f"published {name} ({size / 1024**2:.0f} MiB) to the container")
+    except Exception as error:  # noqa: BLE001 -- the share publish below still runs
+        log(f"FATAL could not publish {name}: {error}")
+        return 1
+    finally:
+        packed.unlink(missing_ok=True)
+    return 0
+
+
 def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
     """Build a card abstraction on a node and publish it once.
 
@@ -356,9 +396,13 @@ def _precompute(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int,
     except (OSError, ValueError, KeyError) as error:
         log(f"FATAL precompute wrote no usable output_dir: {error}")
         return 1, None
-    destination = paths.share / "combo_abstraction" / output.name
     log(f"precomputed {output.name} -> {output}")
+    if plan.checkpoint_sas:
+        code = _publish_abstraction(plan, output, log)
+        if code:
+            return code, None
 
+    destination = paths.share / "combo_abstraction" / output.name
     if destination.is_dir() and not plan.force_publish:
         log(f"REFUSING to republish: {output.name} already exists on the share.")
         log("  Bucket assignment is not pinned by the abstraction hash, so replacing")

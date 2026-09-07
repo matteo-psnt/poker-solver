@@ -83,15 +83,10 @@ def container_sas(account: str, key: str, *, write: bool) -> str:
 
 
 def abstractions_uri(checkpoint_sas: str) -> str:
-    """The abstractions container, from the checkpoint container's SAS.
+    """The abstractions container, from the checkpoint container's SAS."""
+    from src.shared.cloudtask.node import blobstore  # noqa: PLC0415 -- shared with the node
 
-    The token is an ACCOUNT SAS; only the path names the container. Swapping it
-    here keeps one credential on the wire instead of adding a second key to the
-    task payload for the same authorisation.
-    """
-    base, _, query = checkpoint_sas.partition("?")
-    root = base.rsplit("/", 1)[0]
-    return f"{root}/{ABSTRACTIONS}" + (f"?{query}" if query else "")
+    return blobstore.sibling_container(checkpoint_sas, ABSTRACTIONS)
 
 
 SNAPSHOT_EXCLUDES = frozenset(
