@@ -413,7 +413,8 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # and both readings are ~1.8 sigma, i.e. neither is a result. One node's rate
 # is not a policy's rate.
 #
-# $NO_RESOLVER turns the runtime resolver OFF entirely. MEASURED 09-12 against
+# $RESOLVER turns the runtime resolver back ON; it is OFF by default.
+# MEASURED 09-12 against
 # a genuine off-tree opponent (the `gears` arm is a different action tree, so
 # it makes off-menu sizes by construction) at the budget actually fielded:
 #
@@ -441,13 +442,21 @@ sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 # These notes stay ABOVE the heredoc on purpose. It is unquoted -- $RUN_ID
 # and $RECORD_DSN must expand -- so everything inside it is shell input:
 # backticks were SUBSTITUTED on the box and $BUDGET_MS expanded to nothing.
+# THE RESOLVER IS OFF UNLESS A DEPLOY ASKS FOR IT, and that default lives HERE
+# rather than in a caller's argument. It was fielded off on 09-12 and silently
+# came back 22 minutes later, because another session's `serve-deploy` rewrites
+# this file from ITS arguments and simply omitted the flag. A fielded setting
+# that survives only while every future caller remembers a flag is not fielded.
+# Pass `resolver=1` to `just serve-deploy` to turn it back on.
+RESOLVER_FLAG=" --no-resolver"
+[ -n "${RESOLVER:-}" ] && RESOLVER_FLAG=""
 sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
-SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${NO_RESOLVER:+ --no-resolver}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
+SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${RESOLVER_FLAG}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
 EOF
 # The DSN carries a password, and this file gained one the moment the seat began
 # reading run metadata from the record. Same mode as `/etc/blueprint.env`.
