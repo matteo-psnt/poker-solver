@@ -67,7 +67,9 @@ def sibling_container(container_sas: str, container: str) -> str:
     return f"{root}/{container}" + (f"?{query}" if query else "")
 
 
-def _request(url: str, method: str, data: IO[bytes] | None = None) -> urllib.request.Request:
+def _request(
+    url: str, method: str, data: IO[bytes] | bytes | None = None
+) -> urllib.request.Request:
     request = urllib.request.Request(url, method=method, data=data)
     request.add_header("x-ms-version", API_VERSION)
     return request
@@ -153,6 +155,38 @@ def get_object(container_sas: str, name: str, destination: Path) -> bool:
             return False
         raise
     return True
+
+
+def put_bytes(container_sas: str, name: str, body: bytes) -> int:
+    """Upload a small object from memory. Returns bytes written.
+
+    For a manifest, which is a few KB and already in hand. A rung goes through
+    `put_object`, which streams from a file so a node holding a trainer's
+    tables does not also hold 540 MB of snapshot.
+    """
+    request = _request(object_uri(container_sas, name), "PUT", data=body)
+    request.add_header("x-ms-blob-type", "BlockBlob")
+    request.add_header("Content-Length", str(len(body)))
+    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS):
+        pass
+    return len(body)
+
+
+def read_object(container_sas: str, name: str) -> bytes | None:
+    """One whole object's bytes, or None when it is not there.
+
+    For the small things -- a manifest is a few KB. A rung goes through
+    `get_object`, which streams to disk rather than into memory.
+    """
+    try:
+        with urllib.request.urlopen(
+            _request(object_uri(container_sas, name), "GET"), timeout=TIMEOUT_SECONDS
+        ) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
 
 
 def read_head(container_sas: str, name: str, length: int) -> bytes | None:
