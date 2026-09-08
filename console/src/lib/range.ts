@@ -216,3 +216,108 @@ export function actionColours(tokens: readonly string[]): string[] {
     return `color-mix(in srgb, #B23A32 ${Math.round(depth * 100)}%, #E8837C)`;
   });
 }
+
+export interface ComboRow {
+  /** The wire spelling, `"AsKs"` — the same one the board and the URL use. */
+  combo: string;
+  cards: [string, string];
+  /** Which bucket the solver put it in, or -1 when the board blocks it. */
+  bucket: number;
+  strategy: number[] | null;
+  blocked: boolean;
+  /** Reachable, but training never visited its bucket. */
+  untrained: boolean;
+}
+
+/** Spades, hearts, diamonds, clubs — the order `lib/cards` draws a deck in. */
+const SUIT_ORDER: ReadonlyMap<string, number> = new Map(
+  ["s", "h", "d", "c"].map((suit, index) => [suit, index]),
+);
+
+function suitRank(card: string): number {
+  return SUIT_ORDER.get(card.slice(1, 2)) ?? SUIT_ORDER.size;
+}
+
+/**
+ * A combo's two cards, high rank first.
+ *
+ * The wire spells a combo in deck order, so `AKs` arrives as `"KsAs"` and
+ * rendering it verbatim puts the king in front of the ace -- which no player
+ * writes and the chart's own label contradicts two lines above it. `cellFor`
+ * is already order-agnostic; this is the display half of the same fact.
+ */
+function highFirst(combo: string): [string, string] {
+  const [first, second]: [string, string] = [combo.slice(0, 2), combo.slice(2, 4)];
+  const rankOf = (card: string) => RANK_INDEX.get(card.slice(0, 1)) ?? RANKS.length;
+  return rankOf(first) <= rankOf(second) ? [first, second] : [second, first];
+}
+
+/**
+ * The individual combos behind one cell of the grid.
+ *
+ * A cell is an AVERAGE over up to twelve hands, and the average is the thing a
+ * player reads first but not the thing they act on: `AKs` is four hands and
+ * `AKo` is twelve, the board blocks them unevenly, and once a flush is possible
+ * the solver need not treat two suits alike. A cell that reads `62% raise` can
+ * be four combos raising 62% or two raising always and two folding always, and
+ * nothing on the chart could tell those apart.
+ *
+ * Ordered by suit rather than left in wire order, so the same hand lists its
+ * combos the same way in every spot and two spots can be compared by position.
+ *
+ * Blocked combos are KEPT and marked. They are the reason a cell holds fewer
+ * hands than its class does, and dropping them here would leave the count
+ * unexplained in the one place with room to explain it.
+ */
+export function combosIn(label: string, input: AggregateInput): ComboRow[] {
+  const { combos, comboBuckets, buckets, actionCount } = input;
+  const rows: ComboRow[] = [];
+
+  for (let index = 0; index < combos.length; index++) {
+    const combo = combos[index] ?? "";
+    const at = cellFor(combo);
+    if (!at || classLabel(at.row, at.col) !== label) continue;
+
+    const bucket = comboBuckets[index] ?? -1;
+    const entry = bucket < 0 ? undefined : buckets[String(bucket)];
+    const trained = Boolean(entry?.trained && entry.strategy);
+    rows.push({
+      combo,
+      cards: highFirst(combo),
+      bucket,
+      // Sliced to the menu's width: a bucket carries as many weights as the
+      // node has actions, and a shorter one would misalign against the labels.
+      strategy: trained ? (entry?.strategy ?? []).slice(0, actionCount) : null,
+      blocked: bucket < 0,
+      untrained: bucket >= 0 && !trained,
+    });
+  }
+
+  return rows.sort((a, b) => {
+    const [aHi, aLo] = a.cards;
+    const [bHi, bLo] = b.cards;
+    return suitRank(aHi) - suitRank(bHi) || suitRank(aLo) - suitRank(bLo);
+  });
+}
+
+/**
+ * Which combos the solver treats alike: `bucket -> a number a reader can use`.
+ *
+ * `size` is the honest answer to "do the suits differ here", and usually it is
+ * one: preflop the abstraction is 169 buckets for 169 classes, so all four
+ * combos of `AKs` share one and drawing four identical bars would imply a
+ * distinction the solver never made. Postflop they can split, and then WHICH
+ * combos go together is the thing worth seeing -- on `A♥7♦2♣` the three suits
+ * with a card on the board play alike and the spade does not.
+ *
+ * Numbered by first appearance rather than by bucket id, which means nothing to
+ * a reader and is not stable between spots. Blocked combos are left out: they
+ * are in no bucket, and counting them would split a group that agrees.
+ */
+export function bucketGroups(rows: readonly ComboRow[]): Map<number, number> {
+  const groups = new Map<number, number>();
+  for (const row of rows) {
+    if (!row.blocked && !groups.has(row.bucket)) groups.set(row.bucket, groups.size + 1);
+  }
+  return groups;
+}

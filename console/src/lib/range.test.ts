@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, cellFor, classLabel, summarise } from "./range";
+import { aggregate, bucketGroups, cellFor, classLabel, combosIn, summarise } from "./range";
 
 /**
  * The aggregation is the only real logic on the client, and its job is to keep
@@ -152,5 +152,68 @@ describe("summarising the whole range", () => {
   it("is null rather than zero when nothing here was trained", () => {
     expect(summarise(gridOf(cell("AA", null, 6, 6)), 2)).toBeNull();
     expect(summarise([], 2)).toBeNull();
+  });
+});
+
+/**
+ * The drill-down exists because the cell above it is an AVERAGE, and the
+ * average is built to hide exactly the thing a player needs: whether the
+ * solver treats a hand's suits alike. These pin the three ways it can answer.
+ */
+describe("the combos behind one cell", () => {
+  const AKS = {
+    // Deck order, which is how the wire spells a combo -- king before ace.
+    combos: ["KsAs", "KhAh", "KdAd", "KcAc", "KsAd"],
+    comboBuckets: [7, 7, 7, 9, 3],
+    buckets: {
+      "3": { trained: true, strategy: [1, 0] },
+      "7": { trained: true, strategy: [0.2, 0.8] },
+      "9": { trained: true, strategy: [0.6, 0.4] },
+    },
+    actionCount: 2,
+  };
+
+  it("takes only the combos of the class asked for", () => {
+    expect(combosIn("AKs", AKS).map((row) => row.combo)).toEqual(["KsAs", "KhAh", "KdAd", "KcAc"]);
+    expect(combosIn("AKo", AKS).map((row) => row.combo)).toEqual(["KsAd"]);
+  });
+
+  it("puts the high card first, whatever order the wire used", () => {
+    // `KsAs` rendered verbatim reads as a king-high hand under a label saying
+    // AKs -- the chart contradicting itself two lines apart.
+    expect(combosIn("AKs", AKS)[0]?.cards).toEqual(["As", "Ks"]);
+  });
+
+  it("orders by suit, so one hand lists the same way in every spot", () => {
+    expect(combosIn("AKs", AKS).map((row) => row.cards[0])).toEqual(["As", "Ah", "Ad", "Ac"]);
+  });
+
+  it("keeps a blocked combo and marks it, rather than dropping it", () => {
+    // Dropping it leaves "3 of 4 playable" with nothing saying which one, in
+    // the one place on the page with room to say.
+    const rows = combosIn("AKs", { ...AKS, comboBuckets: [-1, 7, 7, 9, 3] });
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toMatchObject({ combo: "KsAs", blocked: true, strategy: null });
+  });
+
+  it("separates never-trained from blocked", () => {
+    const rows = combosIn("AKs", {
+      ...AKS,
+      buckets: { ...AKS.buckets, "9": { trained: false, strategy: null } },
+    });
+    expect(rows[3]).toMatchObject({ blocked: false, untrained: true, strategy: null });
+  });
+
+  it("groups the combos the solver treats alike, ignoring what the board blocks", () => {
+    // The answer to "do the suits matter here". Preflop it is one group -- the
+    // abstraction is 169 buckets for 169 classes, so four identical bars would
+    // imply a distinction the solver never made.
+    const split = bucketGroups(combosIn("AKs", AKS));
+    expect(split.size).toBe(2);
+    // Numbered by first appearance, not by bucket id: 7 is seen before 9.
+    expect([split.get(7), split.get(9)]).toEqual([1, 2]);
+    expect(bucketGroups(combosIn("AKs", { ...AKS, comboBuckets: [7, 7, 7, 7, 3] })).size).toBe(1);
+    // A blocked combo is in no bucket and must not split a group that agrees.
+    expect(bucketGroups(combosIn("AKs", { ...AKS, comboBuckets: [7, 7, 7, -1, 3] })).size).toBe(1);
   });
 });

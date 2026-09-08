@@ -7,7 +7,16 @@ import { Panel } from "@/components/Panel";
 import { PlayingCard } from "@/components/PlayingCard";
 import { RangeGrid } from "@/components/RangeGrid";
 import { type ActionLabel, describeAction, describeActions, inBlinds } from "@/lib/actions";
-import { actionColours, aggregate, type Cell, type RangeSummary, summarise } from "@/lib/range";
+import {
+  actionColours,
+  aggregate,
+  bucketGroups,
+  type Cell,
+  type ComboRow,
+  combosIn,
+  type RangeSummary,
+  summarise,
+} from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 const route = getRouteApi("/blueprint");
@@ -67,6 +76,22 @@ export function Charts() {
     () => (cells && grid ? summarise(cells, grid.actions.length) : null),
     [cells, grid],
   );
+  /**
+   * The combos behind the PINNED class, computed only when one is pinned.
+   *
+   * Pinned rather than hovered: this is a second reading of the same hand and
+   * it appears under the grid, so making it follow the mouse would flicker
+   * twelve rows in and out while you crossed the chart to reach a cell.
+   */
+  const breakdown = useMemo(() => {
+    if (!pinned || !grid || !combos.data) return null;
+    return combosIn(pinned.label, {
+      combos: combos.data.combos,
+      comboBuckets: grid.combo_buckets,
+      buckets: grid.buckets,
+      actionCount: grid.actions.length,
+    });
+  }, [pinned, grid, combos.data]);
 
   // Sizes are meaningless without the stakes, so labelling waits on /run.
   const bigBlind = run.data?.big_blind ?? 0;
@@ -152,6 +177,7 @@ export function Charts() {
                   )
                 }
               />
+              {pinned && breakdown && <Combos cell={pinned} rows={breakdown} actions={labels} />}
             </div>
 
             <aside className="space-y-3 text-[12px]">
@@ -708,5 +734,119 @@ function HandDetail({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The hands behind one square, once you have pinned it.
+ *
+ * The chart's unit is a CLASS and a player's unit is a hand. `AKs` is four of
+ * them and `AKo` is twelve, the board blocks them unevenly, and a cell reading
+ * `62% raise` can be four combos raising 62% or two raising always and two
+ * folding always — a difference the average is built to hide and the one that
+ * decides what you do with the two cards you actually hold.
+ *
+ * Under the grid rather than in the rail: twelve rows do not fit a 16rem column,
+ * and this is a second reading of the hand rather than another fact about it.
+ */
+function Combos({ cell, rows, actions }: { cell: Cell; rows: ComboRow[]; actions: ActionLabel[] }) {
+  const colours = actionColours(actions.map((action) => action.token));
+  const groups = bucketGroups(rows);
+  const distinct = groups.size;
+  const playable = rows.filter((row) => !row.blocked).length;
+
+  return (
+    <section className="mt-4 border-t border-[var(--border)] pt-3">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h3 className="font-mono text-[13px] text-[var(--fg)]">{cell.label}</h3>
+        <span className="text-[11px] text-[var(--fg-muted)]">
+          {playable} of {rows.length} combo{rows.length === 1 ? "" : "s"} playable
+        </span>
+        {/* The answer to "do the suits matter here", said once instead of
+            implied twelve times by identical bars. Preflop the abstraction is
+            suit-isomorphic, so one bucket is the ordinary case and not a fault. */}
+        {playable > 0 && (
+          <span className="text-[11px] text-[var(--fg-faint)]">
+            {distinct === 1
+              ? "every playable combo shares one bucket — the solver draws no distinction between these suits here"
+              : `${distinct} buckets — these combos are not played alike`}
+          </span>
+        )}
+      </div>
+
+      <ul className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
+          <ComboRowView
+            key={row.combo}
+            row={row}
+            actions={actions}
+            colours={colours}
+            group={distinct > 1 ? (groups.get(row.bucket) ?? null) : null}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** One hand: its two cards, what the solver does with it, and the leading action. */
+function ComboRowView({
+  row,
+  actions,
+  colours,
+  group,
+}: {
+  row: ComboRow;
+  actions: ActionLabel[];
+  colours: string[];
+  /** Which set of look-alikes this combo is in, or null when they all match. */
+  group: number | null;
+}) {
+  // The action it takes most often. A twelve-row list is scanned, not read, so
+  // each row carries one number; the bar beside it holds the rest of the mix.
+  const top = row.strategy
+    ? row.strategy.reduce(
+        (best, weight, index) => (weight > best.weight ? { weight, index } : best),
+        { weight: -1, index: 0 },
+      )
+    : null;
+
+  return (
+    <li className="flex items-center gap-2 py-0.5">
+      <span className={cn("flex shrink-0 gap-0.5", row.blocked && "opacity-25")}>
+        <PlayingCard card={row.cards[0]} size="sm" />
+        <PlayingCard card={row.cards[1]} size="sm" />
+      </span>
+      {group !== null && !row.blocked && (
+        <span
+          className="shrink-0 rounded-[2px] px-1 font-mono text-[10px] text-[var(--fg-muted)] ring-1 ring-inset ring-[var(--border)]"
+          title="combos sharing a number are one bucket to the solver — it plays them identically"
+        >
+          {group}
+        </span>
+      )}
+      {row.blocked ? (
+        <span className="text-[11px] text-[var(--fg-faint)]">on the board</span>
+      ) : row.strategy ? (
+        <>
+          <span className="flex h-2.5 min-w-0 flex-1 overflow-hidden rounded-[2px]">
+            {row.strategy.map((weight, index) => (
+              <span
+                key={actions[index]?.token ?? index}
+                style={{ backgroundColor: colours[index], width: `${weight * 100}%` }}
+              />
+            ))}
+          </span>
+          {top && (
+            <span className="shrink-0 tabular-nums text-[11px] text-[var(--fg-muted)]">
+              <span className="text-[var(--fg)]">{actions[top.index]?.text}</span>{" "}
+              {(top.weight * 100).toFixed(0)}%
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="text-[11px] text-[var(--fg-faint)]">never trained</span>
+      )}
+    </li>
   );
 }
