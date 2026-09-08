@@ -76,7 +76,7 @@ if [ -n "${CODE:-}" ]; then
     fi
 else
     snapshot=$(az storage blob list --auth-mode login --account-name "$STORE_ACCOUNT" \
-        --container-name code --query "sort_by([].name, &name)[-1]" -o tsv)
+        --container-name code --query "[].name | sort(@) | [-1]" -o tsv)
     if [ -z "$snapshot" ]; then
         echo "No code snapshot in the store. Run: poker-solver push-code" >&2
         exit 1
