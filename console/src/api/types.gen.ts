@@ -1866,6 +1866,11 @@ export interface components {
             op: string;
             parts: components["schemas"]["RunsParts"];
             /**
+             * Runs With Tasks
+             * @default []
+             */
+            runs_with_tasks: string[];
+            /**
              * Task Runs
              * @default {}
              */

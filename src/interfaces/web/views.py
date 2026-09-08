@@ -149,7 +149,10 @@ def runs(*, invoke: Invoke | None = None) -> dict[str, Any]:
             Part("jobs", jobs.COMMAND, {"limit": RUN_LIST_JOB_LIMIT}),
             Part("tasks", tasks.COMMAND),
         ],
-        join=lambda parts: {"task_runs": _task_runs(parts)},
+        join=lambda parts: {
+            "task_runs": _task_runs(parts),
+            "runs_with_tasks": _runs_with_tasks(parts),
+        },
         invoke=invoke,
     )
     composed["parts"]["tasks"] = _summarised(composed["parts"]["tasks"])
@@ -201,12 +204,17 @@ def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[tasks.Task
 
 
 def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """Which run each task belonged to: `task_id -> run_id`.
+    """Which run each of Batch's CURRENT tasks belonged to: `task_id -> run_id`.
 
-    A projection of the task log, and the reason the run list no longer
-    downloads it. Hundreds of short pairs instead of hundreds of full rows, and
-    it carries everything the two client-side joins need -- which runs have
-    tasks at all, and which of those tasks Batch currently has live.
+    The page asks two questions of this and no others: which runs have a task
+    Batch is currently running, and which runs have ever had a task at all. The
+    first needs only the tasks `jobs` is holding; the second is answered by
+    :func:`_runs_with_tasks`, which ships the run ids alone.
+
+    So it is restricted to the jobs part -- a cross-reference between two parts,
+    not a computed quantity. Unrestricted it was every pair in the log: 6,031 of
+    them, 334 KB of a 455 KB screen, to look up a few dozen. Which Batch states
+    count as live is still the client's call, which is the line that matters.
 
     Tasks with no `run_id` are dropped rather than mapped to null: they belong to
     no run, so they cannot answer a question about one.
@@ -214,4 +222,32 @@ def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:
     available = payloads(parts).get("tasks")
     if not isinstance(available, tasks.TasksPayload):
         return {}
-    return {row.task_id: row.run_id for row in available.rows if row.task_id and row.run_id}
+    current = _tasks_batch_holds(parts)
+    return {
+        row.task_id: row.run_id for row in available.rows if row.task_id in current and row.run_id
+    }
+
+
+def _tasks_batch_holds(parts: dict[str, dict[str, Any]]) -> set[str]:
+    """Every task id the `jobs` part lists, whatever state it is in.
+
+    Membership only -- reading a task's PHASE here would be this module deciding
+    what "running" means, which is the client's decision.
+    """
+    available = payloads(parts).get("jobs")
+    if not isinstance(available, jobs.JobsPayload):
+        return set()
+    return {task.task for job in available.jobs for task in job.tasks}
+
+
+def _runs_with_tasks(parts: dict[str, dict[str, Any]]) -> list[str]:
+    """Which runs have a task-log row at all -- the run ids, deduplicated.
+
+    A run with no row predates the task log, and the page must not call it
+    abandoned on the strength of a record that cannot exist. That is a question
+    about the SET of runs, so the set is what it ships.
+    """
+    available = payloads(parts).get("tasks")
+    if not isinstance(available, tasks.TasksPayload):
+        return []
+    return sorted({row.run_id for row in available.rows if row.run_id})

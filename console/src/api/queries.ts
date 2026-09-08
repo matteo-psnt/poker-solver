@@ -114,8 +114,8 @@ export const useCost = (hours = 0) =>
  * reason to pay for it on a page nobody has opened.
  *
  * `live` is the caller's answer to "is this task still going", decided from the
- * row it already has (no `ended_at`) — the client owns that judgement, the same
- * way it owns which Batch states mean running.
+ * row it already has via `lib/phase.ts` — the client owns that judgement, the
+ * same way it owns which Batch states mean running.
  *
  * It has to be asked, because this used to be `refetchInterval: false` for
  * every task on the grounds that "a published log for a finished task does not

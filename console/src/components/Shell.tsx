@@ -1,8 +1,8 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Activity, Grid3x3, LayoutDashboard, Receipt, ScrollText } from "lucide-react";
 import { useNow } from "@/api/queries";
-import type { Phase } from "@/api/types";
 import { count } from "@/lib/format";
+import { IN_FLIGHT } from "@/lib/phase";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,9 +24,6 @@ const NAV = [
  * you are, so they are never a click away. They read the Now view, which the
  * Overview polls too -- TanStack Query dedupes them, so this costs nothing.
  */
-/** Phases that mean a task is occupying a node or waiting for one. */
-const IN_FLIGHT = new Set<Phase>(["running", "starting", "queued"]);
-
 export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   // The same composed view the Now page polls, not the two commands on their

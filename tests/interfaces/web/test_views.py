@@ -16,18 +16,26 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from src.interfaces.cloud.tasks.batch import BatchTask, Job
+from src.interfaces.commands import jobs as jobs_command
 from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.interfaces.web import app as web_app
 from src.interfaces.web import views
 from src.shared.task_history import TaskRow
+from src.shared.task_states import Phase
 
 
 def _task(task_id: str, run_id: str = "", **fields: Any) -> TaskRow:
-    return TaskRow(
-        task_id=task_id, attempt=0, run_id=run_id, cause="ok", cause_source="node", **fields
-    )
+    """A finished attempt unless told otherwise.
+
+    `cause` carries real spellings -- `completed`, `running`, `unresolved` --
+    because `TaskRow.phase` is derived from it and the joins read that. The
+    default used to be the word `ok`, which the vocabulary does not contain, so
+    every row in here was `UNKNOWN` and no test could tell live from dead."""
+    fields.setdefault("cause", "completed")
+    return TaskRow(task_id=task_id, attempt=0, run_id=run_id, cause_source="node", **fields)
 
 
 # The REAL model, because that is what the command returns and what the joins
@@ -40,6 +48,24 @@ TASK_ROWS = [
     _task("t3", "run-a"),
     _task("t4"),  # belongs to no run
 ]
+
+# What Batch currently holds. `t3` is deliberately absent: a task the log knows
+# about and Batch has forgotten is the ordinary case -- 6,029 of 6,031 rows --
+# and it is what the run list must not download.
+JOBS_PAYLOAD = jobs_command.JobsPayload(
+    jobs=[
+        Job(
+            job="poker-20260913",
+            state="active",
+            tasks=[
+                BatchTask(task="t1", job="poker-20260913", state="running", phase=Phase.RUNNING),
+                BatchTask(task="t2", job="poker-20260913", state="completed", phase=Phase.FINISHED),
+            ],
+        )
+    ],
+    total_jobs=1,
+    hidden_jobs=0,
+)
 
 RUN_ROWS = [
     {"name": "run-a", "experiment_id": "exp-1", "arm": "control"},
@@ -55,6 +81,7 @@ def answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
     calls: list[tuple[str, dict[str, Any]]] = []
     bodies: dict[str, Any] = {
         "tasks": tasks_command.TasksPayload(rows=TASK_ROWS),
+        "jobs": JOBS_PAYLOAD,
         "runs": {"op": "runs", "runs": RUN_ROWS},
     }
 
@@ -89,7 +116,7 @@ class TestOneScreenIsOneRequest:
         """Eleven of twenty-one running tasks had no progress bar: the part was
         cut to the last ten rows, and a running task is not necessarily recent."""
         rows = [_task(f"old-{i}", ended_at="2026-08-01") for i in range(30)]
-        rows += [_task(f"live-{i}") for i in range(21)]
+        rows += [_task(f"live-{i}", cause="running") for i in range(21)]
         rows += [_task(f"done-{i}", ended_at="2026-08-22") for i in range(10)]
         payload = tasks_command.TasksPayload(rows=rows)
 
@@ -102,6 +129,28 @@ class TestOneScreenIsOneRequest:
         assert [t for t in kept if t.startswith("done-")] == [f"done-{i}" for i in range(10)]
         assert not any(t.startswith("old-") for t in kept)
         assert len(payload.rows) == 61, "the memoised payload was trimmed in place"
+
+    def test_an_attempt_that_died_without_stamping_an_end_is_not_live(self, monkeypatch):
+        """MEASURED: 1,296 of 6,031 rows had no `ended_at` and 1,293 of them were
+        superseded attempts Batch will never explain again. Only a task that
+        exits gracefully writes an end, so `not ended_at` kept every one of them
+        forever -- 1.1 MB per five-second poll, on every page, to draw two bars.
+        """
+        rows = [_task(f"zombie-{i}", cause="unresolved") for i in range(50)]
+        rows += [_task(f"done-{i}", cause="completed", ended_at="2026-08-22") for i in range(10)]
+        payload = tasks_command.TasksPayload(rows=rows)
+
+        def _invoke(self: Command, **kwargs: Any) -> Any:
+            return payload if self.name == "tasks" else {"op": self.name}
+
+        monkeypatch.setattr(Command, "invoke", _invoke)
+        part = views.now()["parts"]["tasks"]["payload"]
+        kept = [row.task_id for row in part.rows]
+        assert not any(t.startswith("zombie-") for t in kept), (
+            "an unresolved attempt has no end stamp and is not therefore running"
+        )
+        assert kept == [f"done-{i}" for i in range(10)]
+        assert part.hidden_rows == 50
 
     def test_a_run_page_is_five_questions_in_one(self, answers):
         composed = views.run("run-a")
@@ -181,19 +230,32 @@ class TestTheJoins:
 
     def test_the_run_list_projects_which_run_each_task_was_for(self, answers):
         """`task_runs`, not the rows: the run list is a table of run names and
-        was downloading the whole task log to cross-check their claimed status."""
+        was downloading the whole task log to cross-check their claimed status.
+
+        Restricted to what BATCH still holds, because that is the only thing the
+        page asks of this map. Unrestricted it was every pair in the log --
+        6,031 of them, 334 KB of a 455 KB screen, to look up two."""
         composed = views.runs()
-        assert composed["task_runs"] == {"t1": "run-a", "t2": "run-b", "t3": "run-a"}
+        assert composed["task_runs"] == {"t1": "run-a", "t2": "run-b"}
+        assert "t3" not in composed["task_runs"], "Batch has forgotten t3; it cannot be live"
         # No `rows` AT ALL, not an empty one: the trimmed part is a
         # `TasksSummary`, which has no such field for a page to misread.
         summary = composed["parts"]["tasks"]["payload"]
         assert not hasattr(summary, "rows")
         assert summary.source_rows == 4
 
+    def test_the_run_list_says_which_runs_have_a_task_row_at_all(self, answers):
+        """The OTHER question the page asks, and it is about every row, not the
+        live ones: a run absent here predates the task log, so it must not be
+        called abandoned for having no record. Ships the run ids alone."""
+        composed = views.runs()
+        assert composed["runs_with_tasks"] == ["run-a", "run-b"]
+
     def test_a_task_with_no_run_is_left_out_of_the_projection(self, answers):
         """Mapped to null it would look like a run named `null` that has tasks."""
         composed = views.runs()
         assert "t4" not in composed["task_runs"]
+        assert "" not in composed["runs_with_tasks"]
 
     def test_the_run_list_asks_for_more_jobs_than_the_live_screen(self, answers):
         """A run outlives the daily job its tasks land in, so a live task can sit

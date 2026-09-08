@@ -3098,6 +3098,14 @@
           "parts": {
             "$ref": "#/components/schemas/RunsParts"
           },
+          "runs_with_tasks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs With Tasks",
+            "type": "array"
+          },
           "task_runs": {
             "additionalProperties": {
               "type": "string"

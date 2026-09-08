@@ -1,23 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useRunsView } from "@/api/queries";
-import type { Phase } from "@/api/types";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { count, runLabel } from "@/lib/format";
-
-/**
- * Phases that mean this run still has work in the pool.
- *
- * `queued` counts, and that is deliberate: the question here is "is this run
- * abandoned", and a task waiting for a node is not. It is a DIFFERENT question
- * from the one cost accounting asks — which excludes `queued`, because queue
- * time is not node time — and the two answers are allowed to differ now that
- * both are asked in the same words.
- */
-const IN_FLIGHT = new Set<Phase>(["running", "starting", "queued"]);
+import { IN_FLIGHT } from "@/lib/phase";
 
 /**
  * A run's `status` is a CLAIM, not an observation.
@@ -93,8 +82,8 @@ export function Runs() {
     for (const [taskId, runId] of Object.entries(taskRuns)) {
       if (liveTasks.has(taskId)) live.add(runId);
     }
-    return { liveRuns: live, runsWithTasks: new Set(Object.values(taskRuns)) };
-  }, [view.data?.task_runs, parts?.jobs.payload]);
+    return { liveRuns: live, runsWithTasks: new Set(view.data?.runs_with_tasks ?? []) };
+  }, [view.data?.task_runs, view.data?.runs_with_tasks, parts?.jobs.payload]);
 
   // Only claim a run is abandoned once BOTH cross-check sources have answered.
   // Before that every run would look abandoned, which is worse than saying

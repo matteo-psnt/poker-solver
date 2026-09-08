@@ -68,12 +68,6 @@ export function Overview() {
 
   return (
     <div className="space-y-3">
-      <Panel title="Pools" staleAfterMs={30_000} error={pool?.error ?? null} {...panel}>
-        {poolData?.pools.map((p) => (
-          <PoolFacts key={p.pool_id} pool={p} now={now} />
-        ))}
-      </Panel>
-
       {/* Batch and the task log answer DIFFERENT questions; they share a table
           because neither is sufficient alone: Batch says which node holds
           which task, the task log says how far along it is. */}
@@ -144,8 +138,35 @@ export function Overview() {
           </Table>
         )}
       </Panel>
+
+      {/* Last, because it is the machinery rather than the news: what is
+          running and what died are the page's two questions. A pool that
+          cannot grow says so in the title, so burying it hides nothing. */}
+      <Panel
+        title={poolsTitle(poolData?.pools)}
+        staleAfterMs={30_000}
+        error={pool?.error ?? null}
+        {...panel}
+      >
+        {poolData?.pools.map((p) => (
+          <PoolFacts key={p.pool_id} pool={p} now={now} />
+        ))}
+      </Panel>
     </div>
   );
+}
+
+/**
+ * `Pools` — or what is wrong with one, which is the only reason to look.
+ *
+ * A resize error and an autoscale error are different failures: the first is
+ * Azure refusing capacity, the second is the formula not computing. Both end
+ * the same way, with a pool that will not grow.
+ */
+function poolsTitle(pools: PoolView[] | undefined): string {
+  const stuck = (pools ?? []).filter((p) => p.resize_errors.length > 0 || p.autoscale?.error);
+  if (stuck.length === 0) return "Pools";
+  return `Pools — ${stuck.map((p) => p.pool_id).join(", ")} cannot grow`;
 }
 
 /** `6 busy · 1 booting` — only the phases that are present, busiest first. */
@@ -159,66 +180,142 @@ function phaseSummary(shape: PoolShape): string {
 }
 
 /**
+ * Whether this pool is doing anything worth reading about.
+ *
+ * Three of the four pools are asleep at any moment, and a sleeping pool is
+ * CORRECT and cheap -- it has nothing to say beyond its own name and ceiling.
+ * It was saying it in the same five labelled stats and autoscale sentence as a
+ * working one, which cost 130px each and pushed the running tasks off the
+ * screen entirely.
+ */
+function atRest(pool: PoolView): boolean {
+  return (
+    !pool.current_dedicated_nodes &&
+    !pool.target_dedicated_nodes &&
+    pool.allocation_state === "steady" &&
+    pool.resize_errors.length === 0 &&
+    !pool.autoscale?.error
+  );
+}
+
+/**
  * The pool as facts, then what the autoscaler last decided about it.
  *
- * Two rows with a reason: the first is what IS (nodes, allocation, size,
- * burn), the second is what the formula WANTS and when it last said so. A pool
- * that will not grow is diagnosed by reading the two together, and the formula
- * variables are named rather than dumped -- `$TargetDedicatedNodes=7` is a
- * sentence in the formula's language, not the reader's.
+ * The NAME leads. It used to appear nowhere at all -- you learned which pool
+ * you were reading from `vm size`, in the last column, after the numbers.
+ *
+ * A working pool reads as one sentence of facts, then what the formula WANTS
+ * and when it last said so; a pool that will not grow is diagnosed by reading
+ * the two together, and the formula variables are named rather than dumped --
+ * `$TargetDedicatedNodes=7` is a sentence in the formula's language, not the
+ * reader's. A sleeping pool is one line and keeps its ceiling, which is the
+ * only thing about it that can matter while it holds nothing.
  */
 function PoolFacts({ pool, now }: { pool: PoolView; now: number }) {
-  const allocation = pool.allocation_state ?? "—";
   const allocationFor = elapsed(pool.allocation_since, now);
+  const resting = atRest(pool);
+  const ceiling = [
+    pool.max_nodes != null ? `${pool.max_nodes} node${pool.max_nodes === 1 ? "" : "s"}` : null,
+    pool.max_vcpus != null ? `${pool.max_vcpus} vCPU` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  if (resting) {
+    return (
+      <div className="flex items-baseline gap-3 px-3 py-1.5">
+        <PoolName pool={pool} dim />
+        <span className="text-[12px] text-[var(--fg-faint)]">
+          asleep{ceiling && ` · room for ${ceiling}`}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="divide-y divide-[var(--border)]/60">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-2 p-3 sm:grid-cols-4">
-        <Stat
-          label="nodes"
-          value={`${count(pool.current_dedicated_nodes)} of ${count(
-            pool.target_dedicated_nodes,
-          )} wanted${pool.max_nodes != null ? ` · cap ${pool.max_nodes}` : ""}`}
-        />
-        {/* Where we are capacity-wise, in the unit that compares across pools. */}
-        <Stat
-          label="vCPU"
-          value={
-            pool.vcpus != null
-              ? `${pool.vcpus}${pool.max_vcpus != null ? ` of ${pool.max_vcpus} cap` : ""}`
-              : "—"
-          }
-          title={pool.vcpus_per_node != null ? `${pool.vcpus_per_node} vCPU/node` : undefined}
-        />
-        {/* `resizing for 4m` is the fact that matters; `steady` needs no clock. */}
-        <Stat
-          label="allocation"
-          value={
-            allocation === "steady" || !allocationFor
-              ? allocation
-              : `${allocation} for ${allocationFor}`
-          }
-          title={pool.allocation_since ?? undefined}
-        />
-        <Stat label="vm size" value={pool.vm_size ?? "—"} mono />
-        <Stat
-          label="burn"
-          value={pool.burn_per_hour != null ? `$${pool.burn_per_hour.toFixed(2)}/hr` : "—"}
-          title={
-            pool.hourly_cost
-              ? `${pool.hourly_cost} × ${count(pool.current_dedicated_nodes)}`
-              : undefined
-          }
-        />
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
+        <PoolName pool={pool} />
+        <span className="tnum text-[13px]">
+          <strong className="font-semibold text-[var(--fg)]">
+            {count(pool.current_dedicated_nodes)}
+          </strong>
+          {pool.target_dedicated_nodes !== pool.current_dedicated_nodes && (
+            <span className="text-[var(--fg-muted)]"> of {count(pool.target_dedicated_nodes)}</span>
+          )}{" "}
+          <span className="text-[var(--fg-muted)]">
+            {pool.current_dedicated_nodes === 1 ? "node" : "nodes"}
+          </span>
+        </span>
+        {pool.vcpus != null && (
+          <span
+            className="tnum text-[13px] text-[var(--fg-muted)]"
+            title={pool.vcpus_per_node != null ? `${pool.vcpus_per_node} vCPU/node` : undefined}
+          >
+            <strong className="font-semibold text-[var(--fg)]">{pool.vcpus}</strong>
+            {pool.max_vcpus != null && ` of ${pool.max_vcpus}`} vCPU
+          </span>
+        )}
+        {pool.burn_per_hour != null && (
+          <span
+            className="tnum text-[13px] text-[var(--fg-muted)]"
+            title={
+              pool.hourly_cost
+                ? `${pool.hourly_cost} × ${count(pool.current_dedicated_nodes)}`
+                : undefined
+            }
+          >
+            <strong className="font-semibold text-[var(--fg)]">
+              ${pool.burn_per_hour.toFixed(2)}
+            </strong>
+            /hr
+          </span>
+        )}
+        {/* `steady` is the resting state and says nothing; a resize that has
+            been going for four minutes is the fact worth a word. */}
+        {pool.allocation_state !== "steady" && (
+          <span className="text-[13px] text-amber-400" title={pool.allocation_since ?? undefined}>
+            {pool.allocation_state ?? "unknown allocation"}
+            {allocationFor && ` for ${allocationFor}`}
+          </span>
+        )}
         {pool.resize_errors.map((e, i) => (
           // Every entry is AllocationFailed with a nullable code — there is no
           // stable identity to key on.
-          <p key={i} className="col-span-full font-mono text-[12px] text-red-400">
+          <p key={i} className="basis-full font-mono text-[12px] text-[#E0655C]">
             {e.code}: {e.message}
           </p>
         ))}
       </div>
       <Autoscale pool={pool} now={now} />
     </div>
+  );
+}
+
+/**
+ * Which pool this is, and what it is made of.
+ *
+ * Both, visibly: `standard_e64ds_v6` against `standard_d16als_v6` is why two
+ * pools with the same node count are not the same compute, and it was the only
+ * thing naming the pool at all before the id appeared here.
+ */
+function PoolName({ pool, dim }: { pool: PoolView; dim?: boolean }) {
+  return (
+    <span className="w-[150px] shrink-0 truncate">
+      <span
+        className={cn(
+          "font-mono text-[12px]",
+          dim ? "text-[var(--fg-muted)]" : "font-medium text-[var(--fg)]",
+        )}
+      >
+        {pool.pool_id}
+      </span>
+      {pool.vm_size && (
+        <span className="ml-2 font-mono text-[10px] text-[var(--fg-faint)]">
+          {pool.vm_size.replace(/^standard_/i, "")}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -235,8 +332,9 @@ function Autoscale({ pool, now }: { pool: PoolView; now: number }) {
   const run = pool.autoscale;
   if (!run) {
     return (
-      <p className="px-3 py-2 text-[12px] text-[var(--fg-faint)]">
-        autoscale — the pool has not evaluated its formula yet.
+      <p className="flex gap-3 px-3 py-1.5 text-[12px] text-[var(--fg-faint)]">
+        <span className="w-[150px] shrink-0">autoscale</span>
+        <span>has not evaluated its formula yet</span>
       </p>
     );
   }
@@ -251,10 +349,10 @@ function Autoscale({ pool, now }: { pool: PoolView; now: number }) {
       : null;
   const named = wants != null || pending != null || ceiling != null;
   return (
-    <div className="px-3 py-2 text-[12px]">
-      <span className="mr-3 text-[11px] text-[var(--fg-faint)] uppercase tracking-wider">
-        autoscale
-      </span>
+    <div className="flex flex-wrap items-baseline gap-x-3 px-3 py-1.5 text-[12px]">
+      {/* Aligned to the pool name above it, so the facts and what the formula
+          wants about them read as one block rather than two lists. */}
+      <span className="w-[150px] shrink-0 text-[var(--fg-faint)]">autoscale</span>
       {named ? (
         <span className="tnum">
           wants <strong className="text-[var(--fg)]">{wants ?? "?"}</strong> nodes
@@ -275,7 +373,7 @@ function Autoscale({ pool, now }: { pool: PoolView; now: number }) {
             .join(" · ") || "evaluated to no variables"}
         </span>
       )}
-      <span className="tnum ml-3 text-[var(--fg-faint)]" title={run.evaluated_at ?? undefined}>
+      <span className="tnum text-[var(--fg-faint)]" title={run.evaluated_at ?? undefined}>
         evaluated {run.evaluated_at ? since(run.evaluated_at) : "—"}
         {nextIn != null && ` · next in ~${duration(nextIn)}`}
       </span>
@@ -505,24 +603,5 @@ function Bar({ row }: { row?: TaskRow }) {
       </span>
       <span className="tnum text-[11px]">{Math.round(fraction * 100)}%</span>
     </span>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  mono,
-  title,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  title?: string;
-}) {
-  return (
-    <div title={title}>
-      <div className="text-[11px] text-[var(--fg-faint)] uppercase tracking-wider">{label}</div>
-      <div className={mono ? "font-mono" : "tnum"}>{value}</div>
-    </div>
   );
 }
