@@ -2198,6 +2198,18 @@ export interface components {
              * @default
              */
             op: string;
+            /**
+             * @description Where this attempt is, in the vocabulary `jobs` already ships.
+             *
+             *     Serialised, so the browser reads the same answer rather than deriving
+             *     its own. Four surfaces asked "is it still going?" as ``not ended_at``:
+             *     the Now view, the cancel button, the log poller and a comment claiming
+             *     the client owned the judgement. Only a task that exits gracefully stamps
+             *     an end, so all four counted 1,293 superseded `unresolved` attempts as
+             *     live -- which is 1.1 MB per poll, a Cancel button on tasks that died
+             *     weeks ago, and a log refetched forever.
+             */
+            readonly phase: components["schemas"]["Phase"];
             progress?: components["schemas"]["TaskProgress"] | null;
             /**
              * Run Id

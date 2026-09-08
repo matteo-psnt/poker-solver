@@ -128,9 +128,13 @@ def _view(status: batch.PoolStatus, rate: str | None) -> PoolView:
 
 
 def vcpus_per_node(vm_size: str | None) -> int | None:
-    """`standard_d32als_v6` -> 32; None for a SKU whose D-number is not its cores.
-    The lookahead refuses constrained-core SKUs (`d16-8as`: 8 usable, not 16)."""
-    match = re.search(r"_d(\d+)(?![\d-])", (vm_size or "").lower())
+    """`standard_d32als_v6` -> 32; None for a SKU whose number is not its cores.
+    The lookahead refuses constrained-core SKUs (`d16-8as`: 8 usable, not 16).
+
+    D and E both: the memory pool is `standard_e64ds_v6`, and a D-only parse
+    made ONE unreadable pool null the whole account's vCPU total -- the status
+    bar read `— vCPU` on every page while the panel below it said 32 of 576."""
+    match = re.search(r"_[de](\d+)(?![\d-])", (vm_size or "").lower())
     return int(match.group(1)) if match else None
 
 

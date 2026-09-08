@@ -81,12 +81,15 @@ class TestVcpuArithmetic:
     vCPUs; both inputs come from what pool-status already fetched, and a SKU
     or formula that does not carry the number must yield None, not a guess."""
 
-    def test_d_series_core_count_comes_from_the_sku_name(self):
+    def test_core_count_comes_from_the_sku_name(self):
         assert pool_status.vcpus_per_node("standard_d32als_v6") == 32
         assert pool_status.vcpus_per_node("STANDARD_D64als_v6") == 64
+        # The memory pool. A D-only parse read this as None, and one null view
+        # makes `total_vcpus` null for every pool at once.
+        assert pool_status.vcpus_per_node("standard_e64ds_v6") == 64
 
-    def test_non_d_series_and_absent_sku_yield_none(self):
-        # E16-4ads has 4 usable cores, not 16 -- a D-only parse refuses rather
+    def test_constrained_core_and_absent_sku_yield_none(self):
+        # E16-4ads has 4 usable cores, not 16 -- the lookahead refuses rather
         # than reading the wrong number off the name.
         assert pool_status.vcpus_per_node("standard_e16-4ads_v5") is None
         # Constrained-core D SKU: 8 usable cores, and the name's 16 would be read

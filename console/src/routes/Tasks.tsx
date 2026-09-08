@@ -8,9 +8,20 @@ import { displayName, StatusBadge, toneFor } from "@/components/StatusBadge";
 import { Table, Td, Th } from "@/components/Table";
 import { errorOf } from "@/lib/error";
 import { clock, count, duration, runLabel, since, span, taskLabel } from "@/lib/format";
+import { inFlight } from "@/lib/phase";
 import { cn } from "@/lib/utils";
 
 const route = getRouteApi("/tasks");
+
+/**
+ * How many attempts the page asks for unless told otherwise.
+ *
+ * `--limit 0` fetched all 6,031 and rendered all 6,031 -- 5.3 MB over the wire
+ * every sixty seconds and ~60,000 cells in the DOM, to answer a question that
+ * is almost always about this week. The command takes the NEWEST n, which is
+ * the end anyone scrolls to first.
+ */
+const WINDOW = 300;
 
 /**
  * The densest view in the console, and the one opened when something died.
@@ -20,9 +31,9 @@ const route = getRouteApi("/tasks");
  * failed.
  */
 export function Tasks() {
-  const { cause } = route.useSearch();
+  const { cause, all } = route.useSearch();
   const navigate = useNavigate({ from: "/tasks" });
-  const tasks = useTasks(0);
+  const tasks = useTasks(all ? 0 : WINDOW);
   // One `now` for the whole table, so every open-ended duration in a render is
   // measured against the same instant rather than drifting down the rows.
   const now = Date.now();
@@ -33,6 +44,7 @@ export function Tasks() {
     return [...seen].sort();
   }, [tasks.data]);
 
+  const hidden = tasks.data?.hidden_rows ?? 0;
   const cancel = useCancelTask();
   const rows = useMemo(() => {
     const all = [...(tasks.data?.rows ?? [])].reverse();
@@ -54,14 +66,35 @@ export function Tasks() {
       refreshing={tasks.isFetching}
     >
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--border)] px-3 py-2">
-        <Chip active={!cause} onClick={() => navigate({ search: {} })}>
+        <Chip
+          active={!cause}
+          onClick={() => navigate({ search: (prev) => ({ ...prev, cause: undefined }) })}
+        >
           all
         </Chip>
         {causes.map((c) => (
-          <Chip key={c} active={cause === c} onClick={() => navigate({ search: { cause: c } })}>
+          <Chip
+            key={c}
+            active={cause === c}
+            onClick={() => navigate({ search: (prev) => ({ ...prev, cause: c }) })}
+          >
             {displayName(c)}
           </Chip>
         ))}
+        {/* What the window is HIDING, said by the payload rather than guessed:
+            `hidden_rows` is the command's own count of what `--limit` cut. A
+            filter chip only ever offers a cause present in the window, so the
+            page has to say the window exists or the chips read as the whole
+            vocabulary. */}
+        {hidden > 0 && (
+          <button
+            type="button"
+            onClick={() => navigate({ search: (prev) => ({ ...prev, all: true }) })}
+            className="ml-auto font-mono text-[11px] text-[var(--fg-faint)] hover:text-[var(--fg)] hover:underline"
+          >
+            {count(hidden)} earlier — load all
+          </button>
+        )}
       </div>
       {rows.length > 0 && (
         <Table>
@@ -163,7 +196,7 @@ export function Tasks() {
                       to cancel, and a button that is present-but-useless on
                       every historical row makes the live ones harder to find. */}
                   <Td right>
-                    {isLive(row) && (
+                    {inFlight(row) && (
                       <Confirm
                         label="cancel"
                         confirmLabel="really?"
@@ -183,15 +216,6 @@ export function Tasks() {
       )}
     </Panel>
   );
-}
-
-/**
- * Worth cancelling only while it is still going. `ended_at` is the honest
- * signal: a row reconciled from Batch may carry a cause without having stopped,
- * and one still running has neither.
- */
-function isLive(row: TaskRow): boolean {
-  return !row.ended_at;
 }
 
 function Chip({

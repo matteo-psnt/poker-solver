@@ -28,6 +28,9 @@ function row(overrides: Record<string, unknown>) {
     op: "train-static",
     what: "train-static run-a",
     cause: "running",
+    // The server derives this from `cause` and sends it; the page reads it
+    // rather than guessing from `ended_at`, which a killed task never writes.
+    phase: "running",
     cause_source: "batch",
     workers: 16,
     units: 0,
@@ -96,7 +99,7 @@ describe("a task that is still running", () => {
 
 describe("a task that has ended", () => {
   beforeEach(() => {
-    rows = [row({ ended_at: "2026-08-15T11:00:00+00:00", cause: "success" })];
+    rows = [row({ ended_at: "2026-08-15T11:00:00+00:00", cause: "completed", phase: "finished" })];
   });
 
   it("does not poll a log that cannot change", async () => {

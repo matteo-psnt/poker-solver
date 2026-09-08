@@ -42,7 +42,13 @@ const routes = [
     path: "/tasks",
     component: Tasks,
     // Validated, so a hand-edited URL cannot put arbitrary state into the page.
-    validateSearch: z.object({ cause: z.string().optional() }),
+    validateSearch: z.object({
+      cause: z.string().optional(),
+      // The whole log is 6,031 attempts and 5.3 MB; the page rendered every
+      // one into the DOM. A window is the default and `all` is a link, so the
+      // rare question that needs the lot is still one click and still shareable.
+      all: z.boolean().optional(),
+    }),
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tasks/$taskId", component: TaskLog }),
 

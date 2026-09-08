@@ -3859,6 +3859,11 @@
             "title": "Op",
             "type": "string"
           },
+          "phase": {
+            "$ref": "#/components/schemas/Phase",
+            "description": "Where this attempt is, in the vocabulary `jobs` already ships.\n\nSerialised, so the browser reads the same answer rather than deriving\nits own. Four surfaces asked \"is it still going?\" as ``not ended_at``:\nthe Now view, the cancel button, the log poller and a comment claiming\nthe client owned the judgement. Only a task that exits gracefully stamps\nan end, so all four counted 1,293 superseded `unresolved` attempts as\nlive -- which is 1.1 MB per poll, a Cancel button on tasks that died\nweeks ago, and a log refetched forever.",
+            "readOnly": true
+          },
           "progress": {
             "anyOf": [
               {
@@ -3926,7 +3931,8 @@
           "task_id",
           "attempt",
           "cause",
-          "cause_source"
+          "cause_source",
+          "phase"
         ],
         "title": "TaskRow",
         "type": "object"

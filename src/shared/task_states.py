@@ -91,6 +91,13 @@ def cause_of(phase: Phase) -> str:
     return _CAUSE_BY_PHASE.get(phase, str(phase))
 
 
+# The inverse of `_CAUSE_BY_PHASE`, derived rather than written out so the two
+# cannot drift. It covers only the phases a task is observed IN; a terminal
+# cause is not in here, which is why `task_history.phase_of_cause` -- which owns
+# the terminal vocabulary -- checks that first.
+PHASE_BY_CAUSE: dict[str, Phase] = {cause: phase for phase, cause in _CAUSE_BY_PHASE.items()}
+
+
 class Outcome(StrEnum):
     """What a task that STOPPED actually achieved.
 

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, computed_field, field_validator
 
 from src.shared import task_states
 from src.shared.cloudtask import kinds
@@ -96,6 +96,22 @@ CAUSE_RUNNING = task_states.cause_of(task_states.Phase.RUNNING)
 CAUSE_PREPARING = task_states.cause_of(task_states.Phase.STARTING)
 
 LIVE_CAUSES = task_states.LIVE_CAUSES
+
+
+def phase_of_cause(cause: str | None) -> task_states.Phase:
+    """A task record's cause -> where that task is. The inverse of `cause_of`.
+
+    Terminal first, because `TERMINAL_CAUSES` is the vocabulary this module owns
+    and `task_states` deliberately maps only the phases a task is observed IN.
+
+    ``unresolved`` lands on `UNKNOWN`, which is the whole point of having this:
+    it means nobody has said, and it covers a running task and one that died
+    without stamping an end equally.
+    """
+    word = cause or ""
+    if word in TERMINAL_CAUSES:
+        return task_states.Phase.FINISHED
+    return task_states.PHASE_BY_CAUSE.get(word, task_states.Phase.UNKNOWN)
 
 
 # ``observed_at`` is stamped on every read, so two observations of one finished
@@ -401,6 +417,27 @@ class TaskRow(BaseModel):
     because an estimate reads the OTHER attempts to know how fast this kind of
     task goes."""
     eta_seconds: float | None = None
+
+    @computed_field
+    @property
+    def phase(self) -> task_states.Phase:
+        """Where this attempt is, in the vocabulary `jobs` already ships.
+
+        Serialised, so the browser reads the same answer rather than deriving
+        its own. Four surfaces asked "is it still going?" as ``not ended_at``:
+        the Now view, the cancel button, the log poller and a comment claiming
+        the client owned the judgement. Only a task that exits gracefully stamps
+        an end, so all four counted 1,293 superseded `unresolved` attempts as
+        live -- which is 1.1 MB per poll, a Cancel button on tasks that died
+        weeks ago, and a log refetched forever.
+        """
+        return phase_of_cause(self.cause)
+
+    @property
+    def holds_a_node(self) -> bool:
+        """The clock is running on this attempt. Not serialised -- the browser
+        gets `phase` and asks its own question of it, the way `jobs` already does."""
+        return self.phase in task_states.OCCUPIES_A_NODE
 
 
 def _row(

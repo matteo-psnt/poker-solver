@@ -63,12 +63,20 @@ def now(*, invoke: Invoke | None = None) -> dict[str, Any]:
 
 
 def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
-    """A copy of the tasks part holding every row still running, plus the last
+    """A copy of the tasks part holding every row holding a node, plus the last
     `LIVE_LIMIT`.
 
     `--limit 10` was the wrong cut: with twenty-one tasks running, eleven of
     them had no row to draw a progress bar from. A running task is live by
     definition and there are never many; the recent ten are the deaths.
+
+    Live is the ROW's own `phase`, which is `OCCUPIES_A_NODE` in the share's
+    vocabulary. It was a missing `ended_at`, which is a different question and
+    the wrong one: only a task that exits gracefully stamps an end, so every
+    attempt killed by OOM, a wall clock or a lost node stays `unresolved`
+    forever. 1,296 of 6,031 rows read as live that way, 1,293 of them superseded
+    attempts, and this part shipped 1.1 MB of them every five seconds -- on
+    every page, because the status bar polls it too -- to draw two progress bars.
 
     A COPY -- the payload is memoised and shared with `/api/tasks`.
     """
@@ -80,7 +88,7 @@ def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
     # replaced compared each of 15,684 rows against the last ten -- and against
     # models rather than dicts that would be a field-by-field compare each time.
     cut = len(rows) - LIVE_LIMIT if LIVE_LIMIT > 0 else 0
-    kept = [row for index, row in enumerate(rows) if not row.ended_at or index >= cut]
+    kept = [row for index, row in enumerate(rows) if row.holds_a_node or index >= cut]
     updated = {"rows": kept, "hidden_rows": len(rows) - len(kept)}
     return {**part, "payload": payload.model_copy(update=updated)}
 

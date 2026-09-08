@@ -5,6 +5,7 @@ import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { errorOf } from "@/lib/error";
 import { clock, count, duration, runLabel, span } from "@/lib/format";
+import { inFlight } from "@/lib/phase";
 
 const route = getRouteApi("/tasks/$taskId");
 
@@ -24,12 +25,11 @@ export function TaskLog() {
   // published from the node and a running task has usually published none yet,
   // so opening one used to show nothing at all.
   const row = (tasks.data?.rows ?? []).find((r) => r.task_id === taskId);
-  // No end time means it is still going, so its log is still growing. Decided
-  // here rather than in the query, because this is the component that has the
-  // row — and while `tasks` is still loading the answer is "assume finished",
-  // which costs one refetch once the row arrives instead of a poll for a task
-  // that ended last week.
-  const live = Boolean(row && !row.ended_at);
+  // Decided here rather than in the query, because this is the component that
+  // has the row — and while `tasks` is still loading the answer is "assume
+  // finished", which costs one refetch once the row arrives instead of a poll
+  // for a task that ended last week.
+  const live = Boolean(row && inFlight(row));
   const log = useLog(taskId, 400, live);
   const lines = log.data?.lines ?? [];
 

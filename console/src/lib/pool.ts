@@ -1,4 +1,5 @@
-import type { Jobs, NodePhase, NodeStatus, Phase } from "@/api/types";
+import type { Jobs, NodePhase, NodeStatus } from "@/api/types";
+import { OCCUPIES_A_NODE, PENDING } from "@/lib/phase";
 
 /**
  * What the pool IS, rather than what the API happened to return.
@@ -14,18 +15,6 @@ import type { Jobs, NodePhase, NodeStatus, Phase } from "@/api/types";
  */
 
 export type Task = Jobs["jobs"][number]["tasks"][number] & { job: string };
-
-/**
- * Which task phases hold a node, and which wait for one.
- *
- * These used to be Batch's raw strings, re-derived here from
- * `"BatchTaskState.*"` — one of four sites that each classified those strings
- * independently. The phases are the server's now
- * (`src/shared/task_states.py`), so this says only which of them this SCREEN
- * draws on a node and which in the queue.
- */
-const OCCUPYING: ReadonlySet<Phase> = new Set<Phase>(["running", "starting"]);
-const WAITING: Phase = "queued";
 
 /** Node phases that will take a task without anyone doing anything. */
 const WILL_FREE: ReadonlySet<NodePhase> = new Set<NodePhase>(["idle", "booting"]);
@@ -64,14 +53,14 @@ export function poolShape(jobs: Jobs | undefined, nodes: NodeStatus[] | undefine
     job.tasks.map((task) => ({ ...task, job: job.job })),
   );
 
-  const occupying = tasks.filter((t) => OCCUPYING.has(t.phase));
+  const occupying = tasks.filter((t) => OCCUPIES_A_NODE.has(t.phase));
   // Oldest first: a task that has been running longest is nearest to finishing,
   // so it is the one whose node frees up next.
   occupying.sort((a, b) => at(a.start_time, at(a.created, 0)) - at(b.start_time, at(b.created, 0)));
 
   // Submission order — the order Batch will actually dispatch them.
   const queue = tasks
-    .filter((t) => t.phase === WAITING)
+    .filter((t) => t.phase === PENDING)
     .sort(
       (a, b) => at(a.created, Number.MAX_SAFE_INTEGER) - at(b.created, Number.MAX_SAFE_INTEGER),
     );
