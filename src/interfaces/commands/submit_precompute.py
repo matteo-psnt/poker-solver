@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import Field
 
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
+from src.interfaces.cloud.store import blob
 from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
@@ -57,16 +57,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def published_abstractions(config: CloudConfig) -> list[str]:
-    """Abstraction directories already on the share."""
-    service = share.share_client(config)
-    return [
-        entry.name
-        for entry in share.list_entries(service, config.share_name, share.ABSTRACTION_DIR)
-        if entry.is_directory
-    ]
-
-
 def target_name(abstraction_config: str) -> str:
     """The directory this config will produce, derived without computing it.
 
@@ -82,7 +72,7 @@ class PrecomputeDispatchPayload(dispatch.Dispatched):
 
     op: Literal["submit-precompute"] = "submit-precompute"
     abstraction_config: str
-    """What it will publish as, and every abstraction ALREADY on the share. The
+    """What it will publish as, and every abstraction ALREADY published. The
     whole list, so a collision comes with somewhere else to go."""
     target_name: str
     already_published: list[str] = Field(default_factory=list)
@@ -94,7 +84,7 @@ class PrecomputeDispatchPayload(dispatch.Dispatched):
 def run(args: argparse.Namespace) -> PrecomputeDispatchPayload:
     """Stage the tree and queue one precompute task."""
     config = CloudConfig.load()
-    existing = published_abstractions(config)
+    existing = blob.published_abstractions(config)
     target = target_name(args.config)
 
     if target in existing and not args.force:
@@ -133,13 +123,13 @@ def render(payload: PrecomputeDispatchPayload) -> None:
     if payload.force:
         print("  --force: an existing copy of this abstraction WILL be replaced.")
     else:
-        print("  Not yet on the share; the node also refuses to overwrite.")
+        print("  Not yet published; the node also refuses to overwrite.")
     dispatch.render_queued(payload)
 
 
 COMMAND = Command(
     name="submit-precompute",
-    help="Build a card abstraction on a node and publish it to the share.",
+    help="Build a card abstraction on a node and publish it to the container.",
     add_arguments=add_arguments,
     run=run,
     render=render,

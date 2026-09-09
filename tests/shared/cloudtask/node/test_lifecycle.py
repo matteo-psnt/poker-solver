@@ -19,7 +19,7 @@ from src.shared.cloudtask.node import lifecycle
 from src.shared.cloudtask.node import plan as plan_module
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.process import Killed, TaskLogger
-from tests.shared.cloudtask.node.conftest import python
+from tests.shared.cloudtask.node.conftest import SAS, python
 
 
 class TestExitAccounting:
@@ -97,9 +97,10 @@ class TestMain:
         assert row.cause == task_log.CAUSE_FAILED
         assert "ABSOLUTE" in (paths.share / "logs" / "task-1.log").read_text()
 
-    def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch, recorded):
-        """An operator-cancelled task still leaves its progress on the share."""
+    def test_progress_is_published_even_on_a_failure(self, paths, monkeypatch, recorded, container):
+        """An operator-cancelled task still leaves its progress in the store."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")  # the task's own run is run-a
+        monkeypatch.setenv("POKER_SOLVER_CHECKPOINT_SAS", SAS)
         run_dir = paths.runs / "run-a"
         run_dir.mkdir(parents=True)
         (run_dir / ".run.json").write_text("{}")
@@ -107,12 +108,13 @@ class TestMain:
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, lambda *a: (1, None))
 
         lifecycle.main()
-        assert (paths.archive / "run-a" / ".run.json").exists()
+        assert "run-a/.run.json" in container
 
-    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch, recorded):
+    def test_only_the_tasks_own_run_is_published(self, paths, monkeypatch, recorded, container):
         """A node is reused: runs/ also holds what earlier tasks fetched. Pushing
         those back took ~30 minutes per training task."""
         monkeypatch.setenv("AZ_BATCH_TASK_ID", "a")
+        monkeypatch.setenv("POKER_SOLVER_CHECKPOINT_SAS", SAS)
         for name in ("run-a", "run-fetched-by-an-evaluate"):
             (paths.runs / name).mkdir(parents=True)
             (paths.runs / name / ".run.json").write_text("{}")
@@ -120,29 +122,34 @@ class TestMain:
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.TRAIN, lambda *a: (0, None))
 
         lifecycle.main()
-        assert (paths.archive / "run-a" / ".run.json").exists()
-        assert not (paths.archive / "run-fetched-by-an-evaluate").exists()
+        assert "run-a/.run.json" in container
+        assert not any("fetched-by-an-evaluate" in name for name in container), sorted(container)
 
-    def test_an_evaluation_publishes_the_scored_runs_record_and_nothing_else(
-        self, paths, monkeypatch
+    def test_an_evaluation_publishes_the_scored_run_and_nothing_else(
+        self, paths, monkeypatch, container
     ):
-        """The eval document lands in the SCORED run's evals/ on the node and
-        the exit publish is its only ride to the share -- the first fix here
-        dropped it, and seven clean-exit scores recorded nothing. Neighbouring
-        runs stay untouched, which is the waste the fix removed."""
+        """Neighbouring runs stay untouched: re-publishing a ladder an earlier
+        evaluate task had fetched cost ~30 minutes per task.
+
+        An eval's SCORE goes to Postgres, not to a file the exit publish
+        carries -- `record_evaluation` writes the sink, and the one remaining
+        `evals/*.json` writer (`record_blueprint_match`, whose pairwise payload
+        has no column in a single-`run_id` table) has no command surface, so no
+        node task produces one."""
         monkeypatch.setenv("RUN_OP", str(TaskName.EVALUATE))
         monkeypatch.setenv("RUN_ID", "run-scored")
+        monkeypatch.setenv("POKER_SOLVER_CHECKPOINT_SAS", SAS)
         scored = paths.runs / "run-scored"
-        (scored / "evals").mkdir(parents=True)
-        (scored / "evals" / "x.json").write_text("{}")
+        scored.mkdir(parents=True)
+        (scored / ".run.json").write_text("{}")
         (paths.runs / "run-neighbour").mkdir()
         (paths.runs / "run-neighbour" / ".run.json").write_text("{}")
         monkeypatch.setattr(lifecycle, "_stage", lambda paths, log: 0)
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.EVALUATE, lambda *a: (0, None))
 
         lifecycle.main()
-        assert (paths.archive / "run-scored" / "evals" / "x.json").exists()
-        assert not (paths.archive / "run-neighbour").exists()
+        assert "run-scored/.run.json" in container
+        assert not any("run-neighbour" in name for name in container), sorted(container)
 
 
 def _signalled(plan, paths, log):

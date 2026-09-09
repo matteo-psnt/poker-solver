@@ -111,17 +111,16 @@ def resolve_published_run(run: str) -> str:
     Readers resolve a fragment locally (``resolve_run_dir``); DISPATCH has to
     resolve too, because the id is sent to a node and the node has no fragment
     matcher. Unresolved, `score --run 15261` cost a snapshot upload, a node
-    allocation and three retries before failing "no such run on the share".
-    Resolved against the share's own listing, so both sides answer from one
-    source -- the rule already stated in :func:`pull_metadata`.
+    allocation and three retries before failing "no such run".
+
+    Resolved against the CONTAINER's own listing, because that is the store a
+    node will fetch from. Asking the share instead is what made every run
+    invisible to dispatch the moment the snapshots stopped landing there: the
+    listing went empty and `score --run` refused a run whose rungs were all
+    present, a gate reading the store that no longer answers.
     """
     config = CloudConfig.load()
-    service = share.share_client(config)
-    published = [
-        entry.name
-        for entry in share.list_entries(service, config.share_name, share.ARCHIVE_DIR)
-        if entry.is_directory
-    ]
+    published = sorted(blob.published_rungs(config))
     matches = run_names.matching(run, published)
     if len(matches) > 1:
         raise CommandError(run_names.ambiguous_message(run, matches))
@@ -131,16 +130,16 @@ def resolve_published_run(run: str) -> str:
 
 
 def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
-    """Refuse rungs the SHARE does not actually hold, before anything is dispatched.
+    """Refuse rungs the CONTAINER does not hold, before anything is dispatched.
 
-    THE MARKER SAYS PUBLISHED, THE STORES SAY WHERE. Pruning removes a snapshot
-    without rewriting the manifest that advertises it, so `runinfo` offers rungs
-    that `fetch_for_evaluation` then cannot find -- unverified, each cost a
-    snapshot upload, a node allocation and a `uv sync` before dying on "the
-    manifest names static-N.zarr but it is not on the share", ~26 tasks in the
-    2026-08-23/24 window. But the share is no longer where the bytes are: a
-    migrated rung has a marker, no directory, and an object in the container,
-    and requiring the directory refused every run the migration had moved.
+    THE MANIFEST SAYS PUBLISHED, THE CONTAINER SAYS WHAT IS THERE. Pruning
+    removes a snapshot without rewriting the manifest that advertises it, so
+    `runinfo` offers rungs that a node then cannot fetch -- unverified, each
+    cost a snapshot upload, a node allocation and a `uv sync` before dying,
+    ~26 tasks in the 2026-08-23/24 window.
+
+    Presence IS completeness here: one rung is one atomically-committed object,
+    so there is no half-written state a marker had to rule out.
 
     An empty rung means "the latest checkpoint", which the ladder cannot name in
     advance and the node resolves itself, so it is not checked here.
@@ -149,44 +148,18 @@ def verify_published_rungs(run_id: str, rungs: Sequence[str]) -> None:
     if not wanted:
         return
     config = CloudConfig.load()
-    service = share.share_client(config)
-    entries = share.list_entries(service, config.share_name, f"{share.ARCHIVE_DIR}/{run_id}")
-    names = {entry.name for entry in entries}
+    held = blob.published_rungs(config).get(run_id, set())
     published = {
-        name.removeprefix("static-")
-        .removesuffix(".zarr")
-        .removesuffix(records.SNAPSHOT_SUFFIX): name
-        for name in names
-        if name.startswith("static-") and archive.marker_for(name) in names
+        name.removeprefix("static-").removesuffix(records.SNAPSHOT_SUFFIX): name for name in held
     }
-    marked = {
-        name[len(archive.MARKER_PREFIX) :]
-        for name in names
-        if name.startswith(f"{archive.MARKER_PREFIX}static-")
-    }
-    for name in marked:
-        published.setdefault(
-            name.removeprefix("static-")
-            .removesuffix(".zarr")
-            .removesuffix(records.SNAPSHOT_SUFFIX),
-            name,
-        )
     available = sorted(published)
-    missing = [
-        rung
-        for rung in wanted
-        if rung not in published
-        or (
-            published[rung] not in names
-            and not blob.holds_rung(config, run_id, records.object_name(published[rung]))
-        )
-    ]
+    missing = [rung for rung in wanted if rung not in published]
     if missing:
         raise CommandError(
-            f"{run_id} has no published, complete checkpoint for: {', '.join(missing)}.\n"
-            f"  On the share: {', '.join(available) or '(none)'}\n"
+            f"{run_id} has no published checkpoint for: {', '.join(missing)}.\n"
+            f"  In the container: {', '.join(available) or '(none)'}\n"
             "A rung the manifest advertises can still have been pruned -- this checks "
-            "the share itself, so the mismatch surfaces here instead of on a node."
+            "the container itself, so the mismatch surfaces here instead of on a node."
         )
 
 

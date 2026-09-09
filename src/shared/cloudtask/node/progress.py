@@ -219,12 +219,6 @@ class LadderWatcher(ProgressWatcher):
             self._log(f"retained ladder changed -> {state}")
             archive.publish_run(
                 self._run_dir,
-                self._paths.archive / self._run_dir.name,
-                self._log,
-                self._plan.checkpoint_sas if self._plan else "",
-            )
-            archive.publish_rungs_to_blob(
-                self._run_dir,
                 self._run_dir.name,
                 self._plan.checkpoint_sas if self._plan else "",
                 self._log,
