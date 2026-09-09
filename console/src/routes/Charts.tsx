@@ -158,7 +158,7 @@ export function Charts() {
         }
       >
         {cells && grid ? (
-          <div className="grid items-start gap-5 p-3 xl:grid-cols-[minmax(0,1fr)_16rem]">
+          <div className="grid items-start gap-5 p-3 xl:grid-cols-[minmax(0,1fr)_19rem]">
             {/* Capped, not stretched: past ~44px a cell is empty space, and the
                 label is what has to stay legible, not the square. Left-aligned,
                 because centring it left a dead gutter the width of the rail. */}
@@ -177,13 +177,17 @@ export function Charts() {
                   )
                 }
               />
-              {pinned && breakdown && <Combos cell={pinned} rows={breakdown} actions={labels} />}
             </div>
 
-            <aside className="space-y-3 text-[12px]">
+            {/* Sticky, because the grid is taller than the screen and the rail
+                is where every click is answered: pinning a hand in the bottom
+                row put its mix off the top of the window. Scrolls inside itself
+                on a short viewport rather than clipping the combo list. */}
+            <aside className="space-y-3 text-[12px] xl:sticky xl:top-3 xl:max-h-[calc(100vh-1.5rem)] xl:overflow-y-auto">
               <Actions summary={summary} labels={labels} />
               <Coverage grid={grid} />
               <HandDetail cell={shown} actions={labels} pinned={pinned !== null} />
+              {pinned && breakdown && <Combos rows={breakdown} actions={labels} />}
             </aside>
           </div>
         ) : undefined}
@@ -743,83 +747,75 @@ function HandDetail({
  * The chart's unit is a CLASS and a player's unit is a hand. `AKs` is four of
  * them and `AKo` is twelve, the board blocks them unevenly, and a cell reading
  * `62% raise` can be four combos raising 62% or two raising always and two
- * folding always — a difference the average is built to hide and the one that
+ * folding always -- a difference the average is built to hide and the one that
  * decides what you do with the two cards you actually hold.
  *
- * Under the grid rather than in the rail: twelve rows do not fit a 16rem column,
- * and this is a second reading of the hand rather than another fact about it.
+ * In the rail, under the class average it breaks down, so the two readings of
+ * one hand are next to each other and the grid keeps its width. One row per
+ * hand: the cards, then the same stacked bar the square above is drawn from.
+ * The action names are not repeated per row -- they are in the mix directly
+ * above, four inches away, and twelve copies of `raise to 4.5bb` would be the
+ * widest thing in a 19rem column.
  */
-function Combos({ cell, rows, actions }: { cell: Cell; rows: ComboRow[]; actions: ActionLabel[] }) {
+function Combos({ rows, actions }: { rows: ComboRow[]; actions: ActionLabel[] }) {
   const colours = actionColours(actions.map((action) => action.token));
   const groups = bucketGroups(rows);
-  const distinct = groups.size;
   const playable = rows.filter((row) => !row.blocked).length;
 
   return (
-    <section className="mt-4 border-t border-[var(--border)] pt-3">
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="font-mono text-[13px] text-[var(--fg)]">{cell.label}</h3>
-        <span className="text-[11px] text-[var(--fg-muted)]">
-          {playable} of {rows.length} combo{rows.length === 1 ? "" : "s"} playable
+    <section className="border-t border-[var(--border)] pt-2">
+      <div className="mb-1.5 flex items-baseline gap-2">
+        <h3 className="text-[11px] tracking-wide text-[var(--fg-muted)]">by combo</h3>
+        <span className="text-[11px] text-[var(--fg-faint)]">
+          {playable} of {rows.length} playable
         </span>
-        {/* The answer to "do the suits matter here", said once instead of
-            implied twelve times by identical bars. Preflop the abstraction is
-            suit-isomorphic, so one bucket is the ordinary case and not a fault. */}
-        {playable > 0 && (
-          <span className="text-[11px] text-[var(--fg-faint)]">
-            {distinct === 1
-              ? "every playable combo shares one bucket — the solver draws no distinction between these suits here"
-              : `${distinct} buckets — these combos are not played alike`}
-          </span>
-        )}
       </div>
 
-      <ul className="grid gap-x-4 gap-y-1 sm:grid-cols-2 xl:grid-cols-3">
+      <ul>
         {rows.map((row) => (
           <ComboRowView
             key={row.combo}
             row={row}
-            actions={actions}
             colours={colours}
-            group={distinct > 1 ? (groups.get(row.bucket) ?? null) : null}
+            group={groups.size > 1 ? (groups.get(row.bucket) ?? null) : null}
           />
         ))}
       </ul>
+
+      {/* The answer to "do the suits matter here", said once rather than implied
+          twelve times by identical bars. Preflop the abstraction is 169 buckets
+          for 169 classes, so one group is the ordinary case, not a fault. */}
+      {playable > 0 && (
+        <p className="mt-1.5 text-[11px] text-[var(--fg-faint)]">
+          {groups.size === 1
+            ? "one bucket — the solver plays these suits identically"
+            : `${groups.size} buckets — the numbered groups are played alike`}
+        </p>
+      )}
     </section>
   );
 }
 
-/** One hand: its two cards, what the solver does with it, and the leading action. */
+/** One hand: its two cards and what the solver does with it. */
 function ComboRowView({
   row,
-  actions,
   colours,
   group,
 }: {
   row: ComboRow;
-  actions: ActionLabel[];
   colours: string[];
   /** Which set of look-alikes this combo is in, or null when they all match. */
   group: number | null;
 }) {
-  // The action it takes most often. A twelve-row list is scanned, not read, so
-  // each row carries one number; the bar beside it holds the rest of the mix.
-  const top = row.strategy
-    ? row.strategy.reduce(
-        (best, weight, index) => (weight > best.weight ? { weight, index } : best),
-        { weight: -1, index: 0 },
-      )
-    : null;
-
   return (
-    <li className="flex items-center gap-2 py-0.5">
+    <li className="flex items-center gap-1.5 py-[3px]">
       <span className={cn("flex shrink-0 gap-0.5", row.blocked && "opacity-25")}>
         <PlayingCard card={row.cards[0]} size="sm" />
         <PlayingCard card={row.cards[1]} size="sm" />
       </span>
       {group !== null && !row.blocked && (
         <span
-          className="shrink-0 rounded-[2px] px-1 font-mono text-[10px] text-[var(--fg-muted)] ring-1 ring-inset ring-[var(--border)]"
+          className="w-3 shrink-0 text-center font-mono text-[10px] text-[var(--fg-faint)]"
           title="combos sharing a number are one bucket to the solver — it plays them identically"
         >
           {group}
@@ -828,22 +824,15 @@ function ComboRowView({
       {row.blocked ? (
         <span className="text-[11px] text-[var(--fg-faint)]">on the board</span>
       ) : row.strategy ? (
-        <>
-          <span className="flex h-2.5 min-w-0 flex-1 overflow-hidden rounded-[2px]">
-            {row.strategy.map((weight, index) => (
-              <span
-                key={actions[index]?.token ?? index}
-                style={{ backgroundColor: colours[index], width: `${weight * 100}%` }}
-              />
-            ))}
-          </span>
-          {top && (
-            <span className="shrink-0 tabular-nums text-[11px] text-[var(--fg-muted)]">
-              <span className="text-[var(--fg)]">{actions[top.index]?.text}</span>{" "}
-              {(top.weight * 100).toFixed(0)}%
-            </span>
-          )}
-        </>
+        <span className="flex h-4 min-w-0 flex-1 overflow-hidden rounded-[2px]">
+          {row.strategy.map((weight, index) => (
+            <span
+              key={index}
+              style={{ backgroundColor: colours[index], width: `${weight * 100}%` }}
+              title={`${(weight * 100).toFixed(1)}%`}
+            />
+          ))}
+        </span>
       ) : (
         <span className="text-[11px] text-[var(--fg-faint)]">never trained</span>
       )}
