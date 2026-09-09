@@ -192,23 +192,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/compact-legs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Compact Legs */
-        post: operations["_compact_legs_api_compact_legs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/configs": {
         parameters: {
             query?: never;
@@ -925,72 +908,6 @@ export interface components {
         Combos: {
             /** Combos */
             combos: string[];
-        };
-        /** CompactBody */
-        CompactBody: {
-            /** Apply */
-            apply?: boolean | null;
-            /** Backup */
-            backup?: string | null;
-            /** Delete */
-            delete?: boolean | null;
-            /** Label */
-            label?: string | null;
-        };
-        /**
-         * CompactedPayload
-         * @description `compact-legs`, whose payload describes BOTH halves of the operation.
-         *
-         *     `applied`/`verified`/`deleted` separate a dry run from the irreversible one,
-         *     and the console renders the dry run's numbers as a preview before offering
-         *     it -- so one shape carries "what would move" and "what did".
-         *
-         *     Built up as the operation proceeds rather than at a return, which is why the
-         *     fields have defaults: a run that refuses early still answers with the counts
-         *     it managed to establish, and the dry run IS the early return.
-         */
-        CompactedPayload: {
-            /**
-             * Applied
-             * @default false
-             */
-            applied: boolean;
-            /** Attempts */
-            attempts?: number | null;
-            /**
-             * Backup
-             * @default
-             */
-            backup: string;
-            /** Bundle */
-            bundle: string;
-            /**
-             * Carried
-             * @default 0
-             */
-            carried: number;
-            /**
-             * Deleted
-             * @default 0
-             */
-            deleted: number;
-            /** Files After */
-            files_after?: number | null;
-            /** Files Before */
-            files_before: number;
-            /** Movable */
-            movable: number;
-            /**
-             * Op
-             * @default compact-legs
-             * @constant
-             */
-            op: "compact-legs";
-            /**
-             * Verified
-             * @default false
-             */
-            verified: boolean;
         };
         /** ConcurrencyPoint */
         ConcurrencyPoint: {
@@ -2755,48 +2672,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoxPayload"];
-                };
-            };
-            /** @description Understood, and the answer is no. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Azure did not answer. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    _compact_legs_api_compact_legs_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CompactBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompactedPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

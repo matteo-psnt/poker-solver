@@ -35,7 +35,6 @@ from src.interfaces.commands.blueprint_serve import BlueprintServePayload
 from src.interfaces.commands.cancel import CancelledPayload
 from src.interfaces.commands.chart import ChartPayload
 from src.interfaces.commands.chipzen_seat import ChipzenSeatPayload
-from src.interfaces.commands.compact_legs import CompactedPayload
 from src.interfaces.commands.configs import ConfigKind, ConfigsPayload
 from src.interfaces.commands.cost import CostPayload
 from src.interfaces.commands.curve import CurvePayload
@@ -621,18 +620,6 @@ PAYLOADS: dict[str, Any] = {
     ),
     # The applied-and-deleted shape, because it is the one with something to
     # report: a dry run renders a subset of these keys.
-    "compact-legs": CompactedPayload(
-        bundle="sealed.bundle.json",
-        files_before=375,
-        files_after=55,
-        movable=321,
-        carried=54,
-        attempts=141,
-        applied=True,
-        verified=True,
-        deleted=321,
-        backup="/home/me/legs-backup",
-    ),
     # The APPLIED shape, for the same reason `compact-legs` uses it: a dry run
     # renders a subset. `protected` and `scored_kept` are populated because both
     # are lines a reader has to see before trusting a delete.

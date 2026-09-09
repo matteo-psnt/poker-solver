@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, field_validator
 
-from src.shared import records, task_states
+from src.shared import task_states
 from src.shared.cloudtask import kinds
 from src.shared.cloudtask.task_log import (
     BUNDLE_SUFFIX,
@@ -98,6 +98,11 @@ CAUSE_PREPARING = task_states.cause_of(task_states.Phase.STARTING)
 LIVE_CAUSES = task_states.LIVE_CAUSES
 
 
+# ``observed_at`` is stamped on every read, so two observations of one finished
+# task always differ and comparing them whole reports every reconcile as fresh.
+_VOLATILE_OBSERVED_FIELDS = frozenset({"observed_at", "schema_version"})
+
+
 def _first_not_none(*values: Any) -> Any:
     return next((v for v in values if v is not None), None)
 
@@ -135,26 +140,6 @@ def observed_record(
         "node_id": node_id,
         "observed_at": utcnow(),
     }
-
-
-def write_observed_document(share: str | os.PathLike[str], record: dict[str, Any]) -> Path:
-    """Write an already-built observation, stamped like every other record.
-
-    The stamping is why this is not `json.dumps` at the call site: a document
-    that reached the share unstamped would be one the reader's schema check
-    rejects, and it would be rejected long after whoever wrote it had gone.
-    """
-    directory = tasks_dir(share)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{record['task_id']}{OBSERVED_SUFFIX}"
-    records.write_snapshot(path, record, records.REGISTRY[f"legs/*{OBSERVED_SUFFIX}"])
-    return path
-
-
-# ``observed_at`` is stamped on every read, so two observations of one finished
-# task always differ and every reconcile re-uploaded records saying nothing new:
-# 14.1s of serial share writes per console poll.
-_VOLATILE_OBSERVED_FIELDS = frozenset({"observed_at", "schema_version"})
 
 
 def says_the_same(existing: dict[str, Any] | None, fresh: dict[str, Any]) -> bool:
