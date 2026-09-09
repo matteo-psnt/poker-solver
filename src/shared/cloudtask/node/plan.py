@@ -79,6 +79,9 @@ class TaskPlan:
     # Empty when the dispatching machine had none, which is how a task runs
     # exactly as it did before the database existed.
     record_dsn: str = ""
+    #: Writable SAS for the diagnostics container, carried by EVERY task: a
+    #: read-only checkpoint token cannot publish the log that explains a death.
+    diagnostics_sas: str = ""
     #: Container SAS for the checkpoint store. Empty publishes NOWHERE: there
     #: is no second store to fall back to, so a task without one is refused
     #: rather than left to train with no durable output.

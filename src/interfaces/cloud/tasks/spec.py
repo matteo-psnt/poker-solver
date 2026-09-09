@@ -146,6 +146,10 @@ class TaskSpec:
     # by design, so an operator exporting one would be exporting something
     # that expires under them. `submit` fills this in.
     checkpoint_sas: str = ""
+    # Writable and scoped to the diagnostics container, minted for EVERY task:
+    # the checkpoint token above is an account SAS, so a read-only one could not
+    # publish the log tail that explains the task's own death.
+    diagnostics_sas: str = ""
     # Read-only SAS URL of `code_snapshot`'s tarball; the command line fetches
     # it. Sealed by `dispatch` like the checkpoint SAS.
     code_url: str = ""
