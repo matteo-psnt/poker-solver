@@ -8,10 +8,10 @@ paths:
   - "tests/shared/cloudtask/**"
 ---
 
-# Azure dispatch, the node wrapper, and the share
+# Azure dispatch, the node wrapper, and the stores
 
 `src/interfaces/cloud/` is split by what the code TALKS TO: `tasks/` (Batch),
-`store/` (the share and the blob containers), `cost/` (Cost Management), with `config.py` and
+`store/` (the blob containers), `cost/` (Cost Management), with `config.py` and
 `serve_box.py` above them. It lives under `interfaces` so nothing in
 `pipeline`/`engine`/`core` can reach Azure.
 
@@ -38,40 +38,50 @@ paths:
   hang), 137 is SIGKILL from outside (the OOM killer). A wrong terminal cause
   is permanent: it suppresses reconciliation. `poker-solver tasks` is where a
   death is explained; the run log cannot record one.
-- **Profiling a running task**: `poker-solver profile --task <id>` drops a
-  request file on the share, the node serves it, and a speedscope document
-  comes back. Training tasks only; it cannot fail a task. A profile that never
-  arrives explains itself only in the node log (`logs --task <id> | grep
-  profile`). numba JIT frames are bare addresses; numpy's resolve.
+- **Profiling a running task**: `poker-solver profile --task <id>` puts a
+  request object in the `diagnostics` container, the node serves it and marks
+  it `.request.served` (no task SAS carries `delete`), and a speedscope
+  document comes back the same way. Training tasks only; it cannot fail a task.
+  A profile that never arrives explains itself only in the node log
+  (`logs --task <id> | grep profile`). numba JIT frames are bare addresses;
+  numpy's resolve.
 - **Never point `runs_dir` at the share.** Active runs live on the node's
   `/mnt/work` data disk and are *published* from there. The wrapper sets
   `POKER_SOLVER_CACHE=/mnt/work/cache` so the river's 2.6M boards are not
   re-canonicalised (~1 min) on every task.
-- **Rungs live in the `checkpoints` CONTAINER; the share holds the record.**
-  A published rung is one Blob object, `<run>/static-<iter>.ckpt.zst`, and what
-  stays on the share is the manifest, `.run.json`, the loose result files and a
-  completion MARKER per rung. The marker is still the run's own claim that a
-  rung is complete, so a share run directory is now markers with no snapshot
-  beside them.
+- **THE SHARE IS EMPTY AND NOTHING WRITES TO IT** (09-09). A run lives in the
+  `checkpoints` container -- `<run>/static-<iter>.ckpt.zst`, its manifest and
+  its loose metadata all under `<run>/` -- its record in Postgres, and its logs
+  and profiles in `diagnostics` (90-day expiry). Completion markers are GONE:
+  presence is completeness, because one rung is one atomically-committed
+  object. `pull_metadata` still synthesises marker files locally, from the
+  container's listing, for readers that count them.
 - **A manifest names `static-N.zarr`, the container holds `static-N.ckpt.zst`,
   and `shared.records.object_name` is the only thing that maps between them.**
-  Manifests are never repointed: rewriting them would mutate the durable share
-  and destroy the share fallback for exactly the runs whose only other copy is
-  the container. Both spellings are permanent; the mapping is idempotent and
-  spelled once. 1,081 rungs were uploaded under a name no reader asked for
-  before this existed.
+  Manifests are never repointed, so both spellings are permanent; the mapping
+  is idempotent and spelled once. 1,081 rungs were uploaded under a name no
+  reader asked for before this existed, and comparing the two spellings raw is
+  what made `runinfo` tell a run holding three usable rungs that the store
+  could supply none of them.
 - **A manifest OVER-CLAIMS by design.** `prune-checkpoints` drops a snapshot
   without rewriting the ladder that advertises it, so `retained` names rungs
   that were deleted weeks ago -- 1,030 of them measured against 3 genuinely
   lost. Gate a FETCH on the manifest; gate a DELETION on what a store holds.
-- **Anything that asks "is this rung published" must ask both stores.** The
-  node does it through `blobstore` over its SAS, the dispatcher through
-  `cloud.store.blob` with the account key. Building `static-<rung>.zarr` by
-  hand and asking the share for a directory is the bug this keeps producing:
-  it hit evaluation fetch, warm-start, dispatch verification and prune.
+- **Anything that asks "is this run/rung published" asks the CONTAINER.**
+  `archive.is_published` on the node, `blob.published_rungs` on the laptop.
+  Asking the share for a DIRECTORY is the bug this keeps producing -- it hit
+  evaluation fetch, warm-start, dispatch verification, prune, resume and the
+  precompute collision guard, and once the share emptied each one answered
+  confidently and wrongly rather than failing. **An empty listing never reads
+  as "wrong store".** A gate and the thing it hands off to are two fixes.
 - **`blob.delete_rung` is the only delete against the container**, reached from
   `prune-checkpoints` alone. No task SAS carries `delete`, so nothing running
   on a node can remove a rung even by accident.
+- **A task carries TWO credentials.** The checkpoint SAS is an ACCOUNT token
+  and is read-only for anything that does not publish rungs -- which also
+  stripped write on `diagnostics`, so no score could publish the log explaining
+  its own death. `blob.diagnostics_sas` is separate, container-scoped and
+  writable on every task.
 - **`infra/store/` is a separate Terraform state** holding the durable share,
   so `just destroy` cannot reach the experiment record. Jobs and tasks are
   created at runtime by Python, never in HCL. The share sits with the boxes
