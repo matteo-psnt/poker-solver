@@ -34,6 +34,10 @@ def _row(**overrides: Any) -> _Row:
         "git_dirty": False,
         "started_at": "2026-01-01T00:00:00+00:00",
         "has_checkpoint": True,
+        # The run list's other cross-check: whether the task log has ever held a
+        # row for this run. A run with none predates the log and cannot be
+        # called abandoned for having no record.
+        "has_tasks": True,
     }
     return _Row(**(base | overrides))
 

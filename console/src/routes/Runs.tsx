@@ -31,7 +31,9 @@ export function verdictFor(
   status: string | null,
   runName: string,
   liveRuns: Set<string>,
-  runsWithTasks: Set<string>,
+  /** Whether the task log holds a row for this run — `RunSummary.has_tasks`,
+      answered by the `runs` command rather than by downloading the log. */
+  hasTasks: boolean,
 ): Verdict {
   if ((status ?? "") !== "running") return null;
   if (liveRuns.has(runName)) {
@@ -41,7 +43,7 @@ export function verdictFor(
       title: "a task for this run is live in Batch",
     };
   }
-  if (runsWithTasks.has(runName)) {
+  if (hasTasks) {
     return {
       label: "abandoned",
       tone: "warn",
@@ -67,7 +69,7 @@ export function Runs() {
   const parts = view.data?.parts;
   const runs = parts?.runs.payload ?? null;
 
-  const { liveRuns, runsWithTasks } = useMemo(() => {
+  const liveRuns = useMemo(() => {
     // Batch knows which TASKS are live; `task_runs` says which RUN each task
     // was for. The server does that projection because it needs the whole task
     // log and this page does not — but which STATES count as live stays here,
@@ -82,8 +84,8 @@ export function Runs() {
     for (const [taskId, runId] of Object.entries(taskRuns)) {
       if (liveTasks.has(taskId)) live.add(runId);
     }
-    return { liveRuns: live, runsWithTasks: new Set(view.data?.runs_with_tasks ?? []) };
-  }, [view.data?.task_runs, view.data?.runs_with_tasks, parts?.jobs.payload]);
+    return live;
+  }, [view.data?.task_runs, parts?.jobs.payload]);
 
   // Only claim a run is abandoned once BOTH cross-check sources have answered.
   // Before that every run would look abandoned, which is worse than saying
@@ -121,7 +123,7 @@ export function Runs() {
           <tbody>
             {runs.runs.map((run) => {
               const verdict = checked
-                ? verdictFor(run.status, run.name, liveRuns, runsWithTasks)
+                ? verdictFor(run.status, run.name, liveRuns, run.has_tasks)
                 : null;
               return (
                 <tr key={run.name}>

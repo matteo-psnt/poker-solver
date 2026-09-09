@@ -180,9 +180,6 @@ class RunsView(View):
     task_runs: dict[str, str] = {}
     """`task_id -> run_id`, for the tasks BATCH currently holds. Only the join;
     which of its states count as live is the client's call."""
-    runs_with_tasks: list[str] = []
-    """Every run the task log has a row for. A run absent from this predates the
-    log, and cannot be called abandoned for having no record."""
 
 
 class RunParts(Payload):

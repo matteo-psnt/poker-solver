@@ -60,6 +60,10 @@ class RunSummary(BaseModel):
     commits_ago: int | None
     git_dirty: bool | None
     has_checkpoint: bool
+    """Whether the task log has ever recorded a task for this run. A run with
+    none PREDATES the log, so its claimed status cannot be cross-checked and it
+    must not be called abandoned for having no record."""
+    has_tasks: bool = False
     loadable: bool
     blocker: str | None
     # Descriptive metadata for the picker (None when metadata is unreadable).

@@ -108,6 +108,7 @@ def _from_database(engine: Any) -> list[services.RunSummary]:
                 commits_ago=ahead.get(row.git_commit),
                 git_dirty=row.git_dirty,
                 has_checkpoint=loadable,
+                has_tasks=bool(row.has_tasks),
                 loadable=loadable,
                 blocker=None if loadable else "no checkpoint",
                 iterations=row.iterations,

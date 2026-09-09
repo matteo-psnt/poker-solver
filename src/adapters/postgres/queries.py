@@ -60,9 +60,18 @@ _RUNS = sa.text("""
     --
     -- LEFT JOIN over a filtered set rather than a correlated EXISTS per row:
     -- the subquery form re-probes `checkpoints` once for every run in the page.
-    SELECT p.*, (h.run_id IS NOT NULL) AS has_checkpoint
+    --
+    -- `has_tasks` is the same shape and the same reason. It answers "did this
+    -- run ever have a task recorded", which the run list needs to tell a run
+    -- that DIED from one that predates the task log and cannot be judged. The
+    -- console used to answer it by downloading the whole task log -- 16,895
+    -- legs and 10.6 MB, to learn 367 run ids. Here it is a distinct scan: 14 ms.
+    SELECT p.*,
+           (h.run_id IS NOT NULL) AS has_checkpoint,
+           (t.run_id IS NOT NULL) AS has_tasks
       FROM page p
       LEFT JOIN (SELECT run_id FROM checkpoints WHERE is_current) h USING (run_id)
+      LEFT JOIN (SELECT DISTINCT run_id FROM legs WHERE run_id <> '') t USING (run_id)
      ORDER BY p.started_at DESC
 """)
 

@@ -1797,6 +1797,11 @@ export interface components {
             git_dirty: boolean | null;
             /** Has Checkpoint */
             has_checkpoint: boolean;
+            /**
+             * Has Tasks
+             * @default false
+             */
+            has_tasks: boolean;
             /** Iterations */
             iterations: number | null;
             /** Loadable */
@@ -1865,11 +1870,6 @@ export interface components {
             /** Op */
             op: string;
             parts: components["schemas"]["RunsParts"];
-            /**
-             * Runs With Tasks
-             * @default []
-             */
-            runs_with_tasks: string[];
             /**
              * Task Runs
              * @default {}

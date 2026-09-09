@@ -244,18 +244,10 @@ class TestTheJoins:
         assert not hasattr(summary, "rows")
         assert summary.source_rows == 4
 
-    def test_the_run_list_says_which_runs_have_a_task_row_at_all(self, answers):
-        """The OTHER question the page asks, and it is about every row, not the
-        live ones: a run absent here predates the task log, so it must not be
-        called abandoned for having no record. Ships the run ids alone."""
-        composed = views.runs()
-        assert composed["runs_with_tasks"] == ["run-a", "run-b"]
-
     def test_a_task_with_no_run_is_left_out_of_the_projection(self, answers):
         """Mapped to null it would look like a run named `null` that has tasks."""
         composed = views.runs()
         assert "t4" not in composed["task_runs"]
-        assert "" not in composed["runs_with_tasks"]
 
     def test_the_run_list_asks_for_more_jobs_than_the_live_screen(self, answers):
         """A run outlives the daily job its tasks land in, so a live task can sit

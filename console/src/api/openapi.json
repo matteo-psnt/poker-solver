@@ -2943,6 +2943,11 @@
             "title": "Has Checkpoint",
             "type": "boolean"
           },
+          "has_tasks": {
+            "default": false,
+            "title": "Has Tasks",
+            "type": "boolean"
+          },
           "iterations": {
             "anyOf": [
               {
@@ -3097,14 +3102,6 @@
           },
           "parts": {
             "$ref": "#/components/schemas/RunsParts"
-          },
-          "runs_with_tasks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Runs With Tasks",
-            "type": "array"
           },
           "task_runs": {
             "additionalProperties": {
