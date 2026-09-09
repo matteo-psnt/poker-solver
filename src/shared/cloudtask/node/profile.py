@@ -32,12 +32,19 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from src.shared.cloudtask.node import blobstore
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 PROFILES_DIRNAME = "profiles"
 REQUEST_SUFFIX = ".request"
 PROFILE_SUFFIX = ".speedscope.json"
+
+# A request is CONSUMED by marking it served, never by deleting it: no task SAS
+# carries `delete`, which is the guard that stops a task removing a rung. The
+# marker is the same shape everything else here uses -- presence is the fact.
+SERVED_SUFFIX = ".request.served"
 DEFAULT_SECONDS = 30
 MAX_SECONDS = 600
 POLL_SECONDS = 15
@@ -164,26 +171,27 @@ def _body(request: Path) -> str:
     return raw.strip()
 
 
-def take_request(profile_dir: Path, task_id: str) -> int | None:
-    """Seconds asked for, or None. Consumes the request so it fires once.
+def take_request(task_id: str, sas: str) -> int | None:
+    """Seconds asked for, or None. Marks it served so one request fires once.
 
     An empty or unreadable request still profiles, for the default duration:
-    the operator's intent is in the file EXISTING, and refusing over its
+    the operator's intent is in the request EXISTING, and refusing over its
     contents would be the least helpful possible reading of `touch`.
+
+    SERVED-MARKED RATHER THAN DELETED, because a task's credential cannot
+    delete anything -- see `SERVED_SUFFIX`. The marker goes down BEFORE the
+    duration is returned, so a crash between the two costs a profile rather
+    than looping on one request for the rest of a six-hour task.
     """
-    request = profile_dir / f"{task_id}{REQUEST_SUFFIX}"
-    try:
-        if not request.is_file():
-            return None
-        body = _body(request)
-    except OSError:
+    if not sas:
         return None
-
-    with contextlib.suppress(OSError):
-        request.unlink()
-
+    body = blobstore.read_object(sas, f"{task_id}{REQUEST_SUFFIX}")
+    if body is None or blobstore.exists(sas, f"{task_id}{SERVED_SUFFIX}"):
+        return None
+    with contextlib.suppress(Exception):
+        blobstore.put_bytes(sas, f"{task_id}{SERVED_SUFFIX}", b"")
     try:
-        seconds = int(body)
+        seconds = int(body.decode("utf-8", "replace").strip())
     except ValueError:
         return DEFAULT_SECONDS
     return max(1, min(seconds, MAX_SECONDS))
@@ -291,6 +299,7 @@ def watch(
     task_id: str,
     log: Callable[[str], None],
     stop: threading.Event,
+    sas: str = "",
 ) -> None:
     """Poll for a request beside the run and serve it. Never raises.
 
@@ -302,7 +311,7 @@ def watch(
     served = 0
     while not stop.wait(POLL_SECONDS):
         with contextlib.suppress(Exception):
-            seconds = take_request(profile_dir, task_id)
+            seconds = take_request(task_id, sas)
             if seconds is None:
                 continue
             pid = python_worker(root)
@@ -310,16 +319,18 @@ def watch(
                 log("profile: asked for, but no interpreter is running under this task")
                 continue
             served += 1
-            record(
-                pid,
-                seconds,
-                profile_dir / f"{task_id}.{attempt}.{served}{PROFILE_SUFFIX}",
-                log,
-            )
+            name = f"{task_id}.{attempt}.{served}{PROFILE_SUFFIX}"
+            written = profile_dir / name
+            record(pid, seconds, written, log)
+            if sas:
+                # Straight up: the share is not where an operator fetches this
+                # from any more, and the node-local copy dies with the node.
+                with contextlib.suppress(Exception):
+                    blobstore.put_object(sas, name, written)
 
 
 def watcher(
-    root: int, profile_dir: Path, task_id: str, log: Callable[[str], None]
+    root: int, profile_dir: Path, task_id: str, log: Callable[[str], None], sas: str = ""
 ) -> tuple[threading.Thread, threading.Event]:
     """A started daemon thread serving profile requests, and its stop flag.
 
@@ -330,7 +341,10 @@ def watcher(
     log(f"profile: watching {profile_dir}/{task_id}{REQUEST_SUFFIX} (seconds in the body)")
     stop = threading.Event()
     thread = threading.Thread(
-        target=watch, args=(root, profile_dir, task_id, log, stop), name="profile", daemon=True
+        target=watch,
+        args=(root, profile_dir, task_id, log, stop, sas),
+        name="profile",
+        daemon=True,
     )
     thread.start()
     return thread, stop

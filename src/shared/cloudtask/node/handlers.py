@@ -154,7 +154,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             log=log,
             # Training is the long one, and the only task anybody watches for
             # hours wondering where the time is going.
-            profile_dir=paths.share / profile.PROFILES_DIRNAME,
+            profile_dir=paths.work / profile.PROFILES_DIRNAME,
         )
     finally:
         watcher.stop()
