@@ -131,8 +131,10 @@ _LEGS = sa.text("SELECT task_id, attempt, leg, body FROM legs")
 # could want is in here: a leg's `at` is stamped as it is written, so a task's
 # last event can never be older than the `ended_at` inside it, and reconciliation
 # only ever moves `max(at)` later. The window is therefore a superset of the
-# newest n attempts by end time -- `test_a_bounded_read_answers_what_the_whole_log_does`
-# is what says so against the live record.
+# newest n attempts by end time, which was checked against the live record: a
+# bounded read and a whole-log read return identical rows, `eta_seconds`
+# included. `TestABoundedReadFetchesABoundedNumberOfRows` holds the SHAPE of
+# that -- no test can hold the comparison, which needs the record itself.
 _LEGS_FOR_RECENT_TASKS = sa.text("""
     WITH recent AS (
         SELECT task_id FROM legs GROUP BY task_id ORDER BY max(at) DESC LIMIT :tasks
