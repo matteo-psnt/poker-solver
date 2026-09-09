@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from src.shared.cloudtask import kinds, task_log
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive, handlers
@@ -36,7 +38,9 @@ class TestEvaluateFetch:
         assert handlers._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-a" / "static-2000.zarr" / "chunk").exists()
 
-    def test_every_evaluation_fetch_carries_the_container_credential(self, paths, log, monkeypatch):
+    def test_every_evaluation_fetch_carries_the_container_credential(
+        self, paths, log, monkeypatch, container
+    ):
         """Two of the three fetch sites passed no SAS, so scoring read the
         share exclusively and the container it was migrated into was never
         consulted -- invisible while both stores held the rungs."""
@@ -68,10 +72,14 @@ class TestEvaluateFetch:
         assert all(sas == task.checkpoint_sas for sas in seen), seen
 
     def test_a_run_with_nothing_published_is_refused(self, paths, log):
+        """A DIRECTORY IS NOT PUBLICATION. The old gate accepted any directory
+        under `archive/`, which is why it kept passing while the rungs moved to
+        the container -- and then refused every run once the share was emptied.
+        The manifest is what says a run has something to score."""
         (paths.archive / "run-a").mkdir(parents=True)
         task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
         assert handlers._evaluate(task, paths, log) == (1, None)
-        assert "no published checkpoint to score" in log.path.read_text()
+        assert "no such published run" in log.path.read_text()
 
     def test_a_partial_sweep_is_reported_as_partial(self, paths, log, monkeypatch):
         """Exit 0 keeps Batch from retrying 30 rungs to redo one, but it is not
@@ -186,7 +194,7 @@ class TestEvaluateFetch:
             eval_flags=("--mix-run", "run-nope"),
         )
         assert handlers._evaluate(task, paths, log) == (1, None)
-        assert "names no run on the share" in log.path.read_text()
+        assert "names no published run" in log.path.read_text()
 
     def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch):
         """IT NEVER WAS. Only precompute and vector-sweep filled the path in, so
@@ -245,6 +253,50 @@ class TestTrain:
         assert handlers._reporting(task, paths).progress_path == ""
 
 
+class TestAResumeFindsItsLadder:
+    """THE QUIET ONE. The other three share gates fail loudly; this one just
+    skipped the fetch, so a resume of a published run started the trainer at
+    zero and then republished a manifest whose pointer no longer described the
+    run. A silent restart is worse than a refusal: it looks like a control.
+    """
+
+    def _plan(self, sas=""):
+        return node_plan.TaskPlan(
+            op=TaskName.TRAIN, config="quick_test", to=4000, run_id="run-a", checkpoint_sas=sas
+        )
+
+    def test_a_run_published_only_to_the_container_is_still_fetched(
+        self, paths, log, monkeypatch, container
+    ):
+        """No directory on the share, the whole ladder in the container -- which
+        is every published run now."""
+        container["run-a/STATIC_CHECKPOINT.json"] = (
+            b'{"zarr": "static-2000.ckpt.zst", "iteration": 2000, "retained": []}'
+        )
+        fetched: list[str] = []
+        monkeypatch.setattr(
+            handlers.archive,
+            "fetch_current_rung",
+            lambda source, _dest, _log=None, sas="": fetched.append(source.name),
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+
+        handlers._train(self._plan(SAS), paths, log)
+
+        assert fetched == ["run-a"], "a resume restarted from zero"
+
+    def test_a_run_with_nothing_anywhere_is_not_fetched(self, paths, log, monkeypatch, container):
+        """A genuinely new run. Refusing here would break every first task."""
+        monkeypatch.setattr(
+            handlers.archive,
+            "fetch_current_rung",
+            lambda *_a, **_k: pytest.fail("fetched a run that was never published"),
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+
+        assert handlers._train(self._plan(SAS), paths, log)[0] == 0
+
+
 class TestAbstractionRefresh:
     """A node that booted before an abstraction was precomputed must still see it.
 
@@ -278,7 +330,7 @@ class TestAbstractionRefresh:
         return name
 
     def test_training_pulls_an_abstraction_the_node_has_never_seen(
-        self, paths, tmp_path, log, monkeypatch
+        self, paths, tmp_path, log, monkeypatch, container
     ):
         self._published_abstraction(tmp_path, monkeypatch)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
@@ -322,7 +374,7 @@ class TestAbstractionRefresh:
 
         assert handlers._train(task, paths, log)[0] == 0
 
-    def test_the_abstractions_container_is_the_one_asked(self, paths, log, monkeypatch):
+    def test_the_abstractions_container_is_the_one_asked(self, paths, log, monkeypatch, container):
         """One ACCOUNT SAS, with `sibling_container` swapping the path. Asking
         the checkpoint container for an abstraction lists 1,681 rungs and
         matches none of them."""
@@ -347,7 +399,7 @@ class TestAbstractionRefresh:
         assert seen[0].partition("?")[0].endswith("/abstractions")
 
     def test_an_abstraction_already_on_the_node_is_not_recopied(
-        self, paths, tmp_path, log, monkeypatch
+        self, paths, tmp_path, log, monkeypatch, container
     ):
         """A directory already present is skipped before the object is even
         fetched, which is why the steady-state cost is one HEAD each rather
