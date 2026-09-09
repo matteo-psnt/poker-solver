@@ -31,6 +31,16 @@ from src.interfaces.commands._compose import Invoke, Part, compose, payloads
 # them is the point: `tasks` is the slowest read in the console.
 LIVE_LIMIT = 10
 
+# How far back the live screen reads. `tasks` turns this into a bound on the
+# QUERY, so it is the difference between 16,895 legs and ~350: 2.51s against
+# 0.12s, on the one view the status bar polls from every page every 5 seconds.
+#
+# Generously above what the screen draws. It has to cover every task holding a
+# node -- the pool ceiling is 36 -- plus `LIVE_LIMIT` deaths, and a task is
+# written about every 60s while it runs, so a live one is always among the most
+# recently touched. 200 is two orders of margin on the first and still cheap.
+LIVE_WINDOW = 200
+
 # Deliberately NOT `LIVE_LIMIT`. The run list uses jobs to check whether a run
 # claiming to be running has a task executing, and a run outlives the daily job
 # its tasks land in -- so a smaller limit reads a live run as abandoned.
@@ -54,7 +64,7 @@ def now(*, invoke: Invoke | None = None) -> dict[str, Any]:
         [
             Part("pool", pool_status.COMMAND),
             Part("jobs", jobs.COMMAND, {"limit": LIVE_LIMIT}),
-            Part("tasks", tasks.COMMAND),
+            Part("tasks", tasks.COMMAND, {"limit": LIVE_WINDOW}),
         ],
         invoke=invoke,
     )
@@ -89,7 +99,10 @@ def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
     # models rather than dicts that would be a field-by-field compare each time.
     cut = len(rows) - LIVE_LIMIT if LIVE_LIMIT > 0 else 0
     kept = [row for index, row in enumerate(rows) if row.holds_a_node or index >= cut]
-    updated = {"rows": kept, "hidden_rows": len(rows) - len(kept)}
+    # ADDED to what the command already hid, not recomputed from `rows`: the
+    # part arrives bounded by `LIVE_WINDOW`, so `len(rows)` is the size of the
+    # window and not of the log.
+    updated = {"rows": kept, "hidden_rows": payload.hidden_rows + len(rows) - len(kept)}
     return {**part, "payload": payload.model_copy(update=updated)}
 
 

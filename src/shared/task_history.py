@@ -536,7 +536,14 @@ def join_documents(documents: dict[str, dict[str, Any]]) -> list[TaskRow]:
     observed = _by_task_id(documents, OBSERVED_SUFFIX)
     running = _by_task_id(documents, PROGRESS_SUFFIX)
 
-    latest = {task: max(a for t, a in attempts if t == task) for task, _ in attempts}
+    # One pass. The comprehension this replaced rescanned every key for every
+    # key -- 6,034 x 6,034 = 36M tuple unpacks to answer a question one sweep
+    # answers, and it was 0.8s of a 0.95s join. `tasks._still_open` had the
+    # linear form thirty lines away.
+    latest: dict[str, int] = {}
+    for task, attempt in attempts:
+        if attempt > latest.get(task, -1):
+            latest[task] = attempt
 
     # Known to Batch but never recorded by the node -- killed before its first
     # write. Still gets a row: a task that vanishes is indistinguishable from one

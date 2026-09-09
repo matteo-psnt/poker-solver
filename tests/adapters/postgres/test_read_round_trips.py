@@ -12,7 +12,13 @@ from typing import Any
 import pytest
 
 from src.adapters.postgres import connect, queries
+from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.web import views
+from src.shared.task_history import TaskRow
+
+
+def _task_row(task_id: str) -> TaskRow:
+    return TaskRow(task_id=task_id, attempt=1, cause="completed", cause_source="node")
 
 
 def _widest_screen(monkeypatch) -> int:
@@ -104,6 +110,14 @@ class _Recorder:
     def all(self) -> list[Any]:
         return []
 
+    def scalar(self) -> int:
+        return 0
+
+    # A reader that builds its rows by iterating the result, which `leg_rows`
+    # does. Empty: these count the STATEMENT, never what comes back.
+    def __iter__(self):
+        return iter(())
+
 
 def test_a_read_does_not_open_a_transaction():
     """SQLAlchemy begins on first execute and rolls back on close, so a plain
@@ -125,3 +139,63 @@ def test_every_reader_goes_through_the_read_helper(reader):
     assert engine.options.get("isolation_level") == "AUTOCOMMIT", (
         f"{reader.__name__} opens a transaction to read"
     )
+
+
+class TestABoundedReadFetchesABoundedNumberOfRows:
+    """The third way a correct answer arrives slowly: fetching all of it.
+
+    `--limit n` used to be a slice of the answer. The query returned every leg
+    the log holds -- 16,895 rows, 10.6 MB -- and the command threw all but `n`
+    away. Postgres reads every body in 0.02s; shipping them costs 1.65s, and the
+    status bar polls the view that did it every 5 seconds from every page.
+
+    None of that is visible in what comes back, which is why these count the
+    statement rather than the rows.
+    """
+
+    def test_a_limit_bounds_the_query_and_not_just_the_answer(self):
+        engine = _Recorder()
+        queries.leg_rows(engine, recent_tasks=200)
+        assert "LIMIT :tasks" in str(engine.statements[-1]), (
+            "the whole log was fetched to return 200 rows"
+        )
+
+    def test_no_limit_still_reads_the_whole_log(self):
+        """The run list needs it: only the whole log can say which runs have
+        ever had a task, and a bounded read would call an old one abandoned."""
+        engine = _Recorder()
+        queries.leg_rows(engine)
+        assert "LIMIT" not in str(engine.statements[-1])
+
+    def test_the_bound_is_by_task_so_a_tasks_attempts_stay_together(self):
+        """`join_documents` decides which attempt of a task is latest and can
+        only do that seeing all of them -- and `attempt` is a sentinel (-1/0) on
+        the `progress` and `observed` legs, so grouping on it would file a
+        task's progress apart from its own start."""
+        engine = _Recorder()
+        queries.leg_rows(engine, recent_tasks=200)
+        statement = " ".join(str(engine.statements[-1]).split())
+        assert "GROUP BY task_id ORDER BY max(at) DESC LIMIT :tasks" in statement
+
+    def test_the_live_view_asks_for_a_bound(self, monkeypatch):
+        """The bound only pays if the view that polls every 5s uses it. This is
+        the one that made the whole console slow: `now` asked for `--limit 0`."""
+        asked: dict[str, dict] = {}
+
+        def _record(_op, parts, join=None, invoke=None):
+            asked.update({part.key: part.arguments for part in parts})
+            return {"parts": {part.key: {} for part in parts}}
+
+        monkeypatch.setattr(views, "compose", _record)
+        monkeypatch.setattr(views, "_live_and_recent", lambda part: part)
+        views.now()
+        assert asked["tasks"].get("limit") == views.LIVE_WINDOW
+
+    def test_a_bounded_read_reports_what_it_did_not_fetch(self):
+        """`hidden_rows` counted the rows in hand. Once those are a window that
+        is a fraction of what is hidden, and the Tasks page draws its
+        `load all` affordance from it."""
+        rows = [_task_row(f"t{i}") for i in range(5)]
+        payload = tasks_command._result(rows, None, 2, total=6034)
+        assert len(payload.rows) == 2
+        assert payload.hidden_rows == 6032

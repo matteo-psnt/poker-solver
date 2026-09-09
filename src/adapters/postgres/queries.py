@@ -120,16 +120,63 @@ def checkpoint_series(engine: Any, run_id: str) -> list[dict[str, Any]]:
 # would be a second, silently different, opinion about that.
 _LEGS = sa.text("SELECT task_id, attempt, leg, body FROM legs")
 
+# The same rows for the n most recently touched TASKS.
+#
+# By task and not by attempt, because `join_documents` decides which attempt of
+# a task is latest and can only do that seeing all of them -- and because
+# `attempt` is a sentinel (-1/0) on the `progress` and `observed` legs, so
+# grouping on it would file a task's progress apart from its own start.
+#
+# `max(at)` is when the task was last WRITTEN ABOUT, and every row the caller
+# could want is in here: a leg's `at` is stamped as it is written, so a task's
+# last event can never be older than the `ended_at` inside it, and reconciliation
+# only ever moves `max(at)` later. The window is therefore a superset of the
+# newest n attempts by end time -- `test_a_bounded_read_answers_what_the_whole_log_does`
+# is what says so against the live record.
+_LEGS_FOR_RECENT_TASKS = sa.text("""
+    WITH recent AS (
+        SELECT task_id FROM legs GROUP BY task_id ORDER BY max(at) DESC LIMIT :tasks
+    )
+    SELECT l.task_id, l.attempt, l.leg, l.body
+    FROM legs l JOIN recent r ON l.task_id = r.task_id
+""")
 
-def leg_rows(engine: Any) -> list[tuple[str, int, str, dict[str, Any]]]:
-    """Every leg document, as `(task_id, attempt, leg, body)`.
+# How many task-attempts the log holds, counted where the rows are rather than
+# by fetching them. The UNION is `join_documents`' own rule for what earns a
+# row: every (task, attempt) the node started, plus the tasks Batch saw that it
+# never did. Checked against the join's own count, which it matches exactly.
+_ATTEMPT_COUNT = sa.text("""
+    SELECT count(*) FROM (
+        SELECT task_id, attempt FROM legs WHERE attempt > 0
+        UNION
+        SELECT task_id, 1 FROM legs l WHERE leg = 'observed'
+          AND NOT EXISTS (SELECT 1 FROM legs o WHERE o.task_id = l.task_id AND o.attempt > 0)
+    ) attempts
+""")
 
-    Whole rather than paged: the join needs every row to answer about any one of
-    them -- `kinds.etas` estimates from the whole population, and which attempt
-    of a task is latest is only knowable by seeing all of them.
+
+def leg_rows(engine: Any, *, recent_tasks: int = 0) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Leg documents as `(task_id, attempt, leg, body)`, newest tasks or all.
+
+    Unbounded by default, which `--limit 0` and the run list still want: only
+    the whole log can say which runs have ever had a task.
+
+    `recent_tasks` is the bound worth having. The whole log is 16,895 legs and
+    10.6 MB, and shipping it costs 1.65s of pure transfer -- Postgres itself
+    reads every body in 0.02s -- on a view the status bar polls every 5s. The
+    newest 300 tasks are 1,269 legs and 0.7 MB.
     """
+    query = _LEGS if recent_tasks <= 0 else _LEGS_FOR_RECENT_TASKS
     with _read(engine) as connection:
-        return [(row[0], row[1], row[2], row[3]) for row in connection.execute(_LEGS)]
+        result = connection.execute(query, {"tasks": recent_tasks} if recent_tasks > 0 else {})
+        return [(row[0], row[1], row[2], row[3]) for row in result]
+
+
+def attempt_count(engine: Any) -> int:
+    """How many task-attempts the whole log holds, for a bounded read to report
+    what it did NOT fetch. 34 ms against 1.65s of shipping the rows to count."""
+    with _read(engine) as connection:
+        return int(connection.execute(_ATTEMPT_COUNT).scalar() or 0)
 
 
 def observed_legs(engine: Any) -> dict[str, dict[str, Any]]:

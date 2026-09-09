@@ -98,10 +98,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _result(rows: list[TaskRow], reconciled: int | None, limit: int) -> TasksPayload:
-    """One payload shape for both sources, newest last."""
+def _result(
+    rows: list[TaskRow], reconciled: int | None, limit: int, total: int | None = None
+) -> TasksPayload:
+    """One payload shape for both sources, newest last.
+
+    `total` is how many attempts EXIST, which only a bounded read has to be told:
+    when `rows` is already a window, `len(rows)` counts what was fetched and
+    would report a fraction of what is hidden.
+    """
     shown = rows[-limit:] if limit > 0 else rows
-    return TasksPayload(rows=shown, reconciled=reconciled, hidden_rows=len(rows) - len(shown))
+    return TasksPayload(
+        rows=shown,
+        reconciled=reconciled,
+        hidden_rows=(total if total is not None else len(rows)) - len(shown),
+    )
 
 
 def run(args: argparse.Namespace) -> TasksPayload:
@@ -123,11 +134,20 @@ def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
     Reconciliation still asks BATCH, which is the half no store can make
     cheaper. What the database makes cheap is knowing WHICH tasks to ask about
     and which answers are new, neither of which needs the tree any more.
+
+    **`--limit n` is a bound on the QUERY, not a slice of the answer.** It used
+    to fetch every leg and throw most away: 16,895 rows and 10.6 MB over the
+    wire, 1.65s of it pure transfer, to return ten. A task contributes at least
+    one attempt, so the newest `n` tasks always hold at least the newest `n`
+    attempts -- and the count of what was left behind comes from `attempt_count`
+    rather than from the rows, which are no longer all of them.
     """
-    rows = task_history.join_documents(task_log.documents_from_rows(queries.leg_rows(engine)))
+    total = queries.attempt_count(engine) if args.limit > 0 else None
+    documents = task_log.documents_from_rows(queries.leg_rows(engine, recent_tasks=args.limit))
+    rows = task_history.join_documents(documents)
     open_tasks = _still_open(rows)
     if args.skip_reconcile or not open_tasks:
-        return _result(rows, None, args.limit)
+        return _result(rows, None, args.limit, total)
 
     config = CloudConfig.load()
     fresh = _new_observations(
@@ -135,7 +155,7 @@ def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
     )
     if fresh:
         observations.record_observations(engine, fresh)
-    return _result(rows, len(fresh), args.limit)
+    return _result(rows, len(fresh), args.limit, total)
 
 
 def _still_open(rows: list[TaskRow]) -> list[TaskRow]:
