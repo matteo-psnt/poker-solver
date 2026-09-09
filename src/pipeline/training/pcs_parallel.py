@@ -293,6 +293,7 @@ def pcs_worker(
                 # A legal turn best response maximises JOINTLY over the runouts
                 # sharing the turn, so they cannot be rebound one at a time.
                 sequential=pcs.runout_mode != "turn",
+                trunk_source=pcs.trunk_source,
             )
             logger.info(
                 "[cfr-br worker %d] hybrid opponent best-responds on %s; "

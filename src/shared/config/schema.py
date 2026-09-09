@@ -377,6 +377,15 @@ class PcsConfig(StrictFrozenModel):
     # BR legal -- at the cost of holding one kernel per runout, since the joint
     # maximisation needs their values at the same time.
     runout_mode: Literal["flop", "turn"] = Field(default="flop")
+    # Which strategy the CFR-BR opponent plays OUTSIDE its best-response
+    # streets. `own` gives it a separate regret-matched trunk of its own, so the
+    # trained seat faces an opponent that is strictly stronger than itself --
+    # blueprint-grade early streets PLUS an exact late-street BR -- and folding
+    # preflop is a reasonable reply to that. `blueprint` reads the seat's own
+    # rows instead, making the trunk self-play and the algorithm the hybrid its
+    # docstring describes. The trunk is NOT checkpointed under `own`, so a
+    # resumed task relearns the opponent from scratch mid-run.
+    trunk_source: Literal["own", "blueprint"] = Field(default="own")
 
 
 # ---------------------------------------------------------------------------

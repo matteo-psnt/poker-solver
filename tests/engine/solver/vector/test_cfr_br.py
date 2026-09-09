@@ -276,3 +276,58 @@ def test_cfr_br_is_less_exploitable_in_the_real_game_than_cfr(parts):
     # The trade that identifies the algorithm: CFR-BR is NOT solving the
     # abstract game and must be worse there, or it is just CFR.
     assert br_abstract > cfr_abstract
+
+
+class TestWhichStrategyTheOpponentPlaysOffItsBestResponseStreets:
+    """`trunk_source` shipped implemented, validated and UNREACHABLE: no config
+    field and no argument from `pcs_parallel`, so every CFR-BR run ever trained
+    took the `own` branch by default.
+
+    It is not a cosmetic choice. Under `own` the opponent regret-matches a trunk
+    of its OWN, so the trained seat faces something strictly stronger than
+    itself -- its own calibre early, an exact best response later -- and folding
+    preflop is a reasonable reply. Under `blueprint` the trunk IS the seat's
+    rows, which is the hybrid the class docstring describes.
+    """
+
+    def _run(self, compiled, contexts, source):
+        tree = compiled.tree
+        layout = TrunkLayout(tree, BR_REGIONS["turn_river"])
+        regrets = np.zeros(tree.num_slots, dtype=np.float32)
+        trunk = np.zeros(max(1, layout.num_slots), dtype=np.float32)
+        driver = CFRBestResponse(
+            compiled,
+            regrets,
+            np.zeros(tree.num_slots, dtype=np.float32),
+            trunk,
+            br_streets=BR_REGIONS["turn_river"],
+            weighting="none",
+            cfr_plus=True,
+            showdown="matmul",
+            num_boards=len(BOARDS),
+            sequential=False,
+            trunk_source=source,
+        )
+        for iteration in range(3):
+            driver.iterate(contexts, iteration, boards=BOARDS)
+        return trunk
+
+    def test_own_learns_a_trunk_and_blueprint_leaves_it_untouched(self, parts):
+        compiled, contexts, _ = parts
+        own = self._run(compiled, contexts, "own")
+        blueprint = self._run(compiled, contexts, "blueprint")
+        assert np.count_nonzero(own) > 0, "the `own` trunk must accumulate the opponent's regrets"
+        assert np.count_nonzero(blueprint) == 0, (
+            "`blueprint` must read the seat's rows and write no trunk of its own"
+        )
+
+    def test_an_unknown_source_is_refused(self, parts):
+        compiled, _, _ = parts
+        with pytest.raises(ValueError, match="Unknown trunk source"):
+            CFRBestResponse(
+                compiled,
+                np.zeros(compiled.tree.num_slots, dtype=np.float32),
+                np.zeros(compiled.tree.num_slots, dtype=np.float32),
+                np.zeros(1, dtype=np.float32),
+                trunk_source="nonsense",
+            )
