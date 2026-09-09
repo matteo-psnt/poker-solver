@@ -98,12 +98,27 @@ WARM_BUDGET_MS = 50
 # queue match spending 14.2 s per decision therefore delays a concurrent 2 s
 # ranked decision past its clock, which is a forfeited fixture.
 #
-# 900 ms keeps a concurrent PAIR inside the tight clock (935 + 233 + ~120 ms of
-# frame against 2,000) and stays well above the only budget at which the
-# resolver's 528 mbb/hand gain was ever measured, which was ~300 ms. Spending
-# 14.2 s was never measured to be better than 300 ms -- it was just what the
-# clock allowed.
-MAX_BUDGET_MS = 900
+# 4,000 ms, sized from the MEASURED overshoot rather than from the arithmetic
+# above. Over 7,217 decisions in a clean window (no local jobs on the box) at a
+# 900 ms budget: p50 1,034 ms, p99 1,284, p99.9 1,532, WORST 3,321 -- a 3.69x
+# worst case, not the 6x the concurrency count suggests, because matches
+# overlapping is not the same as decisions colliding. At 4,000 ms that worst
+# case is 14.8 s of a 30 s clock.
+#
+# ⚠️ Measure this on a QUIET box. The same statistic read p99.9 4,501 and a
+# 22,452 ms maximum while duels were running on the seat's own host, which is
+# local interference, not contention between matches.
+#
+# Raising the cap cannot hurt a short clock: `budget_for` takes clock/2 - 800
+# first, so a 2,000 ms clock still asks for 200 ms and a 5,000 ms clock for
+# 1,700 -- both far under any cap above them. Only the 30 s clock, which is
+# 1,202 of the 1,227 matches ever played, sees the difference.
+MAX_BUDGET_MS = 4000
+
+#: Largest share of the clock a decision may ask for, once the measured 3.69x
+#: worst-case overshoot is applied: 0.6 / 3.69. Keeps the TAIL inside the clock,
+#: where `CLOCK_FRACTION` only keeps the average there.
+CONTENTION_SAFE_FRACTION = 0.6 / 3.69
 
 # Zeroing the residue of early iterations measured 940.1 -> 854.0 mbb/hand on the
 # programme gate (three seeds). 0.10 measured WORSE, so this is a verified point
@@ -183,7 +198,12 @@ def budget_for(clock_ms: int | None) -> int:
     """
     clock = int(clock_ms) if clock_ms else TIGHT_CLOCK_MS
     sized = max(50, int(clock * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS)
-    return min(sized, MAX_BUDGET_MS)
+    # And a bound the additive form misses. Concurrent decisions serialise, and
+    # the MEASURED worst case is 3.69x the budget, so a budget safe on average
+    # can still overrun its own clock in the tail: clock/2 - 800 hands a 5,000
+    # ms clock 1,700 ms, which is 6,273 ms of worst case against a 5,000 ms
+    # limit. Latent since the cap never bound there.
+    return max(50, min(sized, int(clock * CONTENTION_SAFE_FRACTION), MAX_BUDGET_MS))
 
 
 @dataclass
