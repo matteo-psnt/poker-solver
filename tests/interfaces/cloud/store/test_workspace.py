@@ -94,50 +94,58 @@ def fake(monkeypatch):
     return store
 
 
+RECORD = {
+    "run-a": {
+        "rungs": {"static-1000.ckpt.zst"},
+        "manifest": b'{"zarr": "static-1000.ckpt.zst", "iteration": 1000, "retained": []}',
+    },
+    "run-b": {"rungs": set(), "manifest": b'{"zarr": "", "iteration": 0, "retained": []}'},
+}
+
+
 class TestPullMetadata:
-    def test_pulls_the_json_record(self, fake, tmp_path):
-        workspace.pull_metadata(fake, "s", tmp_path)
-        assert (tmp_path / "run-a" / "run.jsonl").is_file()
-        assert (tmp_path / "run-a" / "evals" / "slug1.json").is_file()
-        assert (tmp_path / "run-b" / "run.jsonl").is_file()
+    """The tree a reader walks, built from what the container holds."""
 
-    def test_never_pulls_checkpoint_data(self, fake, tmp_path):
-        """~540 MB of zarr chunks that no reading command opens."""
-        workspace.pull_metadata(fake, "s", tmp_path)
-        assert not (tmp_path / "run-a" / "static-1000.zarr").exists()
+    def test_it_writes_each_run_s_manifest(self, tmp_path):
+        assert workspace.pull_metadata(tmp_path, RECORD) == 2
+        assert (tmp_path / "run-a" / "STATIC_CHECKPOINT.json").is_file()
+        assert (tmp_path / "run-b" / "STATIC_CHECKPOINT.json").is_file()
 
-    def test_completion_markers_come_from_the_container(self, fake, tmp_path):
+    def test_markers_come_from_the_rungs_the_container_holds(self, tmp_path):
         """A marker's whole content is that it exists, and what it says is
-        whether a rung the manifest advertises can actually be scored. The
-        CONTAINER answers that now: a rung is one atomically-committed object,
-        so its presence is the completeness the share could only assert about a
-        directory it might have half-copied."""
-        workspace.pull_metadata(
-            fake, "s", tmp_path, published_rungs={"run-a": {"static-1000.ckpt.zst"}}
-        )
+        whether a rung the manifest advertises can actually be fetched. One
+        listing answers that for every run, and it answers from the bytes
+        rather than from a second claim beside them."""
+        workspace.pull_metadata(tmp_path, RECORD)
+
         assert (tmp_path / "run-a" / ".complete-static-1000.ckpt.zst").is_file()
+        assert not list((tmp_path / "run-b").glob(".complete-*"))
 
-    def test_a_share_marker_is_not_recreated(self, fake, tmp_path):
-        """The share still holds ~1,500 of them and they are residue: nothing
-        writes one any more, so trusting them would resurrect a claim the
-        container has already answered."""
-        workspace.pull_metadata(fake, "s", tmp_path, published_rungs={})
-        assert not list((tmp_path / "run-a").glob(".complete-*"))
-
-    def test_one_run_pulls_only_that_run(self, fake, tmp_path):
-        workspace.pull_metadata(fake, "s", tmp_path, run="run-a")
+    def test_one_run_pulls_only_that_run(self, tmp_path):
+        workspace.pull_metadata(tmp_path, RECORD, run="run-a")
         assert (tmp_path / "run-a").is_dir()
         assert not (tmp_path / "run-b").exists()
 
-    def test_an_unpublished_run_says_what_is_published(self, fake, tmp_path):
+    def test_an_unpublished_run_says_what_is_published(self, tmp_path):
         with pytest.raises(CommandError, match="run-a"):
-            workspace.pull_metadata(fake, "s", tmp_path, run="run-nope")
+            workspace.pull_metadata(tmp_path, RECORD, run="run-nope")
 
-    def test_the_local_tree_mirrors_the_published_one(self, fake, tmp_path):
+    def test_an_ambiguous_fragment_is_refused(self, tmp_path):
+        with pytest.raises(CommandError):
+            workspace.pull_metadata(tmp_path, RECORD, run="run-")
+
+    def test_the_local_tree_mirrors_the_published_one(self, tmp_path):
         """The readers are ordinary local-path code; the layout must match."""
-        workspace.pull_metadata(fake, "s", tmp_path)
-        loaded = json.loads((tmp_path / "run-a" / "run.jsonl").read_text())
-        assert loaded["run_id"] == "run-a"
+        workspace.pull_metadata(tmp_path, RECORD)
+        loaded = json.loads((tmp_path / "run-a" / "STATIC_CHECKPOINT.json").read_text())
+        assert loaded["zarr"] == "static-1000.ckpt.zst"
+
+    def test_a_run_with_no_manifest_still_gets_its_directory(self, tmp_path):
+        """A task that died before its first checkpoint has rungs and no
+        manifest, and a reader must see the run rather than nothing."""
+        record = {"run-c": {"rungs": {"static-5.ckpt.zst"}, "manifest": None}}
+        assert workspace.pull_metadata(tmp_path, record) == 0
+        assert (tmp_path / "run-c" / ".complete-static-5.ckpt.zst").is_file()
 
 
 class TestSourceSeam:
@@ -151,27 +159,6 @@ class TestSourceSeam:
         derived = _base.ledger_for(tmp_path)
         assert derived.parent == tmp_path, "derived inside the materialised tree"
         assert derived.is_file(), "rebuild_ledger ran"
-
-
-class TestTheWalkIsPruned:
-    """Filtering checkpoint data out AFTER the walk still paid for the walk.
-
-    A run's .zarr snapshots hold thousands of chunk files and listing them is a
-    round trip per directory -- measured at 167s to pull 146 small JSON files.
-    """
-
-    def test_it_never_lists_inside_a_snapshot_directory(self, fake, tmp_path, monkeypatch):
-        listed: list[str] = []
-        original = share.list_entries
-
-        def spy(service, share_name, path):
-            listed.append(path)
-            return original(service, share_name, path)
-
-        monkeypatch.setattr(share, "list_entries", spy)
-        workspace.pull_metadata(fake, "s", tmp_path)
-
-        assert not [p for p in listed if ".zarr" in p], f"descended into a snapshot: {listed}"
 
 
 class TestSharedTrees:
@@ -386,62 +373,6 @@ class TestSharedTrees:
         with workspace.shared_record_cache(ttl=60.0) as cache:
             assert workspace.active_cache() is cache
         assert workspace.active_cache() is None
-
-
-class TestIncrementalRefresh:
-    """A published record never changes once written, so a refresh should fetch
-    only what moved. The console rebuilds this tree every 45s; before this it
-    re-downloaded all 4,251 immutable documents each time -- 6.4s of a 24.4s
-    rebuild, and `_checkout` blocks every other request while it runs."""
-
-    def test_a_refresh_against_an_unchanged_share_downloads_nothing(self, fake, tmp_path):
-        first = tmp_path / "first"
-        workspace.pull_metadata(fake, "s", first)
-        assert fake.downloads, "the first pull must actually fetch"
-
-        fake.downloads.clear()
-        second = tmp_path / "second"
-        fetched = workspace.pull_metadata(fake, "s", second, previous=first)
-
-        assert fetched == 0
-        assert fake.downloads == []
-        # And the tree is COMPLETE, not merely cheap.
-        assert (second / "run-a" / "evals" / "slug1.json").is_file()
-        assert (second / "run-b" / "run.jsonl").is_file()
-
-    def test_only_the_changed_document_is_refetched(self, fake, tmp_path):
-        first = tmp_path / "first"
-        workspace.pull_metadata(fake, "s", first)
-
-        fake.etags["archive/run-a/evals/slug1.json"] = "v2"
-        fake.downloads.clear()
-        second = tmp_path / "second"
-        fetched = workspace.pull_metadata(fake, "s", second, previous=first)
-
-        assert fetched == 1
-        assert fake.downloads == ["archive/run-a/evals/slug1.json"]
-
-    def test_a_new_document_is_picked_up(self, fake, tmp_path):
-        first = tmp_path / "first"
-        workspace.pull_metadata(fake, "s", first)
-
-        fake.files["archive/run-b/evals/slug9.json"] = json.dumps({"run_id": "run-b"})
-        second = tmp_path / "second"
-        workspace.pull_metadata(fake, "s", second, previous=first)
-
-        assert (second / "run-b" / "evals" / "slug9.json").is_file()
-
-    def test_a_previous_tree_with_no_manifest_is_ignored_not_trusted(self, fake, tmp_path):
-        """A tree from before this existed has no etags. Reusing its files on
-        name alone would serve whatever it happened to hold."""
-        stale = tmp_path / "stale"
-        (stale / "run-a" / "evals").mkdir(parents=True)
-        (stale / "run-a" / "evals" / "slug1.json").write_text("STALE")
-
-        fresh = tmp_path / "fresh"
-        workspace.pull_metadata(fake, "s", fresh, previous=stale)
-
-        assert (fresh / "run-a" / "evals" / "slug1.json").read_text() != "STALE"
 
 
 def _read(trees, build):

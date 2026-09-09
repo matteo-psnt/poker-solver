@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import tarfile
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,10 @@ from src.shared import records
 from src.shared.cloudtask.kinds import TaskName
 
 CONTAINER = "checkpoints"
+
+# Latency-bound, not bandwidth-bound: a manifest is a few KB and the store is
+# in another country, so the downloads overlap.
+_PARALLEL_DOWNLOADS = 32
 ABSTRACTIONS = "abstractions"
 
 # The ops that PUT anything. Everything else fetches, and a fetch has no
@@ -223,6 +228,43 @@ def _client(config: Any, run_id: str, object_name: str) -> Any:
         credential=config.share_key,
     )
     return service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
+
+
+def published_record(config: Any) -> dict[str, dict[str, Any]]:
+    """Every published run, as `{run_id: {"rungs": {...}, "manifest": bytes}}`.
+
+    ONE listing plus one small download per manifest. The manifests are the
+    whole of what a reader materialises now -- the eval documents and run logs
+    that made this incremental live in Postgres, and 345 files of a few KB do
+    not need an etag cache to stay fast.
+    """
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+    container = BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    ).get_container_client(CONTAINER)
+
+    found: dict[str, dict[str, Any]] = {}
+    manifests: list[str] = []
+    for entry in container.list_blobs():
+        run, _, name = entry.name.partition("/")
+        if not name:
+            continue
+        slot = found.setdefault(run, {"rungs": set(), "manifest": None})
+        if name == records.STATIC_CHECKPOINT:
+            manifests.append(run)
+        else:
+            slot["rungs"].add(name)
+
+    def _pull(run: str) -> tuple[str, bytes]:
+        name = f"{run}/{records.STATIC_CHECKPOINT}"
+        return run, container.download_blob(name).readall()
+
+    with ThreadPoolExecutor(max_workers=_PARALLEL_DOWNLOADS) as pool:
+        for run, body in pool.map(_pull, manifests):
+            found[run]["manifest"] = body
+    return found
 
 
 def published_rungs(config: Any) -> dict[str, set[str]]:
