@@ -117,3 +117,9 @@ variable "abstractions_container_name" {
   type        = string
   default     = "abstractions"
 }
+
+variable "diagnostics_container_name" {
+  description = "Blob container holding task logs and profiles; expired by the lifecycle policy."
+  type        = string
+  default     = "diagnostics"
+}

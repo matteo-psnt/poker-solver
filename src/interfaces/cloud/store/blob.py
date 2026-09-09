@@ -230,6 +230,48 @@ def _client(config: Any, run_id: str, object_name: str) -> Any:
     return service.get_blob_client(CONTAINER, f"{run_id}/{object_name}")
 
 
+DIAGNOSTICS = "diagnostics"
+
+
+def read_task_log(config: Any, task_id: str) -> str | None:
+    """One task's published log tail, or None when it has none.
+
+    A task publishes this while it RUNS -- the node-side stream dies with the
+    node, so this copy is the only one a reader can reach. Diagnostics rather
+    than record: it expires on the container's lifecycle policy, and the
+    account that outlives a task is its `legs` row.
+    """
+    from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- see above
+
+    service = BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    )
+    try:
+        blob = service.get_blob_client(DIAGNOSTICS, f"{task_id}.log")
+        return blob.download_blob().readall().decode("utf-8", "replace")
+    except ResourceNotFoundError:
+        return None
+
+
+def task_log_names(config: Any) -> list[str]:
+    """Every published task log, sorted.
+
+    Published logs matter more than node-side `stdout.txt`: Batch keeps task
+    output on the node, and the pool scales to zero within minutes of a task
+    ending, so the node copy is gone for exactly the failed tasks most worth
+    reading.
+    """
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+    service = BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    )
+    return sorted(x.name for x in service.get_container_client(DIAGNOSTICS).list_blobs())
+
+
 def published_record(config: Any) -> dict[str, dict[str, Any]]:
     """Every published run, as `{run_id: {"rungs": {...}, "manifest": bytes}}`.
 

@@ -516,6 +516,7 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
 
 
 ABSTRACTIONS_CONTAINER = "abstractions"
+DIAGNOSTICS_CONTAINER = "diagnostics"
 ABSTRACTION_SUFFIX = ".tar.zst"
 
 

@@ -36,6 +36,11 @@ output "abstractions_container_name" {
   value       = azurerm_storage_container.abstractions.name
 }
 
+output "diagnostics_container_name" {
+  description = "Blob container holding task logs and profiles."
+  value       = azurerm_storage_container.diagnostics.name
+}
+
 output "postgres_host" {
   value = azurerm_postgresql_flexible_server.record_ca.fqdn
 }

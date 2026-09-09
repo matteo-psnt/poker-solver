@@ -20,7 +20,7 @@ import threading
 import time
 from typing import IO, TYPE_CHECKING
 
-from src.shared.cloudtask.node import profile
+from src.shared.cloudtask.node import blobstore, profile
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,9 +62,13 @@ class TaskLogger:
     SMB would put the task's throughput at the mercy of the share.
     """
 
-    def __init__(self, path: Path, share: Path) -> None:
+    def __init__(self, path: Path, share: Path, sas: str = "") -> None:
         self.path = path
         self.share = share
+        # The DIAGNOSTICS container when a task carries a credential for it.
+        # The share is what answered before, and it answers still for a task
+        # dispatched by something that mints none.
+        self.sas = sas
         path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = path.open("ab")
         self._lock = threading.Lock()
@@ -95,18 +99,22 @@ class TaskLogger:
         unchanged on every tick.
         """
         task = os.environ.get("AZ_BATCH_TASK_ID", "task")
-        destination = self.share / "logs" / f"{task}.log"
         try:
             with self._lock:
                 size = self.path.stat().st_size
                 if size == self._published_size:
                     return
-            destination.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("rb") as source:
                 source.seek(max(0, size - PUBLISHED_LOG_BYTES))
-                destination.write_bytes(source.read())
+                tail = source.read()
+            if self.sas:
+                blobstore.put_bytes(self.sas, f"{task}.log", tail)
+            else:
+                destination = self.share / "logs" / f"{task}.log"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(tail)
             self._published_size = size
-        except OSError:
+        except Exception:  # noqa: BLE001 -- the observer must not fail the task
             pass
 
     def close(self) -> None:
