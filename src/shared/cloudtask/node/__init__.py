@@ -13,7 +13,7 @@ Split by what can go wrong, in dependency order::
     paths      where things live on a node -- pure addressing
     process    running a child under a deadline, and keeping what it said
     plan       the RUN_* environment -> the argv -- pure, no IO
-    archive    the share <-> the node's disk
+    archive    the containers <-> the node's disk
     progress   how far along, and how much of that this task can claim
     handlers   what each KIND of task does
     lifecycle  one task start to finish, and the account of how it ended

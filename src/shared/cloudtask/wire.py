@@ -161,7 +161,7 @@ KEYS: tuple[Key, ...] = (
     #
     # A SAS rather than the account key for the same reason the DSN is tolerable
     # above -- it is revocable and it is SCOPED. The key opens every container
-    # and the share; this opens one container, for a bounded window, and it is
+    # on the account; this opens one container, for a bounded window, and it is
     # minted per dispatch rather than stored anywhere.
     #
     # It also means the node needs no SDK: `blobstore` speaks REST through
@@ -169,7 +169,10 @@ KEYS: tuple[Key, ...] = (
     # That matters because `archive` is imported before `uv sync`, where a
     # third-party import would kill the task at bootstrap.
     #
-    # EMPTY DISABLES IT: the task publishes to the share exactly as before.
+    # EMPTY PUBLISHES NOTHING. This was the migration's rollback -- a task
+    # without it fell through to the share -- and there is no share to fall
+    # through to now, so the handlers refuse instead of exiting 0 on a task
+    # whose whole output is unreachable.
     Key("POKER_SOLVER_CHECKPOINT_SAS", "checkpoint_sas", "checkpoint_sas"),
     # The sealed tree, as a read-only SAS URL for that one blob. Consumed by the
     # task COMMAND LINE (`curl | tar`) before any of this code exists on the

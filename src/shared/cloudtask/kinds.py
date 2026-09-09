@@ -583,10 +583,15 @@ class EvaluateTask(TaskKind):
     """Score published rungs of an existing run."""
 
     name = TaskName.EVALUATE
-    """The SCORED run: the eval writes its ledger document into that run's
-    ``evals/`` on the node, and the exit publish is the only way it reaches the
-    share. Cheap by construction -- the rungs this task fetched came FROM the
-    share, so their completion markers make the checkpoint copies no-ops."""
+    """The SCORED run. Its SCORE goes to the `evals` table, not to a file the
+    exit publish carries -- so what the publish does here is the run's loose
+    metadata, and the rungs this task fetched are already in the container,
+    which makes the rung pass a HEAD each rather than an upload.
+
+    ``evals/*.json`` is no longer written by a node: `record_evaluation` writes
+    the sink, and the one remaining file writer (`record_blueprint_match`, whose
+    pairwise payload has no column in a single-``run_id`` table) has no command
+    surface for a task to reach."""
     publishes_run = True
     unit = "board branches"
     progress_file = "evaluate-progress.json"

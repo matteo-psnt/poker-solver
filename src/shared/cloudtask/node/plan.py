@@ -79,7 +79,9 @@ class TaskPlan:
     # Empty when the dispatching machine had none, which is how a task runs
     # exactly as it did before the database existed.
     record_dsn: str = ""
-    #: Container SAS for the checkpoint store. Empty publishes to the share.
+    #: Container SAS for the checkpoint store. Empty publishes NOWHERE: there
+    #: is no second store to fall back to, so a task without one is refused
+    #: rather than left to train with no durable output.
     checkpoint_sas: str = ""
     # Already spent: the command line fetched the tree with it before this ran.
     code_url: str = ""
