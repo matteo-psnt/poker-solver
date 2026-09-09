@@ -75,12 +75,15 @@ def _request(
     return request
 
 
-def list_container(container_sas: str) -> list[str]:
+def list_container(container_sas: str, prefix: str = "") -> list[str]:
     """Every blob name in the container, following continuation markers.
 
     XML because that is what the REST API answers; the SDK that would hide it
     is exactly what the node cannot import. `<Name>` is the only element read,
     so a schema that grows around it does not matter.
+
+    `prefix` narrows it SERVER-SIDE, which is the difference between asking
+    about one run and paging through every rung of every run to find it.
     """
     import xml.etree.ElementTree as ET  # noqa: PLC0415 -- stdlib, only when listing
 
@@ -89,6 +92,8 @@ def list_container(container_sas: str) -> list[str]:
     marker = ""
     while True:
         url = f"{base.rstrip('/')}?restype=container&comp=list&{query}"
+        if prefix:
+            url += f"&prefix={urllib.parse.quote(prefix)}"
         if marker:
             url += f"&marker={urllib.parse.quote(marker)}"
         with urllib.request.urlopen(_request(url, "GET"), timeout=TIMEOUT_SECONDS) as response:

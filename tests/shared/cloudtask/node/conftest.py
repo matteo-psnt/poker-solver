@@ -58,6 +58,11 @@ def container(monkeypatch):
     )
     monkeypatch.setattr(blobstore, "put_bytes", _put)
     monkeypatch.setattr(blobstore, "read_object", lambda _s, name: store.get(name))
+    monkeypatch.setattr(
+        blobstore,
+        "list_container",
+        lambda _s, prefix="": sorted(n for n in store if n.startswith(prefix)),
+    )
     return store
 
 

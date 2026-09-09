@@ -322,16 +322,40 @@ def read_manifest(manifest: Path) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def fetch_metadata(source: Path, destination: Path) -> None:
-    """Everything that is not a snapshot: .run.json, metrics, eval records."""
+def fetch_metadata(source: Path, destination: Path, sas: str = "") -> None:
+    """Everything that is not a snapshot: the manifest, `.run.json`, the curve.
+
+    A MISSING SOURCE DIRECTORY IS NOT AN ERROR. This iterated the share
+    unconditionally, so once the share stopped holding runs every score died
+    three frames into the fetch with a `FileNotFoundError` naming an archive
+    path -- before the evaluator it was setting up had run at all.
+
+    The container is read SECOND so it wins: it is where a published run's
+    metadata is, and the share answers only while it still holds a copy. The
+    manifest matters most of what is here, because it is what the evaluator
+    resolves a rung's name through.
+    """
     destination.mkdir(parents=True, exist_ok=True)
-    for child in sorted(source.iterdir()):
-        if child.name.startswith(MARKER_PREFIX) or is_snapshot(child.name):
+    if source.is_dir():
+        for child in sorted(source.iterdir()):
+            if child.name.startswith(MARKER_PREFIX) or is_snapshot(child.name):
+                continue
+            if child.is_dir():
+                copy_tree(child, destination / child.name, update=False)
+            else:
+                copy_file(child, destination / child.name)
+    if not sas:
+        return
+    for name in blobstore.list_container(sas, f"{source.name}/"):
+        leaf = name.partition("/")[2]
+        if not leaf or leaf.startswith(MARKER_PREFIX) or is_snapshot(leaf):
             continue
-        if child.is_dir():
-            copy_tree(child, destination / child.name, update=False)
-        else:
-            copy_file(child, destination / child.name)
+        body = blobstore.read_object(sas, name)
+        if body is None:
+            continue
+        target = destination / leaf
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
 
 
 def fetch_snapshot(source: Path, destination: Path, name: str, sas: str = "") -> None:
@@ -414,7 +438,7 @@ def fetch_current_rung(source: Path, destination: Path, log: Log = _quiet, sas: 
     publish copies per directory -- so rungs this node never had are neither
     re-uploaded nor removed.
     """
-    fetch_metadata(source, destination)
+    fetch_metadata(source, destination, sas)
     body = published_manifest(source, sas)
     if (source / LEGACY_MANIFEST).is_file() and not body:
         raise FetchRefusedError(
@@ -585,7 +609,7 @@ def fetch_for_evaluation(
     a run whose manifest was repointed to the new format would have every rung
     "missing" here while sitting on the share untouched.
     """
-    fetch_metadata(source, destination)
+    fetch_metadata(source, destination, sas)
     ladder = _ladder_names(source, sas)
     fetched = []
     for rung in rungs:
