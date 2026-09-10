@@ -462,6 +462,15 @@ resource "azurerm_batch_pool" "pool" {
     EOT
   }
 
+  # ⚠️ REMOVING A MOUNT NEEDS POOL RECREATION, and `plan` does not say so.
+  # `mountConfiguration` is settable only at pool CREATE: Batch's update API
+  # does not carry it. Terraform plans the removal as "0 to add, 4 to change,
+  # 0 to destroy", the apply reports success, the START TASK half really does
+  # land -- and the mount is still there afterwards, so the next plan shows the
+  # same four changes forever. Measured 09-10. Until the pools are recreated
+  # (`-replace`, or destroy/create), a live node still mounts an EMPTY share
+  # and nothing reads it.
+  #
   # NO SMB MOUNT. Every store a node reaches is Blob over HTTPS on the stdlib:
   # rungs and manifests in `checkpoints`, abstractions in `abstractions`, the
   # log tail and profiles in `diagnostics`, all through SAS URLs sealed into the
