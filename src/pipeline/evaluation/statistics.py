@@ -8,7 +8,6 @@ for match results.
 from collections.abc import Sequence
 
 import numpy as np
-from scipy import stats
 
 
 def summarize_samples(
@@ -26,6 +25,11 @@ def summarize_samples(
     n = len(samples)
     if n < 2:
         raise ValueError("summarize_samples requires at least 2 samples.")
+
+    # DEFERRED: `scipy.stats` is ~340 ms to import, and `pipeline.services`
+    # reaches this module for every CLI command -- a reader that summarises
+    # nothing was paying it. All three uses are in this one function.
+    from scipy import stats  # noqa: PLC0415 -- see above
 
     values = np.asarray(samples, dtype=np.float64)
     mean = float(values.mean())
