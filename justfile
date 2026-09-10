@@ -108,13 +108,16 @@ serve-ssh:
 # yours -- `at`, the rung to stage and seat (without it both the reader and the
 # seat take the manifest head) -- and `rungs`, a comma-separated
 # `run[:at[:threshold]]` list of SHALLOWER blueprints, each staged and turned
-# into a `--rung` so the seat plays a depth ladder rather than one tree.
+# into a `--rung` so the seat plays a depth ladder rather than one tree -- and
+# `offtree=1`, which confines the resolver to hands that have left our tree,
+# the only place its edge was ever measured.
 #
 # The record's address rides along as $2: the box reads the run from Postgres
 # and has no Terraform of its own to ask.
-serve-deploy run code="" at="" rungs="" budget="":
+serve-deploy run code="" at="" rungs="" budget="" offtree="":
     ssh solver@$({{tfv}} output -raw public_ip) \
-        "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} bash -s" \
+        "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} \
+         RESOLVER_OFF_TREE={{offtree}} bash -s" \
         -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
            "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 
