@@ -84,9 +84,8 @@ def table_scale(game: Game, blueprint: ScorableBlueprint) -> TableScale:
     Refuses rather than approximates. A blind ratio that is not a whole number
     would put every bet size between two of our tree's rungs, and a depth we did
     not train is a different game -- both are worth a forfeited run far less
-    than they are worth a line saying which one happened. **Their game is 200 bb
-    and every blueprint we have is cut for 100**, so this is the guard that
-    fires until a 200 bb arm exists.
+    than they are worth a line saying which one happened. Their game is 200 bb, so
+    a 100 bb arm is refused here and a 200 bb one passes to the chip.
     """
     ours = blueprint.config.game
     if game.big_blind % ours.big_blind or game.small_blind % ours.small_blind:

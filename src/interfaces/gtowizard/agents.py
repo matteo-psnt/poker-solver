@@ -7,8 +7,8 @@ couple of thousand hands is what ground-truth-tests the wire encoding, the
 cumulative-bet convention and the hand loop -- with no blueprint involved, so a
 mismatch cannot be blamed on the strategy.
 
-A depth-mismatched blueprint is NOT such a test: at 200 bb every node is off our
-100 bb tree from the first action, and a bad score there separates nothing.
+A depth-mismatched blueprint is NOT such a test: a 100 bb arm at 200 bb is off
+our tree from the first action, and a bad score there separates nothing.
 """
 
 from __future__ import annotations
