@@ -260,8 +260,7 @@ def load_checkpoint(
     # per infoset are identical, only their addresses moved, so the load
     # permutes rather than refuses. Any other fingerprint still refuses.
     legacy = storage.tree.legacy_fingerprint()
-    translate = manifest.fingerprint == legacy
-    if manifest.fingerprint != expected and not translate:
+    if manifest.fingerprint not in (expected, legacy):
         raise FingerprintMismatchError(
             f"Checkpoint in {checkpoint_dir} was written against betting tree "
             f"{manifest.fingerprint}, but this storage indexes tree {expected}. "
@@ -285,7 +284,10 @@ def load_checkpoint(
     # Push the restriction DOWN to the read. The rung is one compressed object
     # now, so filtering after the fact would decompress every array and throw
     # most of them away -- which is the whole cost a play-only load avoids.
-    root = _open_snapshot(checkpoint_dir, entry, legacy if translate else expected, arrays)
+    #
+    # The rung decides its own vintage; the manifest check above only settles
+    # that this run belongs to this tree at all.
+    root, translate = _open_snapshot(checkpoint_dir, entry, expected, legacy, arrays)
 
     row_source, slot_source = _legacy_index_maps(storage.tree) if translate else (None, None)
     if translate:
@@ -318,24 +320,38 @@ def load_checkpoint(
 
 
 def _open_snapshot(
-    checkpoint_dir: Path, entry: dict, expected: str, names: Iterable[str] | None = None
-) -> dict[str, np.ndarray]:
-    """One rung's arrays, refusing any the manifest disagrees with.
+    checkpoint_dir: Path,
+    entry: dict,
+    current: str,
+    legacy: str,
+    names: Iterable[str] | None = None,
+) -> tuple[dict[str, np.ndarray], bool]:
+    """One rung's arrays, and whether they need permuting into the current layout.
+
+    THE VINTAGE IS THE SNAPSHOT'S OWN, NOT THE MANIFEST'S. A ladder written
+    across the v1->v2 layout change carries rungs of both, and the manifest's
+    fingerprint describes only the rung that was current when it was last
+    written -- so deciding from it refused every OLDER rung of such a run.
+    Measured 09-09: five published ladders, 18 rungs, and because the stranded
+    ones are always the early rungs it is the left half of a within-run
+    convergence curve, for the four 100M abstraction arms among others.
 
     THE NAME IS MAPPED, NOT TRUSTED. A manifest written before the format
-    changed still spells `static-N.zarr` and is never repointed -- rewriting
-    them would have mutated the durable share -- so `records.object_name` is
-    what turns the claim into the file that exists.
+    changed still spells `static-N.zarr` and is never repointed, so
+    `records.object_name` is what turns the claim into the file that exists.
     """
     path = Path(checkpoint_dir) / records.object_name(entry["zarr"])
     arrays, attrs = snapshot_format.read_snapshot(path, names)
     stored = attrs.get("fingerprint")
-    if stored != expected:
-        raise FingerprintMismatchError(
-            f"Snapshot {entry['zarr']} carries fingerprint {stored}, expected {expected}. "
-            "The manifest and the arrays disagree; the snapshot is corrupt."
-        )
-    return arrays
+    if stored == current:
+        return arrays, False
+    if stored == legacy:
+        return arrays, True
+    raise FingerprintMismatchError(
+        f"Snapshot {entry['zarr']} carries fingerprint {stored}, which is neither this "
+        f"tree ({current}) nor its v1 node-major layout ({legacy}). Loading it would "
+        "reinterpret every row as a different infoset."
+    )
 
 
 def read_strategy_sum(storage: StaticArrayStorage, checkpoint_dir: Path, iteration: int):
@@ -352,14 +368,13 @@ def read_strategy_sum(storage: StaticArrayStorage, checkpoint_dir: Path, iterati
         raise FileNotFoundError(f"No static checkpoint manifest in {checkpoint_dir}")
     expected = storage.tree.fingerprint()
     legacy = storage.tree.legacy_fingerprint()
-    translate = manifest.fingerprint == legacy
-    if manifest.fingerprint != expected and not translate:
+    if manifest.fingerprint not in (expected, legacy):
         raise FingerprintMismatchError(
             f"Checkpoint in {checkpoint_dir} was written against betting tree "
             f"{manifest.fingerprint}, but this storage indexes tree {expected}."
         )
-    root = _open_snapshot(
-        checkpoint_dir, manifest.entry_for(iteration), legacy if translate else expected
+    root, translate = _open_snapshot(
+        checkpoint_dir, manifest.entry_for(iteration), expected, legacy
     )
     values = root["strategy_sum"]
     if values.shape != storage.strategy_sum.shape:
