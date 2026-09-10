@@ -39,7 +39,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--runs-dir",
         default="/mnt/work/data/runs",
-        help="Where runs live on this box. Local disk, never the share.",
+        help="Where runs live on this box; the node's own runs directory by default.",
     )
     parser.add_argument("--at", type=int, default=None, help="Chart this iteration's checkpoint.")
     parser.add_argument(

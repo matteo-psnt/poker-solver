@@ -40,7 +40,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--runs-dir",
         default=str(NodePaths.from_environment().runs),
-        help="Where runs live on this box. Local disk, never the share.",
+        help="Where runs live on this box; the node's own runs directory by default.",
     )
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT})."

@@ -148,7 +148,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
     finally:
         watcher.stop()
     if code == 137:
-        log("KILLED (SIGKILL, not the guard -- suspect OOM); published rungs are on the share")
+        log("KILLED (SIGKILL, not the guard -- suspect OOM); published rungs are in the store")
     return code, None
 
 
