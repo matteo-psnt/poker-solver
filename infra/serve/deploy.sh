@@ -12,14 +12,16 @@
 # copies survive a deallocate because /mnt/work is a managed disk, which is what
 # makes waking the box a two-minute boot rather than a re-download.
 #
-# THE SHARE NO LONGER HOLDS CHECKPOINT BYTES. Measured 09-07: across the whole
-# archive there are zero `.ckpt.zst` objects and zero `.zarr` directories -- a
-# run directory is now its manifest, its loose result files and a completion
-# marker per rung. The bytes are one Blob object per rung in the `checkpoints`
-# container. So the record comes off the share and the RUNG comes off Blob, and
-# there is deliberately no share fallback: a fallback that cannot succeed turns
-# "this rung is not published" into 400 MB copied and a failure later inside the
-# loader.
+# THE SHARE IS GONE FROM THIS SCRIPT. Measured 09-10: `/mnt/shared` is mounted
+# and completely EMPTY -- zero archive entries, no abstraction directory. A run
+# is now its manifest, its loose metadata and one object per rung, all under
+# `<run>/` in the `checkpoints` container, with the record in Postgres.
+#
+# There is deliberately no share fallback anywhere below. A fallback that cannot
+# succeed turns "this is not published" into bytes copied and a failure later
+# inside the loader, and an empty listing reads as "nothing there" rather than
+# as "wrong store" -- which is how every share reader answered confidently and
+# wrongly when the share emptied underneath them.
 #
 # Idempotent by SIZE: a rung is re-fetched only when what is on disk does not
 # match what the container holds. Node-local state is not evidence of a complete
@@ -29,51 +31,35 @@ set -euo pipefail
 
 RUN="${1:-}"
 RECORD_DSN="${2:-}"
-if [ -z "$RUN" ] || [ -z "$RECORD_DSN" ]; then
-    echo "usage: deploy.sh <run-id> <record-dsn>   (just serve-deploy <run> supplies both)" >&2
+STORE_ACCOUNT="${3:-}"
+if [ -z "$RUN" ] || [ -z "$RECORD_DSN" ] || [ -z "$STORE_ACCOUNT" ]; then
+    echo "usage: deploy.sh <run-id> <record-dsn> <storage-account>" >&2
+    echo "       (just serve-deploy <run> supplies all three)" >&2
     exit 2
 fi
 
-SHARE=/mnt/shared
 WORK=/mnt/work
 IDLE="${IDLE_TIMEOUT:-1800}"
 
-if ! mountpoint -q "$SHARE"; then
-    echo "$SHARE is not mounted -- the box cannot see the store." >&2
-    exit 1
-fi
+# NO SHARE. It is empty and nothing writes to it: a run is its manifest, its
+# loose metadata and one object per rung, all under `<run>/` in the
+# `checkpoints` container, with the record in Postgres. The account name is an
+# ARGUMENT rather than read off the mount with `findmnt` -- the mount is being
+# removed, and deriving a store's name from a filesystem that is going away is
+# the same mistake as reading the run from it.
+#
+# The box reads Blob as ITSELF, the managed identity it already logs in with to
+# deallocate, so nothing here needs an account key. (It needs Storage Blob Data
+# Reader on the account.) That is also why this stays `az` rather than the
+# project's own `blob.py`: `CloudConfig.load()` wants Terraform, which the box
+# does not have -- the same reason the record DSN is passed in.
+az login --identity --output none
 
-# --------------------------------------------------------------------------- #
-# the run, resolved first
-# --------------------------------------------------------------------------- #
-# Before anything is copied: a typo'd fragment should cost a message, not a
-# 773 MB abstraction sync followed by a message. Matched as a FRAGMENT the way
-# every reader command does, since run ids differ only at the tail.
-matches=$(find "$SHARE/archive" -maxdepth 1 -type d -name "*${RUN}*" -printf '%f\n' 2>/dev/null || true)
-count=$(printf '%s' "$matches" | grep -c . || true)
-
-if [ "$count" -eq 0 ]; then
-    echo "No published run matching '$RUN'. Try: poker-solver runs" >&2
-    exit 1
-fi
-if [ "$count" -gt 1 ]; then
-    echo "'$RUN' matches more than one run:" >&2
-    printf '  %s\n' $matches >&2
-    exit 1
-fi
-RUN_ID="$matches"
-echo "==> run $RUN_ID"
 
 # --------------------------------------------------------------------------- #
 # code
 # --------------------------------------------------------------------------- #
-# Snapshots live in the store's `code` blob container, not on the share. The
-# account is read off the mount so nothing here hard-codes it, and the box
-# reads Blob as ITSELF -- the managed identity it already logs in with to
-# deallocate. (It needs Storage Blob Data Reader on the account for this.)
-STORE_ACCOUNT=$(findmnt -n -o SOURCE "$SHARE" | sed -E 's#^//([^.]+)\..*#\1#')
-az login --identity --output none
-
+# Snapshots live in the store's `code` blob container.
 # $CODE pins a snapshot; without it, the newest. Names sort lexicographically by
 # timestamp, which is what makes the last one the newest rather than merely last.
 #
@@ -120,6 +106,39 @@ mkdir -p "$WORK/data/combo_abstraction" "$WORK/data/runs"
 ln -sfn "$WORK/data" "$WORK/code/data"
 
 # --------------------------------------------------------------------------- #
+# the run, resolved first
+# --------------------------------------------------------------------------- #
+# Before anything is fetched: a typo'd fragment should cost a message, not an
+# abstraction sync followed by a message. One listing of run PREFIXES rather
+# than every object -- `--delimiter /` makes the container answer with the ~300
+# run names instead of the thousands of things inside them.
+#
+# Matched by `src.interfaces.run_names`, the same rule every reader uses and the
+# same one `pull_metadata` applies, so an ambiguous fragment gets the message it
+# gets everywhere else instead of a third hand-rolled copy of the rule.
+prefixes=$(az storage blob list --auth-mode login --account-name "$STORE_ACCOUNT" \
+    --container-name checkpoints --delimiter "/" --query "[].name" -o tsv)
+RUN_ID=$(RUN="$RUN" PREFIXES="$prefixes" PYTHONPATH="$WORK/code" python3 <<'PY'
+import os
+import sys
+
+from src.interfaces import run_names
+
+# The delimiter listing returns `<run>/`; the trailing slash is not part of the
+# name any reader knows.
+published = sorted({line.rstrip("/") for line in os.environ["PREFIXES"].split() if line})
+fragment = os.environ["RUN"]
+matches = run_names.matching(fragment, published)
+if len(matches) > 1:
+    sys.exit(run_names.ambiguous_message(fragment, matches))
+if not matches:
+    sys.exit(run_names.unknown_message(fragment, published))
+print(matches[0])
+PY
+)
+echo "==> run $RUN_ID"
+
+# --------------------------------------------------------------------------- #
 # the card abstraction
 # --------------------------------------------------------------------------- #
 # Abstractions moved off the share too: one `<name>.tar.zst` object each in the
@@ -163,20 +182,19 @@ stage_run() {
     local run="$1" at="$2" dest="$WORK/data/runs/$1"
     mkdir -p "$dest"
     chmod -R u+w "$dest" 2>/dev/null || true
-    # THE MANIFEST: container first, share second -- the same order and the same
-    # reason as a rung. It now lives beside the rungs it names, and the share
-    # copy, while it still lands, is explicitly slated to stop. Reading a store
-    # that is being emptied is the bug this script has already hit twice, so
-    # take the one that is becoming authoritative and keep the other as the
-    # fallback rather than the source.
-    if ! az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+    # THE MANIFEST AND THE LOOSE METADATA, both from the container: they live
+    # under `<run>/` beside the rungs they describe. There is no share fallback
+    # because there is no share -- it is empty and nothing writes to it.
+    az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
         --container-name checkpoints --name "$run/STATIC_CHECKPOINT.json" \
-        --file "$dest/STATIC_CHECKPOINT.json" --output none 2>/dev/null; then
-        cp -u "$SHARE/archive/$run/STATIC_CHECKPOINT.json" "$dest/"
-    fi
-    cp -ru "$SHARE/archive/$run/evals" "$dest/" 2>/dev/null || true
+        --file "$dest/STATIC_CHECKPOINT.json" --output none
+    # Best-effort: a run legitimately may not have published every one of these,
+    # and none of them is needed to LOAD a checkpoint -- they are what the
+    # reader commands render. A missing one must not fail a deploy.
     for small in run.jsonl .run.json progress.jsonl; do
-        cp -u "$SHARE/archive/$run/$small" "$dest/" 2>/dev/null || true
+        az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+            --container-name checkpoints --name "$run/$small" \
+            --file "$dest/$small" --output none 2>/dev/null || true
     done
 
     # THE NAME IS MAPPED, NOT BUILT. A manifest still spells `static-N.zarr` and
