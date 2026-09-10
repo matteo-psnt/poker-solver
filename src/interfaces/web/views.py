@@ -73,15 +73,16 @@ def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
     A COPY -- the payload is memoised and shared with `/api/tasks`.
     """
     payload = part.get("payload")
-    if not isinstance(payload, dict) or "rows" not in payload:
+    if not isinstance(payload, tasks.TasksPayload):
         return part
-    rows = payload["rows"]
-    recent = rows[-LIVE_LIMIT:] if LIVE_LIMIT > 0 else rows
-    kept = [row for row in rows if not row.get("ended_at") or row in recent]
-    return {
-        **part,
-        "payload": {**payload, "rows": kept, "hidden_rows": len(rows) - len(kept)},
-    }
+    rows = payload.rows
+    # "Recent" is a POSITION, so ask for the position. The membership test this
+    # replaced compared each of 15,684 rows against the last ten -- and against
+    # models rather than dicts that would be a field-by-field compare each time.
+    cut = len(rows) - LIVE_LIMIT if LIVE_LIMIT > 0 else 0
+    kept = [row for index, row in enumerate(rows) if not row.ended_at or index >= cut]
+    updated = {"rows": kept, "hidden_rows": len(rows) - len(kept)}
+    return {**part, "payload": payload.model_copy(update=updated)}
 
 
 def run(run_id: str, *, invoke: Invoke | None = None) -> dict[str, Any]:
@@ -165,15 +166,13 @@ def _summarised(part: dict[str, Any]) -> dict[str, Any]:
     distinguishable from a join that is broken.
     """
     payload = part.get("payload")
-    if not isinstance(payload, dict) or "rows" not in payload:
+    if not isinstance(payload, tasks.TasksPayload):
         return part
-    summary = tasks.TasksSummary(
-        source_rows=len(payload["rows"]), reconciled=payload.get("reconciled")
-    )
-    return {**part, "payload": summary.model_dump()}
+    summary = tasks.TasksSummary(source_rows=len(payload.rows), reconciled=payload.reconciled)
+    return {**part, "payload": summary}
 
 
-def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[tasks.TaskRow]:
     """The task-log rows belonging to one run.
 
     The join is `task.run_id`, and it deliberately crosses jobs: a run outlives the
@@ -188,9 +187,9 @@ def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[dict[str, 
     failure and must not try.
     """
     available = payloads(parts).get("tasks")
-    if available is None:
+    if not isinstance(available, tasks.TasksPayload):
         return []
-    return [row for row in available.get("rows", []) if row.get("run_id") == run_id]
+    return [row for row in available.rows if row.run_id == run_id]
 
 
 def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -205,10 +204,6 @@ def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:
     no run, so they cannot answer a question about one.
     """
     available = payloads(parts).get("tasks")
-    if available is None:
+    if not isinstance(available, tasks.TasksPayload):
         return {}
-    return {
-        row["task_id"]: row["run_id"]
-        for row in available.get("rows", [])
-        if row.get("task_id") and row.get("run_id")
-    }
+    return {row.task_id: row.run_id for row in available.rows if row.task_id and row.run_id}

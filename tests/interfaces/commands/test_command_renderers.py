@@ -667,14 +667,13 @@ PAYLOADS["status"] = StatusPayload(
     at="2026-08-03T00:24:48-07:00",
     elapsed_seconds=22.1,
     limit=10,
-    # DUMPED, because that is what a panel actually holds: `_compose._answer`
-    # serialises each part so a view can join over plain data. Embedding the
-    # models here instead made this fixture agree with itself and with nothing
-    # else -- `status` crashed in production on exactly this difference while
-    # rendering the fixture cleanly.
+    # The MODELS, because that is what a panel actually holds: the fan-out hands
+    # on whatever the command returned. This fixture held dumps of them once,
+    # agreeing with itself and with nothing else, and `status` crashed in
+    # production on exactly that difference while rendering the fixture cleanly.
     panels={
-        "pool": StatusPanel(payload=PAYLOADS["pool-status"].model_dump()),
-        "jobs": StatusPanel(payload=PAYLOADS["jobs"].model_dump()),
+        "pool": StatusPanel(payload=PAYLOADS["pool-status"]),
+        "jobs": StatusPanel(payload=PAYLOADS["jobs"]),
         "tasks": StatusPanel(error="Azure rejected the credential — try `az login`."),
     },
 )

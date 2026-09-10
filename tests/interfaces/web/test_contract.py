@@ -157,7 +157,7 @@ class TestTheViewEnvelopes:
     """A view's own shape, which no command owns and so nothing else pins."""
 
     def _part(self, op: str) -> dict:
-        """One answered part. Dumped, because that is how `_compose` ships it."""
+        """One answered part, as JSON -- which is what a browser validates."""
         payload = PAYLOADS[op]
         dump = getattr(payload, "model_dump", None)
         return {"payload": dump() if callable(dump) else payload, "error": None}

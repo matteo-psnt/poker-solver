@@ -16,16 +16,29 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from src.interfaces.commands import tasks as tasks_command
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
 from src.interfaces.web import app as web_app
 from src.interfaces.web import views
+from src.shared.task_history import TaskRow
 
+
+def _task(task_id: str, run_id: str = "", **fields: Any) -> TaskRow:
+    return TaskRow(
+        task_id=task_id, attempt=0, run_id=run_id, cause="ok", cause_source="node", **fields
+    )
+
+
+# The REAL model, because that is what the command returns and what the joins
+# now read. Plain dicts here made the fixture agree with itself and with
+# nothing else -- every join went on passing while reading a shape production
+# never produces.
 TASK_ROWS = [
-    {"task_id": "t1", "run_id": "run-a", "cause": "ok"},
-    {"task_id": "t2", "run_id": "run-b", "cause": "died"},
-    {"task_id": "t3", "run_id": "run-a", "cause": "ok"},
-    {"task_id": "t4", "run_id": None, "cause": "ok"},
+    _task("t1", "run-a"),
+    _task("t2", "run-b"),
+    _task("t3", "run-a"),
+    _task("t4"),  # belongs to no run
 ]
 
 RUN_ROWS = [
@@ -40,12 +53,12 @@ RUN_ROWS = [
 def answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
     """Record every invoke and answer with a plausible payload for its command."""
     calls: list[tuple[str, dict[str, Any]]] = []
-    bodies: dict[str, dict[str, Any]] = {
-        "tasks": {"op": "tasks", "rows": TASK_ROWS},
+    bodies: dict[str, Any] = {
+        "tasks": tasks_command.TasksPayload(rows=TASK_ROWS),
         "runs": {"op": "runs", "runs": RUN_ROWS},
     }
 
-    def _invoke(self: Command, **kwargs: Any) -> dict[str, Any]:
+    def _invoke(self: Command, **kwargs: Any) -> Any:
         calls.append((self.name, kwargs))
         return bodies.get(self.name, {"op": self.name, "seen": kwargs})
 
@@ -56,10 +69,12 @@ def answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
 def _failing(monkeypatch: pytest.MonkeyPatch, *, only: str) -> None:
     """Make ONE command unavailable, leaving the others answering."""
 
-    def _invoke(self: Command, **kwargs: Any) -> dict[str, Any]:
+    def _invoke(self: Command, **kwargs: Any) -> Any:
         if self.name == only:
             raise CommandError(f"{only} is unavailable")
-        return {"op": self.name, "rows": TASK_ROWS, "runs": RUN_ROWS}
+        if self.name == "tasks":
+            return tasks_command.TasksPayload(rows=TASK_ROWS)
+        return {"op": self.name, "runs": RUN_ROWS}
 
     monkeypatch.setattr(Command, "invoke", _invoke)
 
@@ -73,21 +88,20 @@ class TestOneScreenIsOneRequest:
     def test_now_keeps_every_running_task_and_the_recent_ten(self, monkeypatch):
         """Eleven of twenty-one running tasks had no progress bar: the part was
         cut to the last ten rows, and a running task is not necessarily recent."""
-        rows: list[dict[str, str | None]] = [
-            {"task_id": f"old-{i}", "ended_at": "2026-08-01"} for i in range(30)
-        ]
-        rows += [{"task_id": f"live-{i}", "ended_at": None} for i in range(21)]
-        rows += [{"task_id": f"done-{i}", "ended_at": "2026-08-22"} for i in range(10)]
+        rows = [_task(f"old-{i}", ended_at="2026-08-01") for i in range(30)]
+        rows += [_task(f"live-{i}") for i in range(21)]
+        rows += [_task(f"done-{i}", ended_at="2026-08-22") for i in range(10)]
+        payload = tasks_command.TasksPayload(rows=rows)
 
-        def _invoke(self: Command, **kwargs: Any) -> dict[str, Any]:
-            return {"op": self.name, "rows": rows} if self.name == "tasks" else {"op": self.name}
+        def _invoke(self: Command, **kwargs: Any) -> Any:
+            return payload if self.name == "tasks" else {"op": self.name}
 
         monkeypatch.setattr(Command, "invoke", _invoke)
-        kept = [row["task_id"] for row in views.now()["parts"]["tasks"]["payload"]["rows"]]
+        kept = [row.task_id for row in views.now()["parts"]["tasks"]["payload"].rows]
         assert [t for t in kept if t.startswith("live-")] == [f"live-{i}" for i in range(21)]
         assert [t for t in kept if t.startswith("done-")] == [f"done-{i}" for i in range(10)]
         assert not any(t.startswith("old-") for t in kept)
-        assert len(rows) == 61, "the memoised payload was trimmed in place"
+        assert len(payload.rows) == 61, "the memoised payload was trimmed in place"
 
     def test_a_run_page_is_five_questions_in_one(self, answers):
         composed = views.run("run-a")
@@ -123,11 +137,11 @@ class TestTheJoins:
         """`tasks` has no `--run` flag, so this join is the view's own work --
         and it is the one the browser used to do after downloading everything."""
         composed = views.run("run-a")
-        assert [row["task_id"] for row in composed["run_tasks"]] == ["t1", "t3"]
+        assert [row.task_id for row in composed["run_tasks"]] == ["t1", "t3"]
 
     def test_a_task_belonging_to_no_run_is_not_swept_in(self, answers):
         composed = views.run("run-a")
-        assert all(row["run_id"] == "run-a" for row in composed["run_tasks"])
+        assert all(row.run_id == "run-a" for row in composed["run_tasks"])
 
     def test_the_full_task_log_does_not_go_on_the_wire(self, answers):
         """The whole point of joining here. Filtering server-side while still
@@ -136,9 +150,10 @@ class TestTheJoins:
         composed = views.run("run-a")
         # No `rows` AT ALL, not an empty one: the trimmed part is a
         # `TasksSummary`, which has no such field for a page to misread.
-        assert "rows" not in composed["parts"]["tasks"]["payload"]
-        assert composed["parts"]["tasks"]["payload"]["source_rows"] == 4
-        assert composed["parts"]["tasks"]["payload"]["source_rows"] == len(TASK_ROWS)
+        summary = composed["parts"]["tasks"]["payload"]
+        assert not hasattr(summary, "rows")
+        assert summary.source_rows == 4
+        assert summary.source_rows == len(TASK_ROWS)
         assert len(composed["run_tasks"]) == 2
 
     def test_trimming_a_part_does_not_edit_what_the_command_returned(self, answers):
@@ -153,9 +168,9 @@ class TestTheJoins:
         """
         first = views.run("run-a")
         second = views.run("run-b")
-        assert [row["task_id"] for row in first["run_tasks"]] == ["t1", "t3"]
-        assert [row["task_id"] for row in second["run_tasks"]] == ["t2"]
-        assert TASK_ROWS[0]["task_id"] == "t1", "the module-level fixture was mutated"
+        assert [row.task_id for row in first["run_tasks"]] == ["t1", "t3"]
+        assert [row.task_id for row in second["run_tasks"]] == ["t2"]
+        assert TASK_ROWS[0].task_id == "t1", "the module-level fixture was mutated"
 
     def test_the_discarded_part_still_carries_its_failure(self, monkeypatch):
         """Trimming the rows must not trim the reason: `_summarise_rows` runs
@@ -171,8 +186,9 @@ class TestTheJoins:
         assert composed["task_runs"] == {"t1": "run-a", "t2": "run-b", "t3": "run-a"}
         # No `rows` AT ALL, not an empty one: the trimmed part is a
         # `TasksSummary`, which has no such field for a page to misread.
-        assert "rows" not in composed["parts"]["tasks"]["payload"]
-        assert composed["parts"]["tasks"]["payload"]["source_rows"] == 4
+        summary = composed["parts"]["tasks"]["payload"]
+        assert not hasattr(summary, "rows")
+        assert summary.source_rows == 4
 
     def test_a_task_with_no_run_is_left_out_of_the_projection(self, answers):
         """Mapped to null it would look like a run named `null` that has tasks."""

@@ -75,13 +75,15 @@ def _answer(part: Part, invoke: Invoke) -> dict[str, Any]:
     started = time.perf_counter()
     payload, failure = attempt(lambda: invoke(part.command, part.arguments))
     elapsed = time.perf_counter() - started
-    # Dumped, so a join reads plain data. A view cross-references payloads it did
-    # not produce and cannot be typed against all of them at once; the models are
-    # what the COMMANDS are checked against, and the envelope is checked by
-    # `contract.py` on the way out.
-    dump = getattr(payload, "model_dump", None)
     return {
-        "payload": dump() if callable(dump) else payload,
+        # The command's own answer, UNTOUCHED. It used to be dumped here so a
+        # join could read plain data, which cost a full round trip out of the
+        # models and back: 36 ms of a 50 ms compose went into dumping 15,684
+        # task rows that the join then reduced to a count. `jsonio` already
+        # serialises a model wherever it appears, so the dump bought a join
+        # `dict` access instead of an attribute access -- and cost the static
+        # check that says a renderer is being handed the shape it declares.
+        "payload": payload,
         "error": failure.message if failure else None,
         # The fan-out is only as fast as its slowest part, and WHICH part that is
         # was not answerable from the payload: `elapsed_seconds` gives the total,

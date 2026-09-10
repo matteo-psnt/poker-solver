@@ -1,8 +1,8 @@
 """The console's HTTP layer: commands, and composed views of commands.
 
 **No new read path.** Every endpoint body reaches a ``Command.invoke`` and a
-memo -- directly through :func:`answer`, or through :func:`view` for a screen
-that is several commands at once. That is the whole design, and it is the
+memo -- through :func:`answer` for one command, :func:`view` for a screen that
+is several at once, or :func:`uncached` for a write that must not be memoised. That is the whole design, and it is the
 property the previous browser UI lacked: `fbcf9a8` carried
 `api/chart_service.py`, `api/play_service.py` and `chart/data.py` -- a second way
 to ask questions the CLI already answered, which drifted from it and then
@@ -72,7 +72,7 @@ from src.interfaces.web.cache import TtlCache
 from src.shared import jsonio, repo
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
     from src.interfaces.commands._compose import Invoke
@@ -205,26 +205,27 @@ class PushCodeBody(BaseModel):
     root: str | None = None
 
 
-def _served(
-    cache: TtlCache,
-    key: tuple[Any, ...],
-    produce: Callable[[], Any],
-    *,
-    serve_stale_for: float = 0.0,
-    force: bool = False,
-) -> JSONResponse:
-    """One memoised answer, with its failures mapped onto status codes.
+def _served(produce: Callable[[], Any]) -> JSONResponse:
+    """One answer, with its failures mapped onto status codes.
 
     Failures are deliberately NOT cached: a repeated 503 costs a repeated cloud
     read, and the alternative keeps serving "Azure is down" for the whole TTL
     after `az login` has fixed it.
     """
-    payload, failure = attempt(
-        lambda: cache.get(key, produce, serve_stale_for=serve_stale_for, force=force)
-    )
+    payload, failure = attempt(produce)
     if failure is not None:
         return PayloadResponse({"error": failure.message}, status_code=_STATUS[failure.kind])
     return PayloadResponse(payload)
+
+
+def memo_key(command: Command, arguments: Mapping[str, Any]) -> tuple[Any, ...]:
+    """How a command's answer is keyed. THE definition, and there is one.
+
+    A view's parts and the bare endpoint for the same command must land on the
+    same entry -- sharing it is the whole point -- and a second copy of this
+    expression is how they would silently stop.
+    """
+    return (command.name, tuple(sorted(arguments.items())))
 
 
 def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
@@ -239,8 +240,19 @@ def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
     The cache is passed in rather than reached for, so two apps in one process (a
     test and its subject) cannot serve each other's answers.
     """
-    key = (command.name, tuple(sorted(kwargs.items())))
-    return _served(cache, key, lambda: command.invoke(**kwargs))
+    return _served(lambda: cache.get(memo_key(command, kwargs), lambda: command.invoke(**kwargs)))
+
+
+def uncached(command: Command, /, **kwargs: Any) -> JSONResponse:
+    """Run one command and answer with it, memoising nothing.
+
+    Every write, and the two reads that watch a machine change state. Building a
+    throwaway zero-TTL memo per request in order not to use it is what this
+    replaced -- which read as a tuning choice rather than as the correctness
+    rule it is: two identical `submit` bodies fifteen seconds apart are two runs
+    someone wants, and a dispatch must not be made to look idempotent.
+    """
+    return _served(lambda: command.invoke(**kwargs))
 
 
 def _warm_record() -> None:
@@ -351,7 +363,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/tasks/{task_id}/profile", response_model=contract.Profile, responses=ERRORS)
     def _profile(task_id: str, seconds: int = 30) -> JSONResponse:
-        return answer(TtlCache(0.0), profile.COMMAND, task=task_id, seconds=seconds, no_wait=True)
+        return uncached(profile.COMMAND, task=task_id, seconds=seconds, no_wait=True)
 
     # A local directory read, and the only endpoint here that touches neither
     # Azure nor the share. It is what makes the dispatch form offerable at all:
@@ -377,25 +389,24 @@ def create_app() -> FastAPI:
         "/api/tasks/{job_id}/{task_id}/cancel", response_model=contract.Cancelled, responses=ERRORS
     )
     def _cancel(job_id: str, task_id: str) -> JSONResponse:
-        return answer(TtlCache(0.0), cancel.COMMAND, job=job_id, task=task_id)
+        return uncached(cancel.COMMAND, job=job_id, task=task_id)
 
-    # `TtlCache(0.0)`, every one: two identical `submit` bodies fifteen seconds
-    # apart are two runs someone wants, and a dispatch must not be made to look
-    # idempotent.
+    # `uncached`, every one: see its docstring for why a dispatch must not be
+    # made to look idempotent.
 
     @app.post("/api/submit", response_model=contract.SubmitPayload, responses=ERRORS)
     def _submit(body: SubmitBody) -> JSONResponse:
-        return answer(TtlCache(0.0), submit.COMMAND, **given(body))
+        return uncached(submit.COMMAND, **given(body))
 
     @app.post("/api/score", response_model=contract.ScorePayload, responses=ERRORS)
     def _score(body: ScoreBody) -> JSONResponse:
-        return answer(TtlCache(0.0), score.COMMAND, **given(body))
+        return uncached(score.COMMAND, **given(body))
 
     @app.post(
         "/api/precompute", response_model=contract.PrecomputeDispatchPayload, responses=ERRORS
     )
     def _precompute(body: PrecomputeBody) -> JSONResponse:
-        return answer(TtlCache(0.0), submit_precompute.COMMAND, **given(body))
+        return uncached(submit_precompute.COMMAND, **given(body))
 
     # `push-code` reads a tree on the machine RUNNING THIS SERVER, which is the
     # one fact about it a browser hides. `--root` defaults to this checkout, so
@@ -403,9 +414,9 @@ def create_app() -> FastAPI:
     # the payload names what it sealed, which is what the page shows back.
     @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
     def _push_code(body: PushCodeBody) -> JSONResponse:
-        return answer(TtlCache(0.0), push_code.COMMAND, **given(body))
+        return uncached(push_code.COMMAND, **given(body))
 
-    # These three ARE commands, so they go through `answer` like the rest -- the
+    # These three ARE commands, so they go through the same seam as the rest -- the
     # button and `poker-solver serve-box` are then the same code path, which is
     # the property that stops a second control surface existing. Not cached:
     # asking whether the box is up must not be answered from 15 seconds ago while
@@ -419,15 +430,15 @@ def create_app() -> FastAPI:
     # makes the set read as though it were doing something else.
     @app.get("/api/box", response_model=contract.Box, responses=ERRORS)
     def _box() -> JSONResponse:
-        return answer(TtlCache(0.0), serve_box.COMMAND, action="status")
+        return uncached(serve_box.COMMAND, action="status")
 
     @app.post("/api/box/start", response_model=contract.Box, responses=ERRORS)
     def _box_start() -> JSONResponse:
-        return answer(TtlCache(0.0), serve_box.COMMAND, action="start")
+        return uncached(serve_box.COMMAND, action="start")
 
     @app.post("/api/box/stop", response_model=contract.Box, responses=ERRORS)
     def _box_stop() -> JSONResponse:
-        return answer(TtlCache(0.0), serve_box.COMMAND, action="stop")
+        return uncached(serve_box.COMMAND, action="stop")
 
     # Several commands fanned out concurrently and joined -- served through the
     # same memo and the same failure ladder as a single command, so a screen is
@@ -448,8 +459,7 @@ def create_app() -> FastAPI:
         The parts of a view are commands the server already caches, and the
         fan-out used to re-run them: `tasks` is a 15,684-row read and a 0.94s
         join, so clicking through five runs paid it five times while
-        `/api/tasks` served the identical answer from cache. Keyed exactly as
-        `answer` keys it, so the two share entries rather than shadowing.
+        `/api/tasks` served the identical answer from cache.
 
         ``force`` RIDES ALONG, because the refresh button has to reach the
         parts: memoising them and not forcing them made `?fresh=true` re-run the
@@ -460,7 +470,7 @@ def create_app() -> FastAPI:
 
         def invoke(command: Command, arguments: dict[str, Any]) -> Any:
             return cache.get(
-                (command.name, tuple(sorted(arguments.items()))),
+                memo_key(command, arguments),
                 lambda: command.invoke(**arguments),
                 force=force,
             )
@@ -468,12 +478,19 @@ def create_app() -> FastAPI:
         return invoke
 
     def view(build: Any, *key: str, fresh: bool = False) -> JSONResponse:
+        # Two key shapes in ONE memo: a composed screen under its own name, its
+        # parts under the commands they are. The outer entry is what carries
+        # `at` -- a view served stale says how old it is, which it could not if
+        # only the parts were held and the envelope were rebuilt fresh over
+        # them. Composing over warm parts is 1.6 ms, so this layer is bought for
+        # that honesty rather than for speed.
         return _served(
-            cache,
-            (build.__name__, key),
-            lambda: build(*key, invoke=_memoised(force=fresh)),
-            serve_stale_for=0.0 if fresh else VIEW_STALE_GRACE_SECONDS,
-            force=fresh,
+            lambda: cache.get(
+                (build.__name__, key),
+                lambda: build(*key, invoke=_memoised(force=fresh)),
+                serve_stale_for=0.0 if fresh else VIEW_STALE_GRACE_SECONDS,
+                force=fresh,
+            )
         )
 
     @app.get("/api/view/now", response_model=contract.NowView, responses=ERRORS)
@@ -488,10 +505,9 @@ def create_app() -> FastAPI:
     def _view_run(run_id: str, fresh: bool = False) -> JSONResponse:
         return view(views.run, run_id, fresh=fresh)
 
-    # Not `answer(...)`: these are not commands and there is nothing to memoise
-    # here. The blueprint server owns one loaded run and answers in
-    # milliseconds, so a TTL cache would only serve a stale grid after a caller
-    # walked to a different node.
+    # Not a command, so there is nothing to memoise here. The blueprint server
+    # owns one loaded run and answers in milliseconds, so a TTL cache would only
+    # serve a stale grid after a caller walked to a different node.
     blueprint_proxy.mount(app)
 
     _mount_console(app)

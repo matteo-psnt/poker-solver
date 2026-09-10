@@ -34,21 +34,30 @@ TREE = ast.parse(APP.read_text())
 COMMON = {"json", "log_level", "help"}
 
 
+# Where the `<module>.COMMAND` argument sits in each of the two spellings:
+# `answer` takes the memo first, `uncached` has no memo to take.
+COMMAND_ARGUMENT = {"answer": 1, "uncached": 0}
+
+
 def _answer_calls() -> list[ast.Call]:
-    """Every ``answer(cache, <module>.COMMAND, ...)`` call in `app.py`."""
-    return [
-        node
-        for node in ast.walk(TREE)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "answer"
-        and len(node.args) >= 2
-        and isinstance(node.args[1], ast.Attribute)
-    ]
+    """Every call in `app.py` that hands a command to an endpoint."""
+    calls = []
+    for node in ast.walk(TREE):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        index = COMMAND_ARGUMENT.get(node.func.id)
+        if (
+            index is not None
+            and len(node.args) > index
+            and isinstance(node.args[index], ast.Attribute)
+        ):
+            calls.append(node)
+    return calls
 
 
 def _command_of(call: ast.Call) -> str:
-    module = call.args[1].value  # ty: ignore[unresolved-attribute]
+    index = COMMAND_ARGUMENT[call.func.id]  # ty: ignore[unresolved-attribute]
+    module = call.args[index].value  # ty: ignore[unresolved-attribute]
     return module.id.replace("_", "-")
 
 
@@ -66,8 +75,8 @@ MODELS: dict[str, ast.ClassDef] = {
 def _bodies() -> dict[str, str]:
     """``request-model name -> command name``, for each POST that splats a body.
 
-    The shape is always ``answer(TtlCache(0.0), <module>.COMMAND, **given(body))``
-    inside a handler whose parameters include one annotated with the model.
+    The shape is always ``uncached(<module>.COMMAND, **given(body))`` inside a
+    handler whose parameters include one annotated with the model.
 
     Only annotations naming a class declared in `app.py` count. A handler is free
     to take a second parameter -- a path segment, a query flag -- and reading

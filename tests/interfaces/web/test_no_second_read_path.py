@@ -16,9 +16,9 @@ Deriving answers was. So the rule is now:
 
     **The web layer may COMPOSE command payloads. It may not COMPUTE one.**
 
-which is checked as two things here: an endpoint gets its data from `answer` or
-`view` and nowhere else, and `views.py` reaches the outside world only through
-the command registry. A join in `views.py` may filter, group and
+which is checked as two things here: an endpoint gets its data from one of
+`ANSWERING` and nowhere else, and `views.py` reaches the outside world only
+through the command registry. A join in `views.py` may filter, group and
 cross-reference; the moment it needs a quantity no command can answer, it needs
 a command first.
 
@@ -46,8 +46,14 @@ VIEW_IMPORTS = {
 }
 
 
+# The three ways an endpoint is allowed to get its data, all of which end at
+# `Command.invoke`: one command memoised, one command not memoised (a write, or
+# a read watching a machine change state), and several composed.
+ANSWERING = {"answer", "uncached", "view"}
+
+
 def test_every_endpoint_answers_through_a_command():
-    """Each route body must reach `answer(...)` or `view(...)`, and nothing else.
+    """Each route body must reach one of `ANSWERING`, and nothing else.
 
     Catches the plausible-looking regression: an endpoint that assembles a
     response itself because the shape it wanted was 'almost' what a command
@@ -76,10 +82,10 @@ def test_every_endpoint_answers_through_a_command():
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
         # `_unbuilt` and `_spa` serve the page, not data; they answer nothing.
-        if not (calls & {"answer", "view"}) and route.name not in {"_unbuilt", "_spa"}:
+        if not (calls & ANSWERING) and route.name not in {"_unbuilt", "_spa"}:
             offenders.append(route.name)
 
-    assert not offenders, f"these endpoints go through neither `answer()` nor `view()`: {offenders}"
+    assert not offenders, f"these endpoints reach none of {sorted(ANSWERING)}: {offenders}"
 
 
 def test_views_reach_the_world_only_through_commands():

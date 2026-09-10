@@ -78,20 +78,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+type PanelPayload = pool_status.PoolPayload | jobs.JobsPayload | tasks.TasksPayload
+"""What the three panels answer. Naming them is not a fourth place that has to
+know which panels exist -- `PANELS` and `_render_panel` are the same place, and
+this is what lets the checker pair each payload with the renderer that owns it."""
+
+
 class StatusPanel(BaseModel):
     """One panel's answer, or the reason there is not one.
 
     Exactly one of these is set. A panel that failed keeps its place so the
     screen greys one heading and keeps the rest -- which is the property the
     whole fan-out exists for, and it disappears if a failed panel is omitted.
-
-    `payload` is a plain dict rather than a union of the three panel models: it
-    arrives dumped from `_compose`, this command serves no endpoint, and naming
-    the three here would be a fourth place that has to know which panels exist.
-    `_render_panel` is where each is turned back into its own type.
     """
 
-    payload: dict[str, Any] | None = None
+    payload: PanelPayload | None = None
     error: str | None = None
 
 
@@ -177,27 +178,23 @@ PANEL_TITLES: dict[str, str] = {
 }
 
 
-def _render_panel(name: str, payload: dict[str, Any]) -> None:
-    """Hand one panel to the command that owns it, as that command's model.
+def _render_panel(payload: PanelPayload) -> None:
+    """Hand one panel to the command that owns it.
 
-    Spelled out rather than looked up in a table, and the table is what this
-    replaced. `PANEL_RENDERERS` was a ``dict[str, Any]``, so when the panel
-    renderers were converted to take models the checker could not see that this
-    was still passing them the dict `_compose` produces -- `status` crashed on
-    its first panel and `ty` had nothing to say. Written this way each call is
-    checked against the renderer's own parameter type.
-
-    Re-validating rather than keeping the model is deliberate: `gather` is the
-    entry point for any surface, and `--json` consumers want the payload, so the
-    fan-out dumps. Rebuilding here costs one validation per panel per refresh
-    and keeps exactly one shape crossing that seam.
+    Dispatched on the payload's TYPE rather than on the panel's name, which is
+    what makes handing a renderer the wrong shape unrepresentable. It was not:
+    `PANEL_RENDERERS` was a ``dict[str, Any]``, so when the renderers were
+    converted to take models the checker could not see that this still passed
+    them a dict -- `status` crashed on its first panel and `ty` had nothing to
+    say. The name-keyed version that replaced it fixed the call sites but kept
+    the seam, re-validating each panel out of a dict on every refresh.
     """
-    if name == "pool":
-        pool_status.render(pool_status.PoolPayload.model_validate(payload))
-    elif name == "jobs":
-        jobs.render(jobs.JobsPayload.model_validate(payload))
-    elif name == "tasks":
-        tasks.render(tasks.TasksPayload.model_validate(payload))
+    if isinstance(payload, pool_status.PoolPayload):
+        pool_status.render(payload)
+    elif isinstance(payload, jobs.JobsPayload):
+        jobs.render(payload)
+    else:
+        tasks.render(payload)
 
 
 def _render_once(payload: StatusPayload) -> None:
@@ -214,7 +211,7 @@ def _render_once(payload: StatusPayload) -> None:
         if panel.error or panel.payload is None:
             print(f"  unavailable: {panel.error}")
             continue
-        _render_panel(name, panel.payload)
+        _render_panel(panel.payload)
 
 
 def render(payload: StatusPayload) -> None:
