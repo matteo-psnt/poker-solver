@@ -386,10 +386,6 @@ def solve_subgame(
         raise ValueError("Subgame tree has no root actions.")
 
     evaluators = _sample_runout_evaluators(root.state, num_runouts, rng)
-    # Per-combo count of runouts where the combo is alive (for averaging).
-    alive_count = np.zeros(NUM_COMBOS, dtype=np.float64)
-    for evaluator in evaluators:
-        alive_count[evaluator.alive] += 1.0
 
     node_data: dict[int, _NodeData] = {}
     leaf_specs: dict[int, _LeafSpec] = {}
@@ -412,7 +408,6 @@ def solve_subgame(
     ctx = _PassContext(
         hero=hero,
         evaluators=evaluators,
-        alive_count=alive_count,
         node_data=node_data,
         leaf_specs=leaf_specs,
         continuation=continuation,
@@ -462,7 +457,6 @@ class _PassContext:
 
     hero: int
     evaluators: list[RunoutEvaluator]
-    alive_count: np.ndarray
     node_data: dict[int, _NodeData]
     leaf_specs: dict[int, _LeafSpec]
     continuation: Continuation = CHECK_DOWN
@@ -622,18 +616,26 @@ def _leaf_values(
     extra = continuation.pot_fraction * spec.pot
     pot = spec.pot + 2.0 * extra
     invested = (spec.invested[0] + extra, spec.invested[1] + extra)
-    v_hero = np.zeros(NUM_COMBOS)
-    v_opp = np.zeros(NUM_COMBOS)
+    # A runout deals two more cards, so the opponent mass that survives it falls
+    # ~8.4% short of the root-board mass a FOLD leaf is scaled by -- and the
+    # regret update compares the two directly. So the runouts are pooled into
+    # chips PER UNIT of surviving mass and the root-board mass applied once: a
+    # combo the runout blocked leaves the average instead of paying a zero.
+    v_hero, mass_hero = np.zeros(NUM_COMBOS), np.zeros(NUM_COMBOS)
+    v_opp, mass_opp = np.zeros(NUM_COMBOS), np.zeros(NUM_COMBOS)
     for evaluator in ctx.evaluators:
         win_h, tie_h, alive_h = evaluator.masses(reach_opp)
         v_hero += win_h * pot + tie_h * (pot / 2.0) - invested[hero] * alive_h
+        mass_hero += alive_h
 
         win_o, tie_o, alive_o = evaluator.masses(reach_hero)
         v_opp += win_o * pot + tie_o * (pot / 2.0) - invested[opp] * alive_o
+        mass_opp += alive_o
 
-    count = ctx.alive_count
-    np.divide(v_hero, count, out=v_hero, where=count > 0)
-    np.divide(v_opp, count, out=v_opp, where=count > 0)
+    np.divide(v_hero, mass_hero, out=v_hero, where=mass_hero > 0)
+    np.divide(v_opp, mass_opp, out=v_opp, where=mass_opp > 0)
+    v_hero *= nonblocking_mass(reach_opp)
+    v_opp *= nonblocking_mass(reach_hero)
     return v_hero, v_opp
 
 

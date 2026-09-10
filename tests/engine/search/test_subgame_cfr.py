@@ -28,6 +28,7 @@ from src.engine.search.subgame_cfr import (
     _leaf_values,
     _LeafSpec,
     _PassContext,
+    _sample_runout_evaluators,
     solve_subgame,
 )
 from src.engine.search.tree_builder import build_local_tree
@@ -197,6 +198,73 @@ class TestSolveSubgame:
         np.testing.assert_array_equal(first.root_values, second.root_values)
 
 
+class TestShowdownAndFoldLeavesShareOneScale:
+    """A showdown the hero always wins is worth what winning it uncalled is worth.
+
+    A MEASURED failure: summing raw per-runout masses charged every opponent
+    combo the runout blocked as if it had paid zero, so a flop showdown leaf came
+    out 8.42% short of the fold leaf the regret update compares it against
+    (4.35% from the turn, 0 on the river, uniform ranges). Fold equity was
+    over-priced against every showdown branch by exactly that much.
+    """
+
+    # Three aces: the hero's quads beat 2c3d on every runout, and no flush or
+    # straight flush can reach that pair, so the showdown outcome is a constant.
+    BOARD = (Card.new("Ah"), Card.new("Ad"), Card.new("Ac"), Card.new("7d"), Card.new("4s"))
+    POT = 400
+    INVESTED = (150.0, 150.0)
+
+    def _ctx(self, cards: int, runouts: int):
+        state = GameState(
+            street=Street.FLOP,
+            pot=self.POT,
+            stacks=(500, 500),
+            board=self.BOARD[:cards],
+            hole_cards=((Card.new("As"), Card.new("Kd")), (Card.new("2c"), Card.new("3d"))),
+            betting_history=(call(), check()),
+            button_position=0,
+            current_player=0,
+            is_terminal=False,
+            to_call=0,
+            last_aggressor=None,
+            blind_to_call=100,
+            _skip_validation=True,
+        )
+        return _PassContext(
+            hero=0,
+            evaluators=_sample_runout_evaluators(state, runouts, np.random.default_rng(5)),
+            node_data={},
+            leaf_specs={},
+        )
+
+    @pytest.mark.parametrize("cards", [3, 4, 5])
+    def test_a_certain_showdown_win_equals_the_uncalled_win(self, cards: int):
+        hero_combo = _combo_index("As", "Kd")
+        opp = np.zeros(NUM_COMBOS)
+        opp[_combo_index("2c", "3d")] = 0.7
+        hero = np.zeros(NUM_COMBOS)
+        hero[hero_combo] = 1.0
+        ctx = self._ctx(cards, runouts=32)
+
+        net = self.POT - self.INVESTED[0]
+        showdown = _leaf_values(
+            _LeafSpec(
+                is_fold=False, hero_payoff=0.0, opp_payoff=0.0, pot=self.POT, invested=self.INVESTED
+            ),
+            ctx,
+            hero,
+            opp,
+        )[0]
+        uncalled = _leaf_values(
+            _LeafSpec(is_fold=True, hero_payoff=net, opp_payoff=-net, pot=0.0, invested=(0.0, 0.0)),
+            ctx,
+            hero,
+            opp,
+        )[0]
+        assert showdown[hero_combo] == pytest.approx(uncalled[hero_combo], abs=1e-9)
+        assert showdown[hero_combo] == pytest.approx(net * 0.7, abs=1e-9)
+
+
 class TestLeafContinuations:
     """What a depth-limit leaf ASSUMES happens between it and showdown.
 
@@ -220,7 +288,6 @@ class TestLeafContinuations:
         return _PassContext(
             hero=0,
             evaluators=[evaluator],
-            alive_count=np.ones(NUM_COMBOS),
             node_data={},
             leaf_specs={},
         )
