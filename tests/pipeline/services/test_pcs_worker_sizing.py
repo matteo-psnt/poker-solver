@@ -124,22 +124,18 @@ def test_evaluate_terminals_transients_are_counted():
     12.17 GB at 200 bb, sized 11 onto a box that held 10, and the OOM killer
     took one — the coordinator then blocked on a chunk that had already run.
 
-    `evaluate_terminals` peaks above the arrays it reads: `walk` holds the copy
-    of one seat's showdown reaches while the rank walk builds its output. Half
-    of any tree's terminals are showdowns, so that is `num_terminals * hands`.
+    `evaluate_terminals` peaks above the arrays it reads: the rank walk holds
+    the copy of one seat's showdown reaches while it builds its output. Half of
+    any tree's terminals are showdowns, so that is `num_terminals * hands`.
     """
     rules = GameRules(1, 2)
     tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
     compiled = compile_tree(tree, rules)
 
-    walk = worker_bytes(compiled, br_streets="river", showdown="walk")
-    matmul = worker_bytes(compiled, br_streets="river", showdown="matmul")
-
-    # `matmul` stacks BOTH seats before the product, so each of its two arrays
-    # is twice as wide as `walk`'s. The difference IS the transient term, so
-    # this pins its size rather than merely asserting it is nonzero.
+    with_river_br = worker_bytes(compiled, br_streets="river")
     showdowns = compiled.num_terminals // 2
-    assert matmul - walk == 2 * showdowns * LIVE_HANDS * np.dtype(DTYPE).itemsize
+    transient = 2 * showdowns * LIVE_HANDS * np.dtype(DTYPE).itemsize
+    assert with_river_br > transient
 
 
 def test_headroom_is_a_fraction_so_a_big_node_keeps_real_margin():

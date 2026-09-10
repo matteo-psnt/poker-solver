@@ -24,7 +24,7 @@ class TestConfigContentHash:
         # The exact gap this closes: config_name comes from system.config_name
         # inside the YAML, so a run and its override-variant record the same name.
         base = Config.default()
-        variant = base.merge({"storage": {"initial_capacity": 999_999}})
+        variant = base.merge({"storage": {"checkpoint_retain_every": 999_999}})
         assert base.system.config_name == variant.system.config_name
         assert base.content_hash() != variant.content_hash()
 

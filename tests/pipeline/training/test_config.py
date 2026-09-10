@@ -20,8 +20,6 @@ class TestDefaultBehavior:
 
         assert cfg.training.num_iterations > 0
 
-        assert cfg.storage.initial_capacity > 0
-
         assert cfg.game.big_blind > cfg.game.small_blind
         assert cfg.game.starting_stack > 0
 
@@ -36,7 +34,7 @@ class TestDefaultBehavior:
             cfg.training.num_iterations = 999  # ty: ignore[invalid-assignment]
 
         with pytest.raises(ValidationError):
-            cfg.storage.initial_capacity = 999  # ty: ignore[invalid-assignment]
+            cfg.storage.checkpoint_retain_every = 999  # ty: ignore[invalid-assignment]
 
 
 class TestMergeBehavior:

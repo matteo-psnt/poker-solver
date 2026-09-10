@@ -145,7 +145,6 @@ def worker_bytes(
     br_streets: str = "off",
     runouts: int = 1,
     kernels: int = 1,
-    showdown: str = "walk",
 ) -> int:
     """Private bytes one worker allocates, from the tree's shape.
 
@@ -184,11 +183,9 @@ def worker_bytes(
     # the OOM killer took one -- costing a 40-minute probe every rung it ran.
     #
     # Half of any tree's terminals are showdowns; a line ends folded or shown.
-    # `walk` holds the fancy-index copy of one seat's showdown reaches while the
-    # rank walk builds its output -- two (showdowns, hands) arrays. `matmul`
-    # stacks BOTH seats before the product, so each of its two is twice as wide.
-    showdowns = num_terminals // 2
-    live = 2 * (num_terminals if showdown == "matmul" else showdowns)
+    # The rank walk holds the fancy-index copy of one seat's showdown reaches
+    # while it builds its output -- two (showdowns, hands) arrays.
+    live = 2 * (num_terminals // 2)
     return scratch + cache + temporaries + picks + live * LIVE_HANDS * item + WORKER_OVERHEAD_BYTES
 
 
@@ -204,7 +201,6 @@ def ram_safe_workers(
     br_streets: str = "off",
     runouts: int = 1,
     kernels: int = 1,
-    showdown: str = "walk",
 ) -> int:
     """How many workers this node can hold, from the arithmetic above.
 
@@ -219,7 +215,6 @@ def ram_safe_workers(
         br_streets=br_streets,
         runouts=runouts,
         kernels=kernels,
-        showdown=showdown,
     )
     return max(1, int(available // per_worker))
 
@@ -274,7 +269,6 @@ def pcs_worker(
                 dcfr_gamma=solver.dcfr_gamma,
                 cfr_plus=solver.cfr_plus,
                 alternating=pcs.alternating,
-                showdown=pcs.showdown,
             )
         else:
             kernel = CFRBestResponse(
@@ -288,7 +282,6 @@ def pcs_worker(
                 dcfr_beta=solver.dcfr_beta,
                 dcfr_gamma=solver.dcfr_gamma,
                 cfr_plus=solver.cfr_plus,
-                showdown=pcs.showdown,
                 num_boards=pcs.runouts_per_flop,
                 # A legal turn best response maximises JOINTLY over the runouts
                 # sharing the turn, so they cannot be rebound one at a time.

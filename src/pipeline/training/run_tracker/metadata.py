@@ -125,7 +125,6 @@ class RunMetadata:
         parent_run_id: str | None = None,
         kernel: str | None = None,
     ) -> RunMetadata:
-        storage_capacity = config.storage.initial_capacity if config else 0
         now = datetime.now(UTC).isoformat()
         git_commit = get_git_commit()
         git_dirty = is_git_dirty()
@@ -140,7 +139,7 @@ class RunMetadata:
             iterations=0,
             runtime_seconds=0.0,
             num_infosets=0,
-            storage_capacity=storage_capacity,
+            storage_capacity=0,  # the first progress update writes the table's row count
             action_config_hash=action_config_hash,
             card_abstraction_hash=card_abstraction_hash,
             config=config,
@@ -406,10 +405,6 @@ class RunMetadata:
         attempt.runtime_seconds = runtime_seconds
         attempt.end_iter = iterations
         self._sync_cumulative_runtime()
-
-    def resolve_initial_capacity(self, default_capacity: int) -> int:
-        """Return stored capacity if present, otherwise a default."""
-        return self.storage_capacity or default_capacity
 
     def mark_resumed(self) -> None:
         # Open a new attempt starting at the checkpoint we're resuming from. Called

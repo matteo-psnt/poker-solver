@@ -1,150 +1,52 @@
-# Configuration Guide
+# Configuration
 
-This project has two configuration families:
+Two strict, frozen Pydantic models (`extra="forbid"`, so a typo in YAML is
+refused at load time). **The schema is the reference**: every field, its
+default, its constraint and the comment saying why it exists lives next to the
+field, nowhere else.
 
-- **Training/runtime config** (`Config`) in `src/shared/config/schema.py`
-- **Combo abstraction precompute config** (`PrecomputeConfig`) in
-  `src/pipeline/abstraction/config.py`
+- **Training** — `Config` in `src/shared/config/schema.py`; presets in
+  `config/training/<name>.yaml`.
+- **Card abstraction precompute** — `PrecomputeConfig` in
+  `src/pipeline/abstraction/config.py`; presets in
+  `config/abstraction/<name>.yaml`.
 
-Both are strict, frozen Pydantic models (`extra="forbid"`), so unknown keys
-fail validation — typos in YAML are caught at load time.
+`poker-solver configs` lists the presets `submit` and `submit-precompute` accept.
 
-## How loading works
+## A training preset is overrides, resolved last-wins
 
-### Training/runtime (`Config`)
-
-Defaults live in Python (`src/shared/config/schema.py`); YAML files provide
-**overrides only**. Loaders in `src/shared/config/loader.py`:
+1. Python field defaults.
+2. The YAML, which may `extends: <file>` another in the same directory (the
+   current file wins over its base).
+3. `--set section__field=value` on the command line.
 
 ```python
-load_config("config/training/production.yaml", training__num_iterations=500)
-load_training_config("production", system__seed=7)   # by name
+load_training_config("production", system__seed=7)
 ```
 
-Resolution order (last wins):
+`production.yaml` is the recipe the blueprint box fields. A treatment arm is a
+YAML that `extends: production.yaml` and moves ONE thing, so its action and
+abstraction hashes match the control by construction and an exact-BR score is a
+matched tier; it is deleted when the question closes. `quick_test.yaml` is the
+smoke-test preset. A persisted run snapshot reloads through
+`Config.from_persisted_dict`, which drops fields the schema no longer has, so
+old runs stay loadable across schema changes.
 
-1. Python field defaults
-2. YAML file — supports `extends: <filename>` chains (same directory;
-   current file's values win over the base)
-3. Programmatic keyword overrides, using `__` as the nesting separator
-   (`training__num_iterations=50_000`)
+## An abstraction preset names an artifact
 
-Persisted run snapshots are reloaded with `Config.from_persisted_dict`,
-which tolerates schema drift by pruning fields that no longer exist
-(logged), so old runs stay loadable.
+`PrecomputeConfig.from_yaml("<name>")` reads `config/abstraction/<name>.yaml`;
+`config_name` is set from the filename, never written in the YAML. The identity
+hash covers `buckets`, `flop_runouts` and `equity_histogram_bins` only, so
+changing any of those is a new artifact (`buckets-F..T..R..-r..-<hash>` in the
+`abstractions` container) that `submit-precompute --config <name>` must build;
+`kmeans_*`, `num_workers` and `seed` do not change the identity.
 
-### Abstraction precompute (`PrecomputeConfig`)
+A training run records the hash it was trained against, and evaluation pins to
+that hash rather than to the name, so deleting a preset never makes an existing
+run unevaluable — it only stops new runs from being trained on it.
 
-Loaded by name: `PrecomputeConfig.from_yaml("<name>")` reads
-`config/abstraction/<name>.yaml`. `config_name` is set from the filename —
-do not put it in the YAML.
+## Adding a field
 
-## Training config reference (`Config`)
-
-Sections and fields, with defaults:
-
-| Section | Field | Default | Notes |
-|---|---|---|---|
-| `training` | `num_iterations` | 100000 | |
-| | `runs_dir` | `data/runs` | node-relative, under `/mnt/work`; rungs are published to the `checkpoints` container |
-| `storage` | `initial_capacity` | 2000000 | recorded in run metadata only |
-| | `checkpoint_retain_every` | 0 | spare a rung per N iterations from pruning (0 = keep only the last) |
-| `system` | `seed` | null | |
-| | `config_name` | `default` | shown in run metadata |
-| | `log_level` | `INFO` | |
-| `game` | `starting_stack` | 200 | BB units |
-| | `small_blind` / `big_blind` | 1 / 2 | validated: BB > SB |
-| `action_model` | `preflop_templates` | see schema | required keys: `sb_first_in`, `bb_vs_limp`, `sb_vs_limp_raise`, `bb_vs_open`, `sb_vs_3bet`, `bb_vs_4bet`, `sb_vs_5bet` |
-| | `postflop_templates` | see schema | required keys: `first_aggressive`, `facing_bet`, `after_one_raise`, `after_two_raises` |
-| | `jam_spr_threshold` | 2.0 | |
-| | `raise_count_rules` | see schema | maps `facing_1/2/3_plus` → postflop template |
-| | `off_tree_mapping` | `probabilistic` | or `nearest` |
-| | `version` | 1 | |
-| `resolver` | `enabled` | true | |
-| | `time_budget_ms` | 300 | |
-| | `max_depth` | 6 | at 2 it truncated 52% of river leaves |
-| | `max_raises_per_street` | 2 | production overrides to 5 |
-| | `leaf_rollouts` | 8 | board runouts for leaf valuation |
-| | `policy_blend_alpha` | 0.35 | resolver↔blueprint blend |
-| | `min_strategy_prob` | 1e-6 | |
-| | `max_iterations` | null | fixed CFR count; determinism knob (null = wall-clock budget) |
-| | `leaf_continuation_fraction` | 0.0 | a different leaf valuation is a different game to score |
-| | `root_prior_weight` | 0.0 | seeds the subgame with the blueprint |
-| `solver` | `cfr_plus` | false | |
-| | `iteration_weighting` | `linear` | `none` \| `linear` \| `dcfr`; production uses `dcfr` |
-| | `dcfr_alpha/beta/gamma` | 1.5 / 0.0 / 2.0 | used only with `dcfr`; `beta=0` halves negative regrets per update |
-| | `traversal` | `compiled` | `compiled` \| `tree` \| `state`; bit-identical, throughput only |
-| `pcs` | `alternating` | false | |
-| | `runouts_per_flop` | 1 | |
-| | `showdown` | `walk` | `walk` \| `matmul` |
-| `card_abstraction` | `config` | `default` | name of a `config/abstraction/` preset |
-
-Template tokens are validated: preflop accepts `fold`/`call`/`check`/jam
-tokens, numeric open sizes, and multiplier tokens like `"3.5x_open"` /
-`"2.3x_last"`; postflop accepts pot fractions and
-`min_raise`/`pot_raise`/`jam`.
-
-## Add or update a training config (`config/training/*.yaml`)
-
-1. Add a YAML file under `config/training/` containing **only the keys you
-   override** (see `production.yaml`; `default.yaml` is a fully commented
-   template of every field).
-2. Set `system.config_name` to the profile name you want in run metadata.
-3. Optionally `extends:` another YAML in the directory.
-
-There is no config *editor* to update: a leg carries a config name plus
-`LegSpec.sets`, so overrides reach a run through `--set key=value` and nothing
-else.
-
-## Add a new training config field (schema change)
-
-1. Add the field, with default and validation, to the right model in
-   `src/shared/config/schema.py` — constraints live there, nowhere else.
-2. Wire usage where relevant, typically
-   `src/pipeline/blueprint/construction.py`,
-   `src/pipeline/training/static_parallel.py`, or `src/engine/solver|search/`.
-3. Add/update tests in the mirrored test packages and document the field in
-   `config/training/default.yaml`.
-
-## Abstraction precompute reference (`PrecomputeConfig`)
-
-```yaml
-# config/abstraction/default.yaml
-buckets:              # equity buckets per street (required nested keys)
-  flop: 50
-  turn: 100
-  river: 200
-flop_runouts: null    # null = exact (all 1,176 runouts); int = sampled
-equity_histogram_bins: 8
-kmeans_max_iter: 300
-kmeans_n_init: 10
-num_workers: null     # null = all cores
-seed: 42
-```
-
-Workflow:
-
-1. Add a YAML under `config/abstraction/`.
-2. Precompute on the pool:
-   `uv run poker-solver submit-precompute --config <name>`.
-3. Reference it from a training config: `card_abstraction.config: "<name>"`.
-
-The abstraction identity hash (`get_config_hash`) covers `buckets`,
-`flop_runouts`, and `equity_histogram_bins` only — changing any of these
-produces a new artifact directory
-(`<share>/combo_abstraction/buckets-F..T..R..-r..-<hash>/`) and requires
-re-running precompute. `kmeans_*`, `num_workers`, and `seed` do not change
-the identity.
-
-## Where config names and hashes are used
-
-- Training runs record `config_name`, `action_config_hash`, and
-  `card_abstraction_hash` in `.run.json` via `RunTracker`
-  (`src/pipeline/training/run_tracker/tracker.py`).
-- Abstractions are resolved by config name/hash through
-  `AbstractionResolver` and `build_card_abstraction(...)`
-  (`src/pipeline/abstraction/resolver.py`,
-  `src/pipeline/blueprint/construction.py`).
-- Evaluation auto-pins to a run's recorded `card_abstraction_hash` and
-  refuses runs without one, so a strategy is never scored under a different
-  abstraction than it was trained with.
+Add it to the right model in `schema.py` with its default, constraint and a
+one-line comment on why it exists; wire it where it is read; test it in the
+mirrored test package. Nothing else needs updating.

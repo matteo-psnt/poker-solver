@@ -70,7 +70,6 @@ def _driver(compiled, region: str, num_boards: int, weighting: str = "none"):
         br_streets=BR_REGIONS[region],
         weighting=weighting,
         cfr_plus=True,
-        showdown="matmul",
         num_boards=num_boards,
     )
     return driver, regrets, strategy_sum, trunk
@@ -303,7 +302,6 @@ class TestWhichStrategyTheOpponentPlaysOffItsBestResponseStreets:
             br_streets=BR_REGIONS["turn_river"],
             weighting="none",
             cfr_plus=True,
-            showdown="matmul",
             num_boards=len(BOARDS),
             sequential=False,
             trunk_source=source,

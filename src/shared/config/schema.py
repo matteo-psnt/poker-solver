@@ -76,7 +76,6 @@ class TrainingConfig(StrictFrozenModel):
 class StorageConfig(StrictFrozenModel):
     """Storage and checkpoint configuration."""
 
-    initial_capacity: PositiveInt = Field(default=2_000_000)
     # Spare one checkpoint per this many iterations from pruning, so the run ends
     # holding a ladder of snapshots instead of only its last one (0 = keep only the
     # last). Costs a full copy of the table per retained point, so keep it a large
@@ -361,10 +360,6 @@ class PcsConfig(StrictFrozenModel):
     # increments averaged before the discount. 1 is one full board per
     # iteration; more trades K board-passes for lower variance at flop decisions.
     runouts_per_flop: PositiveInt = Field(default=1)
-    # O(H) rank-walk showdown instead of the (T x H) @ (H x H) product. Same
-    # values to float rounding; an EPYC core does the product in seconds, the
-    # walk in a fraction of one.
-    showdown: Literal["walk", "matmul"] = Field(default="walk")
     # CFR-BR: where the opponent plays an exact per-hand best response instead
     # of regret matching (Johanson et al. 2012). One sampled board per iteration
     # supports `river` and nothing wider -- past it the responder is choosing

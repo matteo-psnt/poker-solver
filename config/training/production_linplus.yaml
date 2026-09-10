@@ -1,0 +1,15 @@
+# TREATMENT arm: production with DCFR's schedule swapped for linear weighting
+# over a CFR+ floor ("linplus"). Under plain PCS linplus beat dcfr by +212 mbb at
+# rung 2,000 (3 seeds, same sign in each), and on 10-bucket abstractions it is
+# the schedule that stops the late drift (+38 vs DCFR's +262). Neither was
+# measured under CFR-BR, which is what trains the fielded blueprint; this arm is
+# that measurement. If it wins, it becomes production.yaml.
+
+extends: production.yaml
+
+solver:
+  iteration_weighting: linear
+  cfr_plus: true
+
+system:
+  config_name: "production_linplus"

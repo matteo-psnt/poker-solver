@@ -211,7 +211,6 @@ class CFRBestResponse:
         dcfr_beta: float = 0.0,
         dcfr_gamma: float = 2.0,
         cfr_plus: bool = True,
-        showdown: str = "walk",
         num_boards: int = 1,
         sequential: bool = False,
         trunk_source: str = "own",
@@ -230,7 +229,6 @@ class CFRBestResponse:
         self.dcfr_beta = dcfr_beta
         self.dcfr_gamma = dcfr_gamma
         self.cfr_plus = cfr_plus
-        self.showdown = showdown
         self.num_boards = num_boards
         # One kernel rebound per board instead of one per board held at once.
         # The ~3 GB of hand-space scratch is per KERNEL, so holding K of them is
@@ -285,7 +283,6 @@ class CFRBestResponse:
                     self.compiled,
                     context,
                     cfr_plus=self.cfr_plus,
-                    showdown=self.showdown,
                     groups=self.groups,
                 )
                 kernel.regrets = self.regrets

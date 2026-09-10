@@ -64,9 +64,7 @@ def _pcs(compiled, **options):
 class TestOneBoardIsTheFixedBoardKernel:
     def test_a_cfr_plus_iteration_matches_the_kernel_bit_for_bit(self, parts):
         compiled, contexts, _ = parts
-        pcs, regrets, strategy_sum = _pcs(
-            compiled, weighting="none", cfr_plus=True, showdown="matmul"
-        )
+        pcs, regrets, strategy_sum = _pcs(compiled, weighting="none", cfr_plus=True)
         pcs.iterate([contexts[0]], 0)
 
         reference = VectorCFR(compiled, contexts[0], cfr_plus=True)
@@ -79,7 +77,7 @@ class TestOneBoardIsTheFixedBoardKernel:
         """Same terminal values to float rounding; the walk is O(H), the product O(H^2)."""
         compiled, contexts, _ = parts
         initial = np.ones(contexts[0].num_hands, dtype=np.float32)
-        product = VectorCFR(compiled, contexts[0], cfr_plus=True, showdown="matmul")
+        product = VectorCFR(compiled, contexts[0], cfr_plus=True)
         walk = VectorCFR(compiled, contexts[0], cfr_plus=True, showdown="walk")
         for kernel in (product, walk):
             kernel.forward(initial)
@@ -96,7 +94,7 @@ class TestSamplingIsTheMixtureInExpectation:
         compiled, contexts, _ = parts
         summed = np.zeros(compiled.tree.num_slots, dtype=np.float64)
         for context in contexts:
-            pcs, regrets, _ = _pcs(compiled, weighting="none", cfr_plus=False, showdown="matmul")
+            pcs, regrets, _ = _pcs(compiled, weighting="none", cfr_plus=False)
             pcs.iterate([context], 0)
             summed += regrets
 
@@ -107,7 +105,7 @@ class TestSamplingIsTheMixtureInExpectation:
     def test_runouts_under_one_flop_average_before_the_floor(self, parts):
         """K contexts in one iteration is the mixture's joint increment over K."""
         compiled, contexts, _ = parts
-        pcs, regrets, _ = _pcs(compiled, weighting="none", cfr_plus=True, showdown="matmul")
+        pcs, regrets, _ = _pcs(compiled, weighting="none", cfr_plus=True)
         pcs.iterate(contexts, 0)
 
         mixture = BoardMixtureCFR(compiled, contexts)
@@ -145,9 +143,7 @@ class TestProductionBookkeeping:
         rng = np.random.default_rng(5)
         start = rng.standard_normal(compiled.tree.num_slots).astype(np.float32)
 
-        pcs, regrets, strategy_sum = _pcs(
-            compiled, weighting="dcfr", cfr_plus=False, showdown="matmul"
-        )
+        pcs, regrets, strategy_sum = _pcs(compiled, weighting="dcfr", cfr_plus=False)
         regrets[:] = start
         pcs.iterate([context], iteration)
 
@@ -178,9 +174,7 @@ class TestProductionBookkeeping:
 
     def test_alternating_updates_leave_the_other_players_rows_alone(self, parts):
         compiled, contexts, _ = parts
-        pcs, regrets, strategy_sum = _pcs(
-            compiled, weighting="none", alternating=True, showdown="matmul"
-        )
+        pcs, regrets, strategy_sum = _pcs(compiled, weighting="none", alternating=True)
         pcs.iterate([contexts[0]], 1)
 
         # Built through the accessors, not a node-major repeat -- slots are

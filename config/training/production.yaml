@@ -1,11 +1,19 @@
-# Production Training Configuration for HUNLHE Solver
-# Uses Discounted CFR (DCFR) for faster convergence than Linear/vanilla CFR.
+# The production recipe: what `submit --config production` trains, and what the
+# blueprint box fields. Every value here is a MEASURED choice; the defaults for
+# everything else live in `src/shared/config/schema.py`.
 #
-# (Convergence targets removed: earlier per-iteration mbb/g estimates came from the
-# legacy rollout estimator and are not trustworthy; use LBR after training instead.)
+# Trainer: public chance sampling with a river-legal CFR-BR opponent over four
+# runouts sharing a flop and a turn. Best on the exact-BR gate (`river-r4`,
+# 748.6 mbb thresholded); a turn-legal responder bought −3.5% and collapsed once
+# thresholded, and R=8 is worse than R=4.
 
 solver:
   iteration_weighting: dcfr
+
+pcs:
+  cfr_br: river
+  runout_mode: turn
+  runouts_per_flop: 4
 
 action_model:
   preflop_templates:
@@ -32,13 +40,9 @@ training:
   num_iterations: 1000000
 
 storage:
-  initial_capacity: 4000000
   # Spare one checkpoint per 10M iterations from pruning, so a run ends holding a
   # ladder (10M, 20M, ...) instead of only its final snapshot -- this is what makes
   # a within-run exploitability-vs-iterations curve possible (`evaluate --at N`).
-  # Each rung is a full table (~840 MB at production size) PUBLISHED to the share,
-  # and the upload is the wall-clock of a short run. Must stay a multiple of the
-  # chunk size (`--checkpoint-every`, 5M by default); below it nothing is pruned.
   checkpoint_retain_every: 10000000
 
 system:

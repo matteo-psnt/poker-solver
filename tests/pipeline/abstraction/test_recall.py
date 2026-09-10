@@ -19,7 +19,6 @@ from src.engine.solver.mccfr.compiled_walk import CompiledContext
 from src.pipeline.abstraction.recall import PathRecallBucketer
 from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.pipeline.abstraction.vector_universe import build_hand_context
-from src.shared.config.loader import load_training_config
 from tests.pipeline.abstraction.test_vector_universe import BOARD, StubAbstraction
 
 F, T, R = (StubAbstraction.counts[s] for s in (Street.FLOP, Street.TURN, Street.RIVER))
@@ -105,11 +104,3 @@ class TestSeams:
         wrapped = resolver.load(abstraction_config="ten", recall="path")
         assert isinstance(wrapped, PathRecallBucketer)
         assert wrapped.base is base
-
-    def test_the_probe_configs_differ_only_in_recall(self):
-        street = load_training_config("probe_ten")
-        path = load_training_config("probe_ten_path")
-        assert street.card_abstraction.recall == "street"
-        assert path.card_abstraction.recall == "path"
-        assert street.card_abstraction.config == path.card_abstraction.config == "ten"
-        assert street.action_model == path.action_model

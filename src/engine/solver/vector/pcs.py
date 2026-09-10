@@ -76,7 +76,6 @@ class PublicChanceSamplingCFR:
         dcfr_gamma: float = 2.0,
         cfr_plus: bool = False,
         alternating: bool = False,
-        showdown: str = "walk",
     ):
         if weighting not in ("none", "linear", "dcfr"):
             raise ValueError(f"Unknown iteration weighting {weighting!r}.")
@@ -89,7 +88,6 @@ class PublicChanceSamplingCFR:
         self.dcfr_gamma = dcfr_gamma
         self.cfr_plus = cfr_plus
         self.alternating = alternating
-        self.showdown = showdown
         self.groups: list[NodeGroup] = build_groups(compiled)
         self.kernel: VectorCFR | None = None
         self._delta: np.ndarray | None = None
@@ -101,7 +99,6 @@ class PublicChanceSamplingCFR:
                 self.compiled,
                 context,
                 cfr_plus=self.cfr_plus,
-                showdown=self.showdown,
                 groups=self.groups,
             )
             kernel.regrets = self.regrets

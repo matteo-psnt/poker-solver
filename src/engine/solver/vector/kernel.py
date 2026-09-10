@@ -224,7 +224,9 @@ class VectorCFR:
         context: HandContext,
         *,
         cfr_plus: bool = True,
-        showdown: str = "matmul",
+        # `matmul` values showdowns by an (H x H) sign matrix; it survives as
+        # the oracle the O(H) rank walk is tested against, and nothing ships it.
+        showdown: str = "walk",
         groups: list[NodeGroup] | None = None,
     ):
         self.compiled = compiled

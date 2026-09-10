@@ -113,60 +113,12 @@ Training still learns the blueprint policy; resolving happens only at decision t
 
 ## Configuration
 
-Training configs in `config/training/` are sparse overrides on the schema defaults in `src/shared/config/schema.py` (`config/training/default.yaml` documents every default). The actual production config:
-
-```yaml
-# config/training/production.yaml
-solver:
-  iteration_weighting: dcfr
-
-action_model:
-  preflop_templates:
-    sb_first_in: ["fold", "call", 2.5, 3.5, 5.0]
-    bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
-    sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
-  postflop_templates:
-    first_aggressive: [0.33, 0.66, 1.25]
-    facing_bet: ["min_raise", "pot_raise", "jam"]
-    after_one_raise: ["pot_raise", "jam"]
-    after_two_raises: ["jam"]
-
-resolver:
-  max_raises_per_street: 5
-
-card_abstraction:
-  config: production
-
-training:
-  num_iterations: 1000000
-
-storage:
-  initial_capacity: 4000000
-  checkpoint_retain_every: 10000000
-
-system:
-  config_name: "production"
-```
-
-Resolver defaults (`ResolverConfig`): `enabled: true`, `time_budget_ms: 300`, `max_depth: 6`, `leaf_rollouts: 8`, `policy_blend_alpha: 0.35`, `min_strategy_prob: 1.0e-6`.
-
-Card abstraction configs live in `config/abstraction/`:
-
-```yaml
-# config/abstraction/default.yaml
-buckets:            # equity buckets per street
-  flop: 50
-  turn: 100
-  river: 200
-flop_runouts: null  # null = exact (all 1,176 runouts)
-equity_histogram_bins: 8
-kmeans_max_iter: 300
-kmeans_n_init: 10
-num_workers: null
-seed: 42
-```
-
-`config/training/default.yaml` documents every available setting and its default; new configs only need the keys they override. See the [Configuration Guide](config/README.md) for the full schema reference and workflows.
+Training presets in `config/training/` are sparse overrides on the schema
+defaults in `src/shared/config/schema.py`, which is the reference for every
+field. `production.yaml` is the recipe the blueprint box fields; a treatment arm
+`extends: production.yaml` and moves one thing. Card abstraction presets in
+`config/abstraction/` name an artifact by its bucket counts. See
+[config/README.md](config/README.md).
 
 ## Evaluation
 
