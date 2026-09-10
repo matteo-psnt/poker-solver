@@ -237,18 +237,6 @@ KEYS: tuple[Key, ...] = (
     # hash worth recording.
     Key("RUN_GIT_DIRTY", "git_dirty", "git_dirty"),
     Key("RUN_GIT_BRANCH", "git_branch", "git_branch"),
-    Key("RUN_WARM_START_FROM", "warm_start_from", "warm_start_from"),
-    Key("RUN_WARM_START_WEIGHT", "warm_start_weight", "warm_start_weight", _number, _int),
-    Key("RUN_WARM_START_AT", "warm_start_at", "warm_start_at", _number, _int),
-    Key("RUN_WARM_START_SHAPE", "warm_start_shape", "warm_start_shape"),
-    Key("RUN_EQUITY_PRIOR", "equity_prior_weight", "equity_prior_weight", _number, _int),
-    Key(
-        "RUN_EQUITY_PRIOR_TEMPERATURE",
-        "equity_prior_temperature",
-        "equity_prior_temperature",
-        _number,
-        _float,
-    ),
 )
 
 

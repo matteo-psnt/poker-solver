@@ -25,7 +25,6 @@ from pydantic import BaseModel
 from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
-from src.pipeline.services import equity_prior, warm_start
 from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
@@ -78,9 +77,6 @@ def train_static(
     runs_dir: Path | None = None,
     checkpoint_every: int = 5_000_000,
     run_id: str | None = None,
-    warm_start_from: Path | None = None,
-    warm_start_weight: int = warm_start.DEFAULT_EFFECTIVE_ITERATIONS,
-    warm_start_at: int | None = None,
     progress_file: Path | None = None,
     # Dual write. `None` writes files only, which is what every task did
     # before the database existed and what one dispatched without a DSN
@@ -88,9 +84,6 @@ def train_static(
     # root is the only layer allowed to know which adapter this is.
     sink: RecordSink | None = None,
     record_source: RecordSource | None = None,
-    warm_start_shape: str = "flat",
-    equity_prior_weight: int = 0,
-    equity_prior_temperature: float = equity_prior.DEFAULT_TEMPERATURE,
 ) -> StaticTrainingOutput:
     """Train a static-tree solver from a named config and return a portable summary.
 
@@ -108,14 +101,6 @@ def train_static(
             5M pays under 5% while losing at most ~90 s of work.
         run_id: Continue an EXISTING run directory instead of creating one. The
             checkpoint there is loaded first and training continues from it.
-        warm_start_from: Seed a FRESH run from this run's average strategy
-            before training. Ignored when continuing, so a retried leg does
-            not re-seed over its own progress.
-        warm_start_weight: How much accumulated regret the prior claims.
-        warm_start_at: Which rung of the prior to seed from. Board-free
-            quality is not monotone in iterations, so the LAST rung is not
-            generally the best one; omitting this seeds from whatever the
-            manifest calls current, which is rarely what was measured.
         seed: Overrides ``system.seed``.
         config_overrides: Nested config overrides (``__`` separator).
         experiment: Experiment/arm/parent recorded on the run.
@@ -199,80 +184,6 @@ def train_static(
     # listing reads identity from that one line rather than folding.
     tracker.initialize()
 
-    # Seeding is a FRESH-run act: a retry finds the run dir populated, resumes,
-    # and must not lay the prior back over the progress it already made.
-    #
-    # But "resuming" and "was seeded" are different questions, and conflating
-    # them cost two 30M sweeps. The first attempt died before seeding (the rung
-    # it wanted had not been fetched); the retry saw a populated directory,
-    # skipped the prior, and trained a perfectly good CONTROL under the arm's
-    # name. Every arm agreed to a tenth of a percent and nothing failed.
-    #
-    # So a resume records what it inherited. A run that asked for a prior and is
-    # resuming one that never got seeded is not a smaller version of the
-    # experiment -- it is a different arm wearing its label.
-    seeded = False
-    # Composable: equity is the base everywhere, the trained prior adds its own
-    # confidence where it has one. Kept as a base rather than a second seeding
-    # pass so the two never race to write the same iteration-0 checkpoint.
-    equity_base = None
-    equity_policy = None
-    equity_tree = None
-    if equity_prior_weight and not resuming:
-        # Built once and threaded through: every implicit build reloads the card
-        # abstraction, and three of them cost ~50 minutes before iteration 1.
-        equity_tree = equity_prior.build_tree(config)
-        equity_policy = equity_prior.tree_policy(
-            config, temperature=equity_prior_temperature, tree=equity_tree
-        )
-        equity_base = equity_policy * float(equity_prior_weight)
-    if equity_base is not None and warm_start_from is None and not resuming:
-        equity_prior.write_checkpoint(
-            config,
-            run_dir=run_dir,
-            regrets=equity_base,
-            abstraction_hash=tracker.metadata.card_abstraction_hash,
-            tree=equity_tree,
-        )
-        (run_dir / warm_start.SEEDED_MARKER).write_text(
-            f"equity-prior weight={equity_prior_weight} temperature={equity_prior_temperature}\n"
-        )
-        seeded = True
-    if (
-        warm_start_from is not None
-        and resuming
-        and not (run_dir / warm_start.SEEDED_MARKER).exists()
-    ):
-        raise ValueError(
-            f"Run '{run_id}' asked to seed from '{warm_start_from}' but is resuming a "
-            "directory that was never seeded. Continuing would train an unseeded arm "
-            "under a warm-start label. Delete the run directory to start it cleanly."
-        )
-    if warm_start_from is not None and not resuming:
-        # A bare run id resolves under runs_dir, exactly as --run does; an
-        # explicit path is taken as given. A node passes the id, because the
-        # directory it lands in is the node's business, not the submitter's.
-        source = Path(warm_start_from)
-        if not source.exists():
-            source = base_dir / str(warm_start_from)
-        warm_start.seed_checkpoint(
-            config,
-            source_run=source,
-            run_dir=run_dir,
-            effective_iterations=warm_start_weight,
-            abstraction_hash=tracker.metadata.card_abstraction_hash,
-            at_iteration=warm_start_at,
-            shape=warm_start_shape,
-            base_regrets=equity_base,
-            tree=equity_tree,
-        )
-        (run_dir / warm_start.SEEDED_MARKER).write_text(
-            f"{warm_start_from}@{warm_start_at or 'current'} "
-            f"weight={warm_start_weight} shape={warm_start_shape} "
-            f"equity={equity_prior_weight}\n"
-        )
-        seeded = True
-
     started = time.time()
     try:
         result = train_static_parallel(
@@ -292,7 +203,7 @@ def train_static(
             # was inert for every run this trainer ever wrote.
             abstraction_id=tracker.metadata.card_abstraction_hash,
             checkpoint_every=checkpoint_every,
-            resume=resuming or seeded,
+            resume=resuming,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             on_checkpoint=tracker.record_checkpoint,
         )

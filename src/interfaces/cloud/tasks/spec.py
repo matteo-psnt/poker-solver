@@ -168,12 +168,6 @@ class TaskSpec:
     eval_method: str = ""
     eval_at: str = ""
     eval_flags: tuple[str, ...] = field(default_factory=tuple)
-    warm_start_from: str = ""
-    warm_start_weight: int = 0
-    warm_start_at: int = 0
-    warm_start_shape: str = ""
-    equity_prior_weight: int = 0
-    equity_prior_temperature: float = 0.0
     force_publish: bool = False
     # Stamped by `dispatch.stage_and_queue`, never by a caller: the node has no
     # `.git` (the snapshot excludes it), so the submitting machine is the only
@@ -219,16 +213,6 @@ class TaskSpec:
         # so an unvalidated '1.5h' would run under 6h with zero diagnostics.
         if (why := wire.duration_error(self.timeout)) is not None:
             raise BadTaskError(why)
-        # Both shape a guess that only exists when a weight asks for one, and
-        # the argv builder skips them without it. Silently dropping them would
-        # train a plain control under the variant's arm label -- the failure
-        # that has twice cost a whole sweep, so it raises at submit instead.
-        if self.equity_prior_temperature and not self.equity_prior_weight:
-            raise BadTaskError(
-                "--equity-prior-temperature shapes the equity prior, and without "
-                "--equity-prior there is no prior to shape. This would train a "
-                "control under a variant's arm name."
-            )
 
 
 def utcnow() -> datetime:

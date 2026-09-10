@@ -2012,10 +2012,6 @@ export interface components {
             checkpoint_every?: number | null;
             /** Config */
             config?: string | null;
-            /** Equity Prior Temperature */
-            equity_prior_temperature?: number | null;
-            /** Equity Prior Weight */
-            equity_prior_weight?: number | null;
             /** Experiment */
             experiment?: string | null;
             /** Kernel */
@@ -2034,14 +2030,6 @@ export interface components {
             timeout?: string | null;
             /** To */
             to: number;
-            /** Warm Start At */
-            warm_start_at?: number | null;
-            /** Warm Start From */
-            warm_start_from?: string | null;
-            /** Warm Start Shape */
-            warm_start_shape?: string | null;
-            /** Warm Start Weight */
-            warm_start_weight?: number | null;
             /** Workers */
             workers?: number | null;
         };

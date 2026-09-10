@@ -71,52 +71,6 @@ def _refresh_abstractions(paths: NodePaths, log: TaskLogger, sas: str = "") -> N
 
 
 def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str | None]:
-    # The prior lives on the share like any other run, and fetching it is the
-    # node's job -- without this the trainer resolves a run directory that was
-    # never brought down.
-    #
-    # FATAL when it is missing, not a warning. This warned and trained on, which
-    # is how four 30M arms -- eight node-hours -- came back as four identical
-    # controls: the prior had been pruned from the share, every arm quietly
-    # became its own control, and nothing said so until the coverage ladders
-    # turned out identical. For a warm-started task the prior IS the experiment,
-    # so a missing one is a task that cannot do its job, not one that can do
-    # less of it.
-    if getattr(plan, "warm_start_from", ""):
-        prior = plan.warm_start_from
-        if not archive.is_published(prior, plan.checkpoint_sas):
-            log(
-                f"FATAL warm-start prior {plan.warm_start_from} is not published; "
-                "refusing to train an unseeded arm that would look like a control"
-            )
-            return 1, "missing-prior"
-        log(f"fetching warm-start prior {plan.warm_start_from}")
-        # The rung the task will SEED FROM, not the manifest's current one. A
-        # prior is a ladder and the best rung is rarely the last: asking for
-        # rung 100 while fetching rung 200 left the trainer with no such
-        # checkpoint, the first attempt died, and the Batch retry -- finding a
-        # populated run directory -- skipped seeding and trained a control. Two
-        # 30M sweeps were lost that way before the cause was visible.
-        wanted = getattr(plan, "warm_start_at", 0)
-        destination = paths.runs / plan.warm_start_from
-        if wanted:
-            archive.fetch_metadata(prior, destination, plan.checkpoint_sas)
-            # THE PRIOR'S MANIFEST NAMES ITS RUNGS, and asking the share for a
-            # directory is a second opinion that fails for every migrated run:
-            # the rung is in the container and there is no directory to find.
-            name = dict(archive.manifest_entries(prior, plan.checkpoint_sas)).get(int(wanted), "")
-            if not name:
-                log(f"FATAL warm-start prior has no rung {wanted} (its manifest names none)")
-                return 1, "missing-rung"
-            try:
-                archive.require_complete(prior, name, plan.checkpoint_sas)
-            except archive.FetchRefusedError as refusal:
-                log(f"FATAL warm-start rung {wanted}: {refusal}")
-                return 1, "missing-rung"
-            archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas, log)
-            log(f"fetched warm-start rung {name}")
-        else:
-            archive.fetch_current_rung(prior, destination, plan.checkpoint_sas, log)
     _refresh_abstractions(paths, log, plan.checkpoint_sas)
     run_id = plan.train_run_id
     if archive.is_published(run_id, plan.checkpoint_sas):

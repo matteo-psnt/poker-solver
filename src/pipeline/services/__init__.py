@@ -21,9 +21,6 @@ group by concern only:
 """
 
 from src.pipeline.services.bucketing import precompute_abstraction
-from src.pipeline.services.equity_prior import (
-    DEFAULT_TEMPERATURE as DEFAULT_EQUITY_TEMPERATURE,
-)
 from src.pipeline.services.experiments import (
     CurveOutput,
     CurvePoint,
@@ -49,16 +46,12 @@ from src.pipeline.services.scoring import (
     record_blueprint_match,
 )
 from src.pipeline.services.static_training import StaticTrainingOutput, train_static
-from src.pipeline.services.warm_start import DEFAULT_EFFECTIVE_ITERATIONS, PRIOR_SHAPES
 from src.pipeline.training.run_tracker import ExperimentTag
 
 __all__ = [
     "BLUEPRINT_MATCH_ESTIMATOR_LABEL",
-    "DEFAULT_EFFECTIVE_ITERATIONS",
-    "DEFAULT_EQUITY_TEMPERATURE",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
-    "PRIOR_SHAPES",
     "CurveOutput",
     "CurvePoint",
     "EvaluationOutput",

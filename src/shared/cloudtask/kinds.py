@@ -131,18 +131,6 @@ class NodePlan(TaskFields, Protocol):
     def eval_flags(self) -> Sequence[str]: ...
     @property
     def progress_path(self) -> str: ...
-    @property
-    def warm_start_from(self) -> str: ...
-    @property
-    def warm_start_weight(self) -> int: ...
-    @property
-    def warm_start_at(self) -> int: ...
-    @property
-    def warm_start_shape(self) -> str: ...
-    @property
-    def equity_prior_weight(self) -> int: ...
-    @property
-    def equity_prior_temperature(self) -> float: ...
 
 
 @dataclass(frozen=True)
@@ -434,25 +422,6 @@ class TrainTask(TaskKind):
             argv += ["--checkpoint-every", str(plan.checkpoint_every)]
         if work := plan.progress_path:
             argv += ["--progress-file", work]
-        # Seeding is a property of a FRESH run; train_static ignores it when
-        # continuing, so a retry cannot lay the prior back over real progress.
-        if plan.warm_start_from:
-            argv += ["--warm-start-from", plan.warm_start_from]
-            if plan.warm_start_weight:
-                argv += ["--warm-start-weight", str(plan.warm_start_weight)]
-            # The rung is part of the prior's identity: board-free quality is not
-            # monotone, so seeding from the manifest's current rung silently uses
-            # a different strategy than the one that was measured.
-            if plan.warm_start_at:
-                argv += ["--warm-start-at", str(plan.warm_start_at)]
-            if plan.warm_start_shape:
-                argv += ["--warm-start-shape", plan.warm_start_shape]
-        if plan.equity_prior_weight:
-            argv += ["--equity-prior", str(plan.equity_prior_weight)]
-            # Only alongside a weight: it shapes the same guess, and passing
-            # it without one asks for a prior that is not there.
-            if plan.equity_prior_temperature:
-                argv += ["--equity-prior-temperature", str(plan.equity_prior_temperature)]
         # Appended only when set: `--arm ""` records an arm literally named
         # empty string rather than an unaffiliated run.
         for flag, value in (
@@ -482,33 +451,6 @@ class TrainTask(TaskKind):
         return _iterations_done(plan, state, self.unit)
 
 
-def _refuse_scalar_only_priors(task: Any, kernel: str) -> None:
-    """Refuse a prior only `train-static` can apply.
-
-    These kernels' argv carries no ``--warm-start-*``/``--equity-prior*``, so a
-    submission naming one would train a plain CONTROL under the variant's arm
-    label -- the failure that has twice cost a whole sweep, and the reason the
-    scalar path refuses temperature-without-weight at submit.
-    """
-    named = [
-        flag
-        for flag, value in (
-            ("--warm-start-from", task.warm_start_from),
-            ("--warm-start-weight", task.warm_start_weight),
-            ("--warm-start-at", task.warm_start_at),
-            ("--equity-prior", task.equity_prior_weight),
-            ("--equity-prior-temperature", task.equity_prior_temperature),
-        )
-        if value
-    ]
-    if named:
-        raise BadTaskError(
-            f"--kernel {kernel} cannot apply {', '.join(named)}: only the scalar "
-            "trainer seeds a prior. This would train a control under a variant's "
-            "arm name. Drop the flag, or submit the arm with --kernel scalar."
-        )
-
-
 class TrainPcsTask(TaskKind):
     """Train by public chance sampling: one board per iteration, every hand at once.
 
@@ -530,7 +472,6 @@ class TrainPcsTask(TaskKind):
             raise BadTaskError("a training task needs a config, even when continuing a run")
         if task.to <= 0:
             raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
-        _refuse_scalar_only_priors(task, "pcs")
 
     def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = [

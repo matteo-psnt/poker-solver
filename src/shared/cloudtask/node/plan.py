@@ -97,12 +97,6 @@ class TaskPlan:
     workers: int = 1
     checkpoint_every: int = 0
     retain_every: int = 0
-    warm_start_from: str = ""
-    warm_start_weight: int = 0
-    warm_start_at: int = 0
-    warm_start_shape: str = ""
-    equity_prior_weight: int = 0
-    equity_prior_temperature: float = 0.0
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     eval_method: str = DEFAULT_EVAL_METHOD
     eval_rungs: tuple[str, ...] = ()

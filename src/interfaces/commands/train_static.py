@@ -52,60 +52,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "1M paid ~20%% and 5M pays under 5%%.",
     )
     parser.add_argument(
-        "--warm-start-from",
-        default=None,
-        dest="warm_start_from",
-        help="Seed a FRESH run from this run's average strategy before training. "
-        "Ignored when continuing, so a retried leg cannot lay the prior back over "
-        "the progress it already made.",
-    )
-    parser.add_argument(
-        "--warm-start-weight",
-        type=int,
-        default=services.DEFAULT_EFFECTIVE_ITERATIONS,
-        dest="warm_start_weight",
-        help="How much accumulated regret the prior CLAIMS, and so how many real "
-        "iterations it takes to overrule. The experiment's independent variable.",
-    )
-    parser.add_argument(
-        "--warm-start-at",
-        type=int,
-        default=None,
-        dest="warm_start_at",
-        help="Rung of the prior to seed from. Board-free quality is NOT monotone "
-        "in iterations, so the last rung is not generally the best -- score the "
-        "ladder and name the minimum. Omitted seeds from the manifest's current.",
-    )
-    parser.add_argument(
-        "--warm-start-shape",
-        default="flat",
-        choices=services.PRIOR_SHAPES,
-        dest="warm_start_shape",
-        help="How the prior's weight is spread across rows. flat = every row "
-        "claims the full weight. confidence = a row claims less the more "
-        "indifferent the prior is there, so rows it had no view on stop braking "
-        "the solver. Changes resistance, never the strategy a row plays.",
-    )
-    parser.add_argument(
-        "--equity-prior",
-        type=int,
-        default=0,
-        dest="equity_prior_weight",
-        help="Seed a FRESH run with a strength-aware opening guess instead of "
-        "uniform: strong buckets lean to betting and raising, weak ones to "
-        "checking and folding. Needs no source run, so it applies to a cold "
-        "start -- which is where it matters, since the rows it helps are the "
-        "ones training has not reached. 0 disables.",
-    )
-    parser.add_argument(
-        "--equity-prior-temperature",
-        type=float,
-        default=services.DEFAULT_EQUITY_TEMPERATURE,
-        help="How sharply the guess commits. Low sharpens toward one action; "
-        "high flattens toward uniform, which is the thing being replaced -- so a "
-        "large value is a NULL arm that must reproduce a cold control.",
-    )
-    parser.add_argument(
         "--run",
         default=None,
         help="Continue an EXISTING run instead of starting one. --iterations is an "
@@ -149,13 +95,7 @@ def run(args: argparse.Namespace) -> StaticTrainingPayload:
             ),
             checkpoint_every=args.checkpoint_every,
             run_id=args.run,
-            warm_start_from=Path(args.warm_start_from) if args.warm_start_from else None,
-            warm_start_weight=args.warm_start_weight,
-            warm_start_at=args.warm_start_at,
             progress_file=Path(args.progress_file) if args.progress_file else None,
-            warm_start_shape=args.warm_start_shape,
-            equity_prior_weight=args.equity_prior_weight,
-            equity_prior_temperature=args.equity_prior_temperature,
         )
     return StaticTrainingPayload(**out.model_dump())
 

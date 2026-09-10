@@ -167,17 +167,9 @@ class SubmitBody(BaseModel):
     retain_every: int | None = None
     timeout: str | None = None
     pool: str | None = None
-    # `--kernel` and the two groups it gates. Absent here for as long as they
-    # existed on the command, so the console could queue only scalar runs and
-    # only cold ones -- a gap that reads as a missing feature rather than a
-    # missing field. `test_endpoint_arguments` now pins every body to its flags.
+    # `test_endpoint_arguments` pins every body to its command's flags, so a
+    # flag added to `submit` cannot be missing here for long.
     kernel: str | None = None
-    warm_start_from: str | None = None
-    warm_start_weight: int | None = None
-    warm_start_at: int | None = None
-    warm_start_shape: str | None = None
-    equity_prior_weight: int | None = None
-    equity_prior_temperature: float | None = None
 
 
 class ScoreBody(BaseModel):

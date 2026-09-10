@@ -98,54 +98,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="[pcs] Keep one rung per this many iterations for `score --at`. 0 keeps every rung.",
     )
     parser.add_argument(
-        "--warm-start-from",
-        default="",
-        dest="warm_start_from",
-        help="[scalar] Seed a FRESH run from this run's average strategy. Board-free "
-        "reaches a 30M-iteration blueprint's quality in ~100 iterations, so it is "
-        "worth a try as a prior even though it is capped as a blueprint.",
-    )
-    parser.add_argument(
-        "--warm-start-weight",
-        type=int,
-        default=0,
-        dest="warm_start_weight",
-        help="[scalar] How much regret the prior claims, i.e. how many real "
-        "iterations it takes to overrule. The experiment's independent variable.",
-    )
-    parser.add_argument(
-        "--warm-start-at",
-        type=int,
-        default=0,
-        dest="warm_start_at",
-        help="[scalar] Rung of the prior to seed from; the last rung is not "
-        "generally the best one.",
-    )
-    parser.add_argument(
-        "--warm-start-shape",
-        default="",
-        dest="warm_start_shape",
-        choices=("", "flat", "confidence"),
-        help="[scalar] How the prior's weight is spread across rows. flat gives "
-        "every row the full weight; confidence damps rows the prior is "
-        "indifferent about, so they stop braking the solver.",
-    )
-    parser.add_argument(
-        "--equity-prior",
-        type=int,
-        default=0,
-        dest="equity_prior_weight",
-        help="[scalar] Seed a fresh run with a strength-aware opening guess "
-        "instead of uniform. Needs no prior run.",
-    )
-    parser.add_argument(
-        "--equity-prior-temperature",
-        type=float,
-        default=0.0,
-        help="[scalar] How sharply the guess commits. High flattens toward "
-        "uniform, so a large value is a null arm.",
-    )
-    parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
         help="Wall-clock ceiling on the TRAINING process. It fires before the task-level "
@@ -242,12 +194,6 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 ),
                 retain_every=args.retain_every,
                 timeout=args.timeout,
-                warm_start_from=args.warm_start_from,
-                warm_start_weight=args.warm_start_weight,
-                warm_start_at=args.warm_start_at,
-                warm_start_shape=args.warm_start_shape,
-                equity_prior_weight=args.equity_prior_weight,
-                equity_prior_temperature=args.equity_prior_temperature,
             )
         ],
     )

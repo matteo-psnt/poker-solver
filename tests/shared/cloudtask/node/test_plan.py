@@ -239,12 +239,6 @@ WIRE_SAMPLES: dict[str, tuple[Any, Any]] = {
     "RUN_GIT_COMMIT": ("c13dcb7", "c13dcb7"),
     "RUN_GIT_DIRTY": ("1", "1"),
     "RUN_GIT_BRANCH": ("wire-and-share", "wire-and-share"),
-    "RUN_WARM_START_FROM": ("run-prior", "run-prior"),
-    "RUN_WARM_START_WEIGHT": (3000, 3000),
-    "RUN_WARM_START_AT": (9, 9),
-    "RUN_WARM_START_SHAPE": ("confidence", "confidence"),
-    "RUN_EQUITY_PRIOR": (250, 250),
-    "RUN_EQUITY_PRIOR_TEMPERATURE": (0.4, 0.4),
 }
 
 

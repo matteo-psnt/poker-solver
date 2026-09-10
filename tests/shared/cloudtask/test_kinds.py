@@ -58,53 +58,8 @@ def _plan(**kwargs):
         "universe_boards": 0,
         "universe_seed": 0,
         "dtype": "",
-        "warm_start_from": "",
-        "warm_start_weight": 0,
-        "warm_start_at": 0,
-        "warm_start_shape": "",
-        "equity_prior_weight": 0,
     }
     return SimpleNamespace(**(base | kwargs))
-
-
-class TestAPriorIsRefusedByTheKernelsThatCannotApplyIt:
-    """A submission naming a prior a kernel's argv does not carry would train a
-    plain CONTROL under the variant's arm label -- the failure that has twice
-    cost a whole sweep. The scalar path refuses at submit; these did not.
-    """
-
-    PRIORS = (
-        {"warm_start_from": "run-y"},
-        {"warm_start_weight": 3000},
-        {"warm_start_at": 10_000_000},
-        {"equity_prior_weight": 3000},
-        {"equity_prior_temperature": 0.5},
-    )
-
-    def _spec_for(self, op, **over):
-        base = {
-            "op": op,
-            "warm_start_from": "",
-            "warm_start_weight": 0,
-            "warm_start_at": 0,
-            "warm_start_shape": "",
-            "equity_prior_weight": 0,
-            "equity_prior_temperature": 0.0,
-            "to": 1000,
-            "universe_boards": 32,
-        }
-        return _spec(**(base | over))
-
-    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS])
-    @pytest.mark.parametrize("prior", PRIORS)
-    def test_a_prior_is_refused_rather_than_dropped(self, op, prior):
-        spec = self._spec_for(op, **prior)
-        with pytest.raises(BadTaskError, match="only the scalar trainer"):
-            kinds.kind(op).validate(spec)
-
-    @pytest.mark.parametrize("op", [TaskName.TRAIN_PCS])
-    def test_a_plain_arm_still_passes(self, op):
-        kinds.kind(op).validate(self._spec_for(op))
 
 
 class TestEveryKindRungsAtItsOwnScale:
