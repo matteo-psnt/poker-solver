@@ -20,10 +20,10 @@ from src.shared.config import Config
 
 
 def _run(published, name, *, rungs, status="completed", scored=(), suffix=".zarr"):
-    """A published run holding `rungs`, as the share presents one.
+    """A published run holding `rungs`, as a materialised tree presents one.
 
-    `suffix` because the marker carries whichever spelling the rung was
-    published under, and prune has to read both.
+    `suffix` because a marker carries whichever spelling the rung was published
+    under, and prune has to read both.
     """
     run_dir = published / name
     (run_dir / "evals").mkdir(parents=True)
@@ -47,9 +47,9 @@ def _run(published, name, *, rungs, status="completed", scored=(), suffix=".zarr
 
 
 def _plan(published, *, price=False, **kwargs):
-    """`price=False` by default: sizing is a listing per run against the real
-    share, and most of these tests are about which rungs are chosen, not how
-    big they are."""
+    """`price=False` by default: sizing is a HEAD per run against the real
+    container, and most of these tests are about which rungs are chosen, not
+    how big they are."""
     return prune_checkpoints.COMMAND.invoke(price=price, **kwargs)
 
 
@@ -59,10 +59,8 @@ def _record(monkeypatch):
     The store's coordinates are stubbed too: `run` reads them unconditionally,
     and a unit test must not depend on this laptop's Terraform state."""
     from src.interfaces.cloud import config as cloud_config
-    from src.interfaces.cloud.store import share
 
     monkeypatch.setattr(cloud_config.CloudConfig, "load", staticmethod(lambda: _Config()))
-    monkeypatch.setattr(share, "share_client", lambda _c: object())
     monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: object())
     monkeypatch.setattr(prune_checkpoints.connect, "record_source_from_environment", lambda: None)
     monkeypatch.setattr(prune_checkpoints.queries, "scored_rungs", lambda _: {})
@@ -161,94 +159,7 @@ class TestTheSafetyCatch:
             _plan(published, keep=0)
 
 
-class TestTheOrphanSweep:
-    """`--apply` deletes the marker BEFORE the bytes, so an interrupted sweep
-    leaves an unclaimed directory rather than a rung that lies about existing.
-    That trade is only sound if the leftovers are actually collected."""
-
-    @staticmethod
-    def _share(monkeypatch, files):
-        from src.interfaces.cloud import config as cloud_config
-        from src.interfaces.cloud.store import share
-
-        class _Deleted(list):
-            """A list that also carries the container deletions."""
-
-            objects: list[str]
-
-        deleted = _Deleted()
-
-        def list_entries(_service, _name, path, *, etags=False):
-            seen: dict[str, bool] = {}
-            for candidate in files:
-                if candidate.startswith(f"{path}/"):
-                    rest = candidate[len(path) + 1 :]
-                    seen[rest.split("/")[0]] = "/" in rest
-            return [
-                share.ShareEntry(name=n, is_directory=d, size=1) for n, d in sorted(seen.items())
-            ]
-
-        def walk(_service, _name, path, *, skip_dir=None):
-            return [(p, "v1") for p in list(files) if p.startswith(f"{path}/")]
-
-        def delete_file(_service, _name, path):
-            deleted.append(path)
-            return files.discard(path) is None
-
-        def delete_directory(_service, _name, path):
-            return not any(p.startswith(f"{path}/") for p in files)
-
-        monkeypatch.setattr(share, "list_entries", list_entries)
-        monkeypatch.setattr(share, "walk_files", walk)
-        monkeypatch.setattr(share, "delete_file", delete_file)
-        monkeypatch.setattr(share, "delete_directory", delete_directory)
-        monkeypatch.setattr(share, "share_client", lambda _c: object())
-        monkeypatch.setattr(cloud_config.CloudConfig, "load", staticmethod(lambda: _Config()))
-        # The container half, recorded beside the share's. Both are deletions
-        # this command now performs and a test of one must not silently reach
-        # the real account for the other.
-        from src.interfaces.cloud.store import blob
-
-        objects: list[str] = []
-        monkeypatch.setattr(
-            blob, "delete_rung", lambda _c, run, name: (objects.append(f"{run}/{name}"), True)[1]
-        )
-        monkeypatch.setattr(blob, "rung_size", lambda *_a: 0)
-        deleted.objects = objects
-        return deleted
-
-    def test_an_unclaimed_snapshot_is_swept_and_a_claimed_one_is_not(self, published, monkeypatch):
-        _run(published, "run-a", rungs=[100, 200, 300, 400])
-        base = "archive/run-a"
-        # The markers live on the SHARE, which is where `claimed` is read from --
-        # not in the local record tree the plan was decided against.
-        files = {
-            f"{base}/{archive.MARKER_PREFIX}static-300.zarr",
-            f"{base}/{archive.MARKER_PREFIX}static-400.zarr",
-            # 300 and 400 are KEPT: claimed by a marker, so never touched.
-            f"{base}/static-300.zarr/c/0",
-            f"{base}/static-400.zarr/c/0",
-            # 999 is the leftover shape: bytes with no marker naming them.
-            f"{base}/static-999.zarr/c/0",
-        }
-        deleted = self._share(monkeypatch, set(files))
-        # `--apply` refuses without a record, since that is what protects a
-        # scored rung. This case is about the sweep, so give it an empty one.
-        monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: object())
-        monkeypatch.setattr(
-            prune_checkpoints.connect, "record_source_from_environment", lambda: None
-        )
-        monkeypatch.setattr(prune_checkpoints.queries, "scored_rungs", lambda _: {})
-
-        prune_checkpoints.COMMAND.invoke(keep=2, price=False, apply=True, runs=["run-a"])
-
-        assert f"{base}/static-999.zarr/c/0" in deleted, "the orphan's bytes were left behind"
-        assert f"{base}/static-300.zarr/c/0" not in deleted
-        assert f"{base}/static-400.zarr/c/0" not in deleted
-
-
 class _Config:
-    share_name = "s"
     storage_account = "a"
     share_key = "k"
 
@@ -318,26 +229,25 @@ class TestPruningReachesTheContainer:
             f"static-200{records.SNAPSHOT_SUFFIX}",
         ]
 
-    def test_the_container_object_is_deleted_too(self, published, monkeypatch):
+    def test_the_container_object_is_deleted(self, published, monkeypatch):
+        """The ONLY delete this command performs now."""
         _run(published, "run-a", rungs=[100, 200, 300, 400])
-        deleted = TestTheOrphanSweep._share(monkeypatch, {"archive/run-a/static-100.zarr/c/0"})
-        monkeypatch.setattr(prune_checkpoints.connect, "engine_from_environment", lambda: object())
+        deleted: list[str] = []
+        from src.interfaces.cloud.store import blob
+
         monkeypatch.setattr(
-            prune_checkpoints.connect, "record_source_from_environment", lambda: None
+            blob, "delete_rung", lambda _c, run, name: deleted.append(f"{run}/{name}") or True
         )
-        monkeypatch.setattr(prune_checkpoints.queries, "scored_rungs", lambda _: {})
 
         plan = _plan(published, keep=2, apply=True, runs=["run-a"])
 
-        assert deleted.objects == ["run-a/static-100.ckpt.zst", "run-a/static-200.ckpt.zst"]
+        assert deleted == ["run-a/static-100.ckpt.zst", "run-a/static-200.ckpt.zst"]
         assert plan.objects_deleted == 2
 
-    def test_a_migrated_rung_is_priced_from_the_container(self, published, monkeypatch):
-        """A migrated rung has a marker on the share and no bytes beside it, so
-        pricing the share alone reported a plan that frees nothing -- and a
-        plan that frees nothing is one nobody runs."""
+    def test_a_rung_is_priced_from_the_container(self, published, monkeypatch):
+        """Priced by SAMPLING one rung per run: rungs of a run are the same
+        table at different iterations, so per-run is where the accuracy is."""
         _run(published, "run-a", rungs=[100, 200, 300, 400])
-        TestTheOrphanSweep._share(monkeypatch, set())
         from src.interfaces.cloud.store import blob
 
         monkeypatch.setattr(blob, "rung_size", lambda *_a: 3 * 1024**3)

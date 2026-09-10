@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from src.interfaces.cloud.store import share, workspace
+from src.interfaces.cloud.store import workspace
 from src.interfaces.errors import CommandError
 
 if TYPE_CHECKING:
@@ -23,75 +23,6 @@ def _mark(root: Path, _previous: Path | None) -> None:
     expression, so it cannot help returning it.
     """
     (root / "marker").write_text("x")
-
-
-class _FakeShare:
-    """A share as a dict of path -> bytes.
-
-    Stands in for ShareServiceClient at the two seams workspace uses --
-    ``list_entries``/``walk_files`` to discover and ``download_file`` to pull --
-    so the materialiser is tested without an Azure account.
-    """
-
-    def __init__(self, files: dict[str, str]):
-        self.files = files
-        self.written: dict[str, str] = {}
-        self.etags: dict[str, str] = {}
-        self.downloads: list[str] = []
-
-
-@pytest.fixture
-def fake(monkeypatch):
-    store = _FakeShare(
-        {
-            "archive/run-a/run.jsonl": json.dumps({"event": "created", "run_id": "run-a"}) + "\n",
-            "archive/run-a/STATIC_CHECKPOINT.json": json.dumps({"iteration": 1000}),
-            "archive/run-a/evals/slug1.json": json.dumps({"run_id": "run-a"}),
-            "archive/run-a/static-1000.zarr/0.0": "BULK",
-            "archive/run-a/.complete-static-1000.zarr": "",
-            "archive/run-b/run.jsonl": json.dumps({"event": "created", "run_id": "run-b"}) + "\n",
-        }
-    )
-
-    def walk_files(service, share_name, path, *, skip_dir=None):
-        prefix = f"{path}/"
-        found = []
-        for p in service.files:
-            if not p.startswith(prefix):
-                continue
-            parts = p[len(prefix) :].split("/")
-            if skip_dir is not None and any(skip_dir(part) for part in parts[:-1]):
-                continue
-            found.append((p, service.etags.get(p, "v1")))
-        return found
-
-    def list_entries(service, share_name, path, *, etags=False):
-        names = set()
-        prefix = f"{path}/"
-        for p in service.files:
-            if p.startswith(prefix):
-                rest = p[len(prefix) :]
-                names.add((rest.split("/")[0], "/" in rest))
-        return [share.ShareEntry(name=n, is_directory=d, size=0) for n, d in sorted(names)]
-
-    def download_file(service, share_name, path, destination):
-        service.downloads.append(path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(service.files[path])
-
-    def read_text(service, share_name, path):
-        return service.files.get(path)
-
-    def write_text(service, share_name, path, body):
-        service.written[path] = body
-        service.files[path] = body
-
-    monkeypatch.setattr(share, "walk_files", walk_files)
-    monkeypatch.setattr(share, "list_entries", list_entries)
-    monkeypatch.setattr(share, "download_file", download_file)
-    monkeypatch.setattr(share, "read_text", read_text)
-    monkeypatch.setattr(share, "write_text", write_text)
-    return store
 
 
 RECORD = {

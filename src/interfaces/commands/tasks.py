@@ -24,7 +24,6 @@ from pydantic import BaseModel
 
 from src.adapters.postgres import connect, observations, queries
 from src.interfaces.cloud.config import CloudConfig
-from src.interfaces.cloud.store import share
 from src.interfaces.cloud.tasks import batch
 from src.interfaces.commands._base import Command
 from src.shared import task_history
@@ -34,9 +33,6 @@ from src.shared.task_history import TaskRow
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Iterable
-
-# Round trips, not bytes: see `workspace._PARALLEL_DOWNLOADS`, measured there.
-_PARALLEL_SHARE_IO = 64
 
 # Which version of each record a materialised tree holds: one `etag<TAB>name`
 # line per file. BESIDE `legs/`, not inside it, where `read_documents` would
@@ -168,7 +164,7 @@ def _new_observations(
     `says_the_same` rather than a byte comparison, and the reason is measured:
     `observed_at` is stamped on every read, so two observations of one finished
     task differ in a field that means nothing. Re-publishing those cost 14.1s
-    per poll restating what the share already said.
+    per poll restating what the record already said.
     """
     open_ids = {row.task_id for row in open_tasks}
     fresh: dict[str, dict[str, Any]] = {}
@@ -193,7 +189,7 @@ def _new_observations(
 
 
 def _ask_batch(config: CloudConfig, open_tasks: list[TaskRow]) -> list[dict[str, Any]]:
-    """Ask Batch about exactly the tasks the share could not explain.
+    """Ask Batch about exactly the tasks the record could not explain.
 
     One ``get_task`` per open question, concurrently, rather than listing every
     task of every job in the account -- which cost ~0.39s per job and scaled
@@ -240,28 +236,6 @@ def _link(source: Path, destination: Path) -> None:
         shutil.copyfile(source, destination)
 
 
-def _upload_observed(service: Any, share_name: str, local: Path, explained: list[str]) -> None:
-    """Push back only the observer records.
-
-    The node owns the other half and must never be overwritten from here -- one
-    writer per file is what makes this safe on a share with no atomic rename.
-
-    Concurrently, and only for what `_new_observations` found NEW. A write is ~2.4s of
-    round trip; six of them, serially, on every read, was 14.1s spent restating
-    what the share already said.
-    """
-    if not explained:
-        return
-
-    def publish(task_id: str) -> None:
-        name = f"{task_id}{task_history.OBSERVED_SUFFIX}"
-        body = (task_log.tasks_dir(local) / name).read_text()
-        share.write_text(service, share_name, f"{task_log.RECORDS_DIRNAME}/{name}", body)
-
-    with ThreadPoolExecutor(max_workers=min(_PARALLEL_SHARE_IO, len(explained))) as pool:
-        list(pool.map(publish, explained))
-
-
 def format_table(rows: Iterable[TaskRow]) -> str:
     """Compact fixed-width listing, one row per task.
 
@@ -293,7 +267,7 @@ def format_table(rows: Iterable[TaskRow]) -> str:
     # counted rather than only how much of it.
     materialised = [{c: _cell(_derived(r, c)) for c in columns} for r in rows]
     if not materialised:
-        return "  no task records on the share"
+        return "  no task records"
     widths = {c: max(len(c), *(len(r[c]) for r in materialised)) for c in columns}
     lines: list[str] = ["  " + "  ".join(c.ljust(widths[c]) for c in columns)]
     lines.append("  " + "  ".join("-" * widths[c] for c in columns))
