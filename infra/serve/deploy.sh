@@ -409,9 +409,13 @@ sudo tee /etc/chipzen-seat.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
+POKER_SOLVER_RECORD_DSN=$RECORD_DSN
 POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
 SEAT_EXTRA=${AT:+--at $AT}$SEAT_RUNGS
 EOF
+# The DSN carries a password, and this file gained one the moment the seat began
+# reading run metadata from the record. Same mode as `/etc/blueprint.env`.
+sudo chmod 600 /etc/chipzen-seat.env
 
 sudo systemctl daemon-reload
 sudo systemctl enable blueprint
