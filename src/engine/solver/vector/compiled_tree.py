@@ -79,21 +79,17 @@ class CompiledTree:
         terminal_street: Street the hand ended on. Showdowns before the river
             still need a full board, which is why this is recorded.
         depth: Longest path from the root to each node, in decision nodes.
-        walk_index: Node id -> its position in ``level_nodes``. The transient
-            per-iteration arrays (reach, value) are indexed in THIS space, where
-            a level is contiguous and a two-level window is a slice; storage
-            rows stay in node-id space, so no checkpoint is affected.
-        walk_target: ``edge_target`` with node children translated into walk
-            space. Terminal edges keep their terminal id, exactly as
-            ``edge_target`` does -- ``edge_kind`` still says which is which.
-        level_slot: NODE ID -> its offset within its own level, keyed like
-            ``walk_index`` rather than by walk position. With a two-slot ring
-            holding level ``k`` at ``k & 1``, this is the index into that
-            buffer. Keying it the other way translates twice and reads a
-            plausible, wrong slot.
-        slot_target: ``walk_target`` reduced to the child's ``level_slot``.
-            Every node child is exactly one level down (checked at build), so
-            the ring parity is the parent's level plus one and needs no lookup.
+        level_slot: NODE ID -> its offset within its own level. The transient
+            per-iteration arrays (reach, value) are a two-slot ring holding
+            level ``k`` at ``k & 1``, and this is the index into that buffer.
+            Keyed by node id, NOT by position in ``level_nodes``: keying it the
+            other way translates twice and reads a plausible, wrong slot.
+            Storage rows stay in node-id space, so no checkpoint is affected.
+        slot_target: ``edge_target`` with node children reduced to the child's
+            ``level_slot``; terminal edges keep their terminal id, exactly as
+            ``edge_target`` does. Every node child is exactly one level down
+            (checked at build), so the ring parity is the parent's level plus
+            one and needs no lookup.
         level_nodes: Node ids sorted by depth, then by id.
         level_offset: Level ``d`` occupies ``level_nodes[level_offset[d] :
             level_offset[d + 1]]``.
@@ -110,8 +106,6 @@ class CompiledTree:
     terminal_value: np.ndarray
     terminal_street: np.ndarray
     depth: np.ndarray
-    walk_index: np.ndarray
-    walk_target: np.ndarray
     level_slot: np.ndarray
     slot_target: np.ndarray
     level_nodes: np.ndarray
@@ -222,8 +216,6 @@ class _Compiler:
             terminal_value=np.array(self.terminal_value, dtype=np.float64),
             terminal_street=np.array(self.terminal_street, dtype=np.int8),
             depth=self.depth,
-            walk_index=walk_index,
-            walk_target=walk_target,
             level_slot=level_slot,
             slot_target=slot_target,
             level_nodes=level_nodes,
