@@ -152,6 +152,16 @@ def _self_seat(match_info: dict[str, Any]) -> int:
     for entry in match_info.get("seats") or ():
         if entry.get("is_self"):
             return int(entry.get("seat", 0))
+    # SAY SO. Falling back to 0 is indistinguishable from correctly reading 0,
+    # and we are seat 0 in 503 of 504 matches -- so a silent default would be
+    # invisible in every match except the rare one it gets WRONG, where every
+    # action in the history is then attributed to the wrong player.
+    logger.warning(
+        "match_start carried no seat flagged `is_self` (%s seats); assuming 0. "
+        "If this match is not ours to play from seat 0, every reconstructed "
+        "spot in it is built for the opponent.",
+        len(match_info.get("seats") or ()),
+    )
     return 0
 
 
