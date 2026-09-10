@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from src.interfaces.commands._base import Command, resolve_run_dir
 from src.interfaces.errors import CommandError
+from src.shared.cloudtask.node.paths import NodePaths
 
 if TYPE_CHECKING:
     import argparse
@@ -38,7 +39,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", required=True, help="Run id, fragment, or path to a run dir.")
     parser.add_argument(
         "--runs-dir",
-        default="/mnt/work/runs",
+        default=str(NodePaths.from_environment().runs),
         help="Where runs live on this box. Local disk, never the share.",
     )
     parser.add_argument(
