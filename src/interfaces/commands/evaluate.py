@@ -276,7 +276,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "the fraction a four-card deal leaves compatible, so a voided branch is not a refund. "
         "Exact at full enumeration; a separate comparison tier from the annulled default.",
     )
-    parser.add_argument("--seed", type=int, default=None, help="Random seed (default: random).")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed (default: random for lbr, 1 for resolver_match). For "
+        "resolver_match it picks the DEALS, so it is how a gate arm is replicated: "
+        "several seeds are several independent samples of the same knob tier.",
+    )
 
 
 def run(args: argparse.Namespace) -> services.EvaluationPayload:
@@ -340,6 +347,9 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         resolver_iterations=args.resolver_iterations,
         resolver_gate_deals=args.deals,
         resolver_gate_workers=args.workers,
+        # `--seed` means "random" for lbr and "these deals" for the gate, so the
+        # gate keeps its deterministic default rather than inheriting None.
+        resolver_gate_seed=args.seed if args.seed is not None else 1,
         resolver_root_prior_weight=args.resolver_prior_weight,
         resolver_blend_alpha=args.resolver_blend_alpha,
         resolver_leaf_rollouts=args.resolver_leaf_rollouts,

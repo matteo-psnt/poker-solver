@@ -80,6 +80,10 @@ def evaluate_and_record(
     resolver_iterations: int = 64,
     resolver_gate_deals: int = 1000,
     resolver_gate_workers: int = 1,
+    # Which deals get played. Every gate row ever recorded carries base_seed=1
+    # because this had no caller: six seeds fanned over six nodes returned six
+    # identical numbers, so a gate arm could not be replicated.
+    resolver_gate_seed: int = 1,
     leaf_continuation_fraction: float | None = None,
     resolver_max_iterations: int | None = None,
     resolver_root_prior_weight: float | None = None,
@@ -150,6 +154,7 @@ def evaluate_and_record(
         out = evaluate_run_resolver_gate(
             run_dir,
             num_deals=resolver_gate_deals,
+            seed=resolver_gate_seed,
             leaf_continuation_fraction=leaf_continuation_fraction,
             max_iterations=resolver_max_iterations,
             root_prior_weight=resolver_root_prior_weight,
