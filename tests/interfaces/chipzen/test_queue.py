@@ -185,9 +185,25 @@ class TestRateLimitBackoff:
         assert _retry_after({}, 0.0) == seat_module._QUEUE_BACKOFF_START_S
         assert _retry_after({}, 2.0) == 4.0
 
-    def test_the_backoff_is_bounded_by_the_period_it_replaces(self) -> None:
+    def test_the_doubling_is_bounded(self) -> None:
+        """Our GUESS is capped; their instruction is not capped to the same place.
+
+        The ceiling used to be the 30 s poll period, on the reasoning that a
+        backoff should never cost more queue time than the limit it answers.
+        That is backwards while a limit PERSISTS -- it pins the retry at two a
+        minute forever, which keeps a rate limit alive rather than waiting it
+        out. MEASURED 09-14: 429s from 00:37 and still going 55 minutes later,
+        20 matches into a day whose previous three ran 100.
+        """
         assert _retry_after({}, 1e6) == seat_module._QUEUE_BACKOFF_MAX_S
-        assert _retry_after({"retry-after": "99999"}, 0.0) == seat_module._QUEUE_BACKOFF_MAX_S
+        assert seat_module._QUEUE_BACKOFF_MAX_S >= 300.0
+
+    def test_a_long_retry_after_is_honoured(self) -> None:
+        """Their number beats ours: they know the window, we are guessing."""
+        assert _retry_after({"retry-after": "600"}, 0.0) == 600.0
+
+    def test_an_absurd_retry_after_is_still_bounded(self) -> None:
+        assert _retry_after({"retry-after": "99999"}, 0.0) == (seat_module._QUEUE_RETRY_AFTER_MAX_S)
 
     def test_a_limited_join_is_retried_rather_than_abandoned(self, chipzen) -> None:
         # The seat must keep asking: a rate limit is the queue working, not the

@@ -696,19 +696,35 @@ _QUEUE_POLL_S = 30.0
 # a full ~30 s of sitting unqueued. Retry in seconds, not in a poll.
 TOO_MANY_REQUESTS = 429
 _QUEUE_BACKOFF_START_S = 2.0
-_QUEUE_BACKOFF_MAX_S = 30.0
+_QUEUE_BACKOFF_MAX_S = 300.0
+
+#: Longest wait a server-sent `Retry-After` can buy. Generous on purpose -- if
+#: they ask for ten minutes, arguing with them is how a short limit becomes a
+#: long one.
+_QUEUE_RETRY_AFTER_MAX_S = 900.0
+
+#: Re-announce a limit that will not clear, so a block cannot hide in silence.
+_QUEUE_LIMIT_RELOG_S = 300.0
 
 
 def _retry_after(headers: Mapping[str, str], previous: float) -> float:
     """Seconds to wait after a rate-limited join -- their header, else doubling.
 
-    Capped at the poll period it replaces, so a backoff can never cost more
-    queue time than the rate limit it is answering.
+    The ceiling was the 30 s poll period, on the reasoning that a backoff should
+    never cost more queue time than the limit it answers. That is backwards
+    while a limit PERSISTS: it pins the retry at two a minute forever, which is
+    a way to keep a rate limit alive rather than wait one out. MEASURED 09-14 --
+    429s from 00:37, still going 55 minutes later, 20 matches into a day whose
+    previous three ran 100.
+
+    So the doubling now runs to five minutes, and a server-sent `Retry-After` is
+    honoured up to fifteen. Their number is better than ours: they know the
+    window, we are guessing at it.
     """
     header = headers.get("retry-after")
     if header:
         try:
-            return max(1.0, min(float(header), _QUEUE_BACKOFF_MAX_S))
+            return max(1.0, min(float(header), _QUEUE_RETRY_AFTER_MAX_S))
         except ValueError:
             pass  # a date-form Retry-After; the doubling below is the fallback
     return min(max(previous * 2.0, _QUEUE_BACKOFF_START_S), _QUEUE_BACKOFF_MAX_S)
@@ -745,6 +761,7 @@ async def _keep_queued(
     period = _QUEUE_POLL_S
     last_state: str | None = None
     backoff = 0.0
+    limited_first = limited_since = 0.0
 
     async with httpx.AsyncClient(base_url=base, headers=headers, timeout=15.0) as http:
         while True:
@@ -774,8 +791,23 @@ async def _keep_queued(
                     and exc.response.status_code == TOO_MANY_REQUESTS
                 ):
                     backoff = _retry_after(exc.response.headers, backoff)
-                    if last_state != "limited":
-                        logger.warning("queue: rate limited; retrying in %.0fs", backoff)
+                    # Re-announce a limit that will not clear. Logging only the
+                    # FIRST 429 made an hour-long block look exactly like one
+                    # blip: on 09-14 the seat sat limited from 00:37 with a
+                    # single line in the journal, 20 matches into a day whose
+                    # previous three ran 100, and nothing said so.
+                    now = time.monotonic()
+                    if last_state != "limited" or now - limited_since >= _QUEUE_LIMIT_RELOG_S:
+                        if last_state == "limited":
+                            logger.warning(
+                                "queue: STILL rate limited after %.0f min; retrying in %.0fs",
+                                (now - limited_first) / 60.0,
+                                backoff,
+                            )
+                        else:
+                            logger.warning("queue: rate limited; retrying in %.0fs", backoff)
+                            limited_first = now
+                        limited_since = now
                         last_state = "limited"
                 # Their side being down must never take the socket with it: the
                 # lobby can still be handed a challenge while the queue is out.
