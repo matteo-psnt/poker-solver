@@ -181,22 +181,6 @@ variable "data_disk_gb" {
   default     = 256
 }
 
-variable "store_account_name" {
-  description = "Storage account of the durable share (infra/store outputs it)."
-  type        = string
-  default     = "pokersolverstore"
-}
-
-variable "store_resource_group" {
-  type    = string
-  default = "poker-solver-store-rg"
-}
-
-variable "store_share_name" {
-  type    = string
-  default = "poker-data"
-}
-
 variable "batch_account_name" {
   description = "Lowercase alphanumeric, 3-24 chars, unique within the region."
   type        = string

@@ -38,11 +38,6 @@ data "azurerm_client_config" "current" {}
 # down compute cannot touch the experiment record. Read it by name rather than via
 # terraform_remote_state: a data lookup keeps the two modules independently
 # appliable, so neither can break the other's plan.
-data "azurerm_storage_account" "store" {
-  name                = var.store_account_name
-  resource_group_name = var.store_resource_group
-}
-
 locals {
   # Consistent tagging makes cost attribution possible later, when there is more
   # than one thing in the subscription.
@@ -164,11 +159,11 @@ locals {
     chmod -R a+rX /opt/node-deps 2>/dev/null || true
     PYTHONPATH=/opt/node-deps /usr/local/bin/python3.13 -c "import psycopg"
     chmod -R a+rX /opt/uv-python
-    SHARE="$AZ_BATCH_NODE_MOUNTS_DIR/shared"
+    # The directories a task writes into. Abstractions are NOT seeded here any
+    # more: `_refresh_abstractions` fetches them from the container per task,
+    # which is what makes precompute-then-train work on a warm pool -- this ran
+    # once per node BOOT, so a node that came up first could never see one.
     mkdir -p /mnt/work/data/combo_abstraction /mnt/work/data/runs
-    if [ -d "$SHARE/combo_abstraction" ]; then
-      cp -ru "$SHARE/combo_abstraction/." /mnt/work/data/combo_abstraction/
-    fi
 
     # The start task runs ELEVATED; tasks do not. Everything created above is
     # therefore root-owned, and a task trying to `mkdir /mnt/work/data/runs` gets
@@ -466,34 +461,17 @@ resource "azurerm_batch_pool" "pool" {
     EOT
   }
 
-  # The durable share, mounted on every node. Code snapshots, card abstractions,
-  # published runs and eval records all travel through here.
+  # NO SMB MOUNT. Every store a node reaches is Blob over HTTPS on the stdlib:
+  # rungs and manifests in `checkpoints`, abstractions in `abstractions`, the
+  # log tail and profiles in `diagnostics`, all through SAS URLs sealed into the
+  # task. The share is empty and nothing writes to it (09-09).
   #
-  # MOUNT OPTIONS ARE A RELIABILITY CONTROL, not tuning. Two nodes have gone
-  # `unusable` with MountConfigurationError MID-LEG (not at startup), stranding a
-  # task that Batch then reports as `running` forever. Both happened while
-  # publishing multi-GB checkpoint snapshots, which is the only sustained SMB
-  # load this pool generates.
-  #
-  #   vers=3.1.1    Azure Files' recommended dialect; 3.0 predates the reconnect
-  #                 and encryption improvements, and this share supports it.
-  #   nosharesock   a dedicated TCP connection for this mount rather than one
-  #                 shared across mounts to the same server -- one stalled
-  #                 operation then cannot take the whole mount down with it.
-  #   actimeo=30    caches attributes for 30s. Publishing walks thousands of
-  #                 files with cp -u, which stats every one; without this each
-  #                 stat is a round trip and the metadata traffic alone can
-  #                 exhaust the share's IOPS allowance.
-  #   mfsymlinks    symlink support, so a copy cannot fail on one unexpectedly.
-  mount {
-    azure_file_share {
-      account_name        = data.azurerm_storage_account.store.name
-      account_key         = data.azurerm_storage_account.store.primary_access_key
-      azure_file_url      = "https://${data.azurerm_storage_account.store.name}.file.core.windows.net/${var.store_share_name}"
-      relative_mount_path = "shared"
-      mount_options       = "-o vers=3.1.1,dir_mode=0777,file_mode=0777,serverino,nosharesock,actimeo=30,mfsymlinks"
-    }
-  }
+  # It is worth recording what the mount cost, because "just mount it" is the
+  # obvious suggestion: two nodes went `unusable` with MountConfigurationError
+  # MID-LEG rather than at startup, stranding tasks that Batch then reported as
+  # `running` forever. Both happened while publishing multi-GB snapshots, which
+  # was the only sustained SMB load this pool ever generated. A PUT has no
+  # mount to lose.
 
   # als_v6 has NO local temp disk, and a run needs the 773 MB abstraction plus
   # multi-GB checkpoints. This disk is the node's working storage; the start task
