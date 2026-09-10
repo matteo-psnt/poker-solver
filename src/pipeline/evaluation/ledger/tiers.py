@@ -25,6 +25,18 @@ TIER_KNOBS = ("scorer", "opponent", "include_off_tree")
 # was measured on a tree nothing can now identify.
 IDENTITY_KNOBS = ("card_abstraction_hash", "action_config_hash", "eval_tree_fingerprint")
 
+# The INSTRUMENT, not the game. exact_br is deterministic, so its number is a
+# property of (checkpoint, knobs, SCORING CODE) -- and the code moved: one
+# unchanged checkpoint at 4/16/16 conditional+thresholded scored 812.2 mbb on
+# 2026-09-03 and 775.0 on 2026-09-10 across the storage rewrite, with byte-
+# identical knobs on both rows. `tier_mismatches` cannot catch it (it refuses
+# every exact_br pair up front, since those rows carry no per-hand samples), so
+# the grouping key is the only guard there is. Deliberately strict: a commit
+# that did not touch the scorer still splits, because nothing here can prove it
+# did not. The cost is re-scoring a baseline in the same batch as its arm, which
+# is the discipline the drift proved necessary anyway.
+INSTRUMENT_KNOBS = ("eval_git_commit",)
+
 CONDITIONAL_TIER_KNOBS = (
     "runouts",
     "resolver_iterations",
@@ -246,6 +258,7 @@ def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
     return (
         record.get("method"),
         *(record.get(k) for k in IDENTITY_KNOBS),
+        *(record.get(k) for k in INSTRUMENT_KNOBS),
         *(knobs.get(k) for k in TIER_KNOBS),
         *(knobs.get(k) for k in CONDITIONAL_TIER_KNOBS),
         knobs.get("base_seed"),
@@ -278,6 +291,7 @@ def tier_label(record: dict[str, Any]) -> str:
     parts = [str(record.get("method") or "?")]
     # Truncated: these are 16-hex digests and the label is read in a table row.
     parts += [f"{k}={str(record[k])[:8]}" for k in IDENTITY_KNOBS if record.get(k) is not None]
+    parts += [f"{k}={str(record[k])[:8]}" for k in INSTRUMENT_KNOBS if record.get(k) is not None]
     parts += [f"{k}={knobs[k]}" for k in TIER_KNOBS if knobs.get(k) is not None]
     parts += [f"{k}={knobs[k]}" for k in CONDITIONAL_TIER_KNOBS if knobs.get(k) is not None]
     if knobs.get("base_seed") is not None:
@@ -319,6 +333,14 @@ def tier_mismatches(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
             reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
                 f"{knob} differs ({a.get(knob)!r} vs {b.get(knob)!r}): the two rows measured "
                 "different games, so their exploitability numbers are not on one scale."
+            )
+
+    for knob in INSTRUMENT_KNOBS:
+        if a.get(knob) != b.get(knob):
+            reasons.append(  # noqa: PERF401 - multi-line message reads worse as a genexp
+                f"{knob} differs ({str(a.get(knob))[:8]} vs {str(b.get(knob))[:8]}): the two "
+                "rows were measured by different scoring code. Re-score the baseline at the "
+                "arm's commit; a remembered number is not a baseline."
             )
 
     seed_a, seed_b = ka.get("base_seed"), kb.get("base_seed")
