@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -77,6 +78,74 @@ class TestPullMetadata:
         record = {"run-c": {"rungs": {"static-5.ckpt.zst"}, "manifest": None}}
         assert workspace.pull_metadata(tmp_path, record) == 0
         assert (tmp_path / "run-c" / ".complete-static-5.ckpt.zst").is_file()
+
+
+class TestAScopedReadAsksAboutOneRun:
+    """`runinfo --run X` pulled all 331 manifests and kept one -- 7.9s, of which
+    ~6.7s was manifests it discarded. The refusals have to survive the change:
+    both of them name what IS published, and a one-run record cannot.
+    """
+
+    RUNS = ("run-train-a-100", "run-train-b-200", "run-other-b-300")
+
+    def _store(self, monkeypatch, *, pulled):
+        from src.interfaces.cloud.config import CloudConfig
+        from src.interfaces.cloud.store import blob
+
+        monkeypatch.setattr(
+            CloudConfig, "load", classmethod(lambda cls: SimpleNamespace(storage_account="a"))
+        )
+        monkeypatch.setattr(blob, "published_run_ids", lambda _c: sorted(self.RUNS))
+        monkeypatch.setattr(
+            blob,
+            "published_record",
+            lambda _c: pytest.fail("a scoped read pulled the WHOLE record"),
+        )
+        monkeypatch.setattr(
+            blob,
+            "published_record_for",
+            lambda _c, run: (
+                pulled.append(run)
+                or {
+                    run: {"rungs": {"static-1.ckpt.zst"}, "manifest": b"{}"}
+                    if run in self.RUNS
+                    else {}
+                }
+            ),
+        )
+
+    def test_a_full_id_skips_the_id_list_entirely(self, tmp_path, monkeypatch):
+        """The scripted case: the prefix either matches objects or it does not."""
+        from src.interfaces.cloud.store import blob
+
+        pulled: list[str] = []
+        self._store(monkeypatch, pulled=pulled)
+        monkeypatch.setattr(
+            blob, "published_run_ids", lambda _c: pytest.fail("listed ids for a full id")
+        )
+
+        workspace._materialise(tmp_path, run="run-train-a-100")
+
+        assert pulled == ["run-train-a-100"]
+        assert (tmp_path / "run-train-a-100").is_dir()
+
+    def test_a_fragment_resolves_against_the_id_list(self, tmp_path, monkeypatch):
+        pulled: list[str] = []
+        self._store(monkeypatch, pulled=pulled)
+
+        workspace._materialise(tmp_path, run="a-100")
+
+        assert pulled == ["run-train-a-100"]
+
+    def test_an_ambiguous_fragment_still_names_its_candidates(self, tmp_path, monkeypatch):
+        self._store(monkeypatch, pulled=[])
+        with pytest.raises(CommandError, match="matches 2 runs"):
+            workspace._materialise(tmp_path, run="b-")
+
+    def test_an_unknown_fragment_still_names_what_is_published(self, tmp_path, monkeypatch):
+        self._store(monkeypatch, pulled=[])
+        with pytest.raises(CommandError, match="is not published"):
+            workspace._materialise(tmp_path, run="nope")
 
 
 class TestSourceSeam:
