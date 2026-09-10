@@ -319,12 +319,7 @@ def download_diagnostic(config: Any, name: str, destination: Path) -> None:
 
 
 def _diagnostics(config: Any) -> Any:
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
-
-    return BlobServiceClient(
-        account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
-    ).get_container_client(DIAGNOSTICS)
+    return _container(config, DIAGNOSTICS)
 
 
 def published_abstractions(config: Any) -> list[str]:
@@ -337,16 +332,10 @@ def published_abstractions(config: Any) -> list[str]:
     the abstraction hash, so republishing over a name silently rebuckets every
     run already trained against it.
     """
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
-
-    container = BlobServiceClient(
-        account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
-    ).get_container_client(ABSTRACTIONS)
     return sorted(
-        entry.name.removesuffix(archive.ABSTRACTION_SUFFIX)
-        for entry in container.list_blobs()
-        if entry.name.endswith(archive.ABSTRACTION_SUFFIX)
+        name.removesuffix(archive.ABSTRACTION_SUFFIX)
+        for name in _container(config, ABSTRACTIONS).list_blob_names()
+        if name.endswith(archive.ABSTRACTION_SUFFIX)
     )
 
 
@@ -358,17 +347,13 @@ def published_record(config: Any) -> dict[str, dict[str, Any]]:
     that made this incremental live in Postgres, and 345 files of a few KB do
     not need an etag cache to stay fast.
     """
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
-
-    container = BlobServiceClient(
-        account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
-    ).get_container_client(CONTAINER)
-
+    container = _container(config, CONTAINER)
     found: dict[str, dict[str, Any]] = {}
     manifests: list[str] = []
-    for entry in container.list_blobs():
-        run, _, name = entry.name.partition("/")
+    # NAMES ONLY: the properties `list_blobs` also returns are read by nothing
+    # here, and they are most of the bytes for 1,695 objects.
+    for blob_name in container.list_blob_names():
+        run, _, name = blob_name.partition("/")
         if not name:
             continue
         slot = found.setdefault(run, {"rungs": set(), "manifest": None})
@@ -387,26 +372,67 @@ def published_record(config: Any) -> dict[str, dict[str, Any]]:
     return found
 
 
+def _container(config: Any, name: str) -> Any:
+    """A container client. The SDK is imported here and nowhere at module scope:
+    `blob` is reached from the node's closure, which has no Azure SDK."""
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
+
+    return BlobServiceClient(
+        account_url=f"https://{config.storage_account}.blob.core.windows.net",
+        credential=config.share_key,
+    ).get_container_client(name)
+
+
+def published_run_ids(config: Any) -> list[str]:
+    """Every published run id, sorted, WITHOUT listing a single rung.
+
+    A DELIMITER walk asks Blob for the common prefixes under `<run>/` and gets
+    332 names back instead of 1,695 -- measured against this container from a
+    laptop, 0.27s versus 2.40s. The readers that only need to resolve a name
+    (`resolve_published_run`) were paying the whole listing for it.
+    """
+    container = _container(config, CONTAINER)
+    return sorted(
+        prefix.name.rstrip("/")
+        for prefix in container.walk_blobs(delimiter="/")
+        if prefix.name.endswith("/")
+    )
+
+
+def rungs_for(config: Any, run_id: str) -> set[str]:
+    """The rung objects ONE run holds, by server-side prefix.
+
+    0.23s against 2.40s for the whole-container listing this replaced at the
+    dispatch gate, which asked about one run and paged through every other run
+    to find it.
+    """
+    container = _container(config, CONTAINER)
+    return {
+        leaf
+        for name in container.list_blob_names(name_starts_with=f"{run_id}/")
+        if (leaf := name.partition("/")[2]) and leaf != records.STATIC_CHECKPOINT
+    }
+
+
 def published_rungs(config: Any) -> dict[str, set[str]]:
     """Every rung the container holds, as `{run_id: {object name}}`.
 
     ONE listing for the whole container rather than one per run: the readers
-    ask about every published run at once, and a per-run call is a round trip
-    each against a store in another country.
+    that ask about EVERY published run at once, where a per-run call would be a
+    round trip each against a store in another country. A reader asking about
+    one run wants `rungs_for`.
+
+    NAMES ONLY. `list_blobs` returns full properties for all 1,695 objects and
+    nothing here reads one -- measured 3.78s median against 2.48s, and the tail
+    is the real difference: 2.61-9.65s versus 2.26-2.65s.
 
     This is what replaced the share's completion markers. A rung is one
     atomically-committed object, so its PRESENCE is the completeness a marker
     used to assert about a directory that could be half-copied.
     """
-    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415 -- Azure only here
-
-    service = BlobServiceClient(
-        account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
-    )
     found: dict[str, set[str]] = {}
-    for entry in service.get_container_client(CONTAINER).list_blobs():
-        run, _, name = entry.name.partition("/")
+    for blob_name in _container(config, CONTAINER).list_blob_names():
+        run, _, name = blob_name.partition("/")
         if name and name != records.STATIC_CHECKPOINT:
             found.setdefault(run, set()).add(name)
     return found

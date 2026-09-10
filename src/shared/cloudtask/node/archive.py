@@ -171,11 +171,16 @@ def _put_object(name: str, source: Path, sas: str, log: Log, *, overwrite: bool 
 def _transferred(size: int, elapsed: float) -> str:
     """`<bytes> in <s> (<MiB/s>)`, so a task log carries its own throughput.
 
+    THE POINT OF THE MIGRATION, measured on a pool node both ways. A 300M rung
+    over SMB was 5,508 small files at ~93 ms each -- latency-bound, not
+    bandwidth-bound -- so ~8.5 minutes serial and ~1.2 at 16 threads
+    (2026-08-24). The same rung as ONE object: **1.21 GiB in 9.0s, 138 MiB/s**
+    (2026-09-10). 8x the threaded copy, 57x the serial one.
+
     Publishing was the dominant wall-clock of a short run and the only sustained
     load that ever took a node `unusable`, so the number that says whether it
     still is belongs in every task log rather than in a session that measured it
-    once. A rung is ~1 GiB; at 100 MiB/s that is ~10s, and a figure far off that
-    is the signal.
+    once. ~138 MiB/s is the mark; far off it is the signal.
     """
     rate = f", {size / elapsed / 1024**2:,.0f} MiB/s" if elapsed > 0.05 else ""
     return f"{size:,} bytes in {elapsed:.1f}s{rate}"

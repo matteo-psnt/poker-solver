@@ -133,11 +133,9 @@ class TestDispatchResolvesTheFragmentToo:
                 lambda cls: SimpleNamespace(storage_account="a", share_name="s", share_key="k")
             ),
         )
-        monkeypatch.setattr(
-            blob,
-            "published_rungs",
-            lambda config: {name: {"static-100.ckpt.zst"} for name in names},
-        )
+        # A DELIMITER walk, which is what resolving a name costs now: 332
+        # prefixes rather than all 1,695 objects.
+        monkeypatch.setattr(blob, "published_run_ids", lambda config: sorted(names))
         return workspace
 
     def test_a_fragment_becomes_the_full_id_before_dispatch(self, monkeypatch):
