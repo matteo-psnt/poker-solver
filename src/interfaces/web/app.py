@@ -30,7 +30,9 @@ is no poller here and nothing depends on a background thread staying alive.
 
 from __future__ import annotations
 
+import logging
 import sys
+import threading
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -73,10 +75,14 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
+    from src.interfaces.commands._compose import Invoke
+
 # How often a polled screen is re-read from Azure, whatever the browser's
 # cadence: a view past this age is served as it is and refreshed behind the
 # answer. A sweep of the live screen is ~2s warm, so a shorter TTL would have
 # the refreshes overlapping their own results.
+
+logger = logging.getLogger(__name__)
 CACHE_TTL_SECONDS = 5.0
 
 # How long past the TTL a view is still served stale. A refresh that keeps
@@ -237,6 +243,25 @@ def answer(cache: TtlCache, command: Command, /, **kwargs: Any) -> JSONResponse:
     return _served(cache, key, lambda: command.invoke(**kwargs))
 
 
+def _warm_record() -> None:
+    """Build the shared record tree before anyone asks for it.
+
+    MEASURED 6.42s, essentially all of it 331 manifest downloads, and it was
+    paid by whoever opened the console first -- so the first screen of a fresh
+    server was its slowest. Nothing here is served from this call; acquiring the
+    tree is the point, and every later reader finds it built.
+
+    Best effort and never fatal: an unreachable store must not stop the server
+    starting, and the reader that arrives next will get the same failure with
+    the context to explain it.
+    """
+    try:
+        with workspace.share_records():
+            pass
+    except Exception as error:  # noqa: BLE001 -- a warm-up cannot fail a boot
+        logger.warning(f"could not warm the record tree: {type(error).__name__}: {error}")
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Share one materialised record between every reader, while serving.
@@ -248,6 +273,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     invisible to the next reader.
     """
     with workspace.shared_record_cache(RECORD_TREE_TTL_SECONDS, RECORD_TREE_STALE_GRACE_SECONDS):
+        # In the background: `serve` prints its URL as soon as this yields, and
+        # a warm-up that blocked would make the console refuse connections for
+        # six seconds rather than answer the first one slowly.
+        threading.Thread(target=_warm_record, name="record-warm", daemon=True).start()
         yield
 
 
@@ -413,11 +442,36 @@ def create_app() -> FastAPI:
     # `fresh` is the refresh button. Served stale, a click answered in
     # milliseconds with the same `at` and looked like it did nothing; a
     # deliberate ask is worth the wait for a real sweep, spinner and all.
+    def _memoised(*, force: bool) -> Invoke:
+        """Answer a part through the SAME memo a bare endpoint uses.
+
+        The parts of a view are commands the server already caches, and the
+        fan-out used to re-run them: `tasks` is a 15,684-row read and a 0.94s
+        join, so clicking through five runs paid it five times while
+        `/api/tasks` served the identical answer from cache. Keyed exactly as
+        `answer` keys it, so the two share entries rather than shadowing.
+
+        ``force`` RIDES ALONG, because the refresh button has to reach the
+        parts: memoising them and not forcing them made `?fresh=true` re-run the
+        view over cached panels and return the same screen, which is a refresh
+        that does nothing. Still one sweep per part, not one per panel that
+        shares it -- `TtlCache.get` is single-flight per key.
+        """
+
+        def invoke(command: Command, arguments: dict[str, Any]) -> Any:
+            return cache.get(
+                (command.name, tuple(sorted(arguments.items()))),
+                lambda: command.invoke(**arguments),
+                force=force,
+            )
+
+        return invoke
+
     def view(build: Any, *key: str, fresh: bool = False) -> JSONResponse:
         return _served(
             cache,
             (build.__name__, key),
-            lambda: build(*key),
+            lambda: build(*key, invoke=_memoised(force=fresh)),
             serve_stale_for=0.0 if fresh else VIEW_STALE_GRACE_SECONDS,
             force=fresh,
         )

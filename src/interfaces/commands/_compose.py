@@ -43,7 +43,22 @@ class Part:
     arguments: dict[str, Any] = field(default_factory=dict)
 
 
-def _answer(part: Part) -> dict[str, Any]:
+# A `type` alias, so the annotation stays lazy and `Command` can remain a
+# TYPE_CHECKING import: this module is imported by every surface and the command
+# base drags the registry in with it.
+type Invoke = Callable[[Command, dict[str, Any]], Any]
+
+
+def _invoke(command: Command, arguments: dict[str, Any]) -> Any:
+    """Run the command directly: what ``invoke=None`` means, and the default.
+
+    Private, and the default is `None` rather than this, so a caller that does
+    not memoise never has to name it.
+    """
+    return command.invoke(**arguments)
+
+
+def _answer(part: Part, invoke: Invoke) -> dict[str, Any]:
     """Answer one part, or record why it could not be answered.
 
     Which failures are survivable is :func:`~src.interfaces.errors.attempt`'s
@@ -57,7 +72,9 @@ def _answer(part: Part) -> dict[str, Any]:
     is greyed out with a reason either way; the caller that needs the kind (the
     console, picking a status code) asks `attempt` itself.
     """
-    payload, failure = attempt(lambda: part.command.invoke(**part.arguments))
+    started = time.perf_counter()
+    payload, failure = attempt(lambda: invoke(part.command, part.arguments))
+    elapsed = time.perf_counter() - started
     # Dumped, so a join reads plain data. A view cross-references payloads it did
     # not produce and cannot be typed against all of them at once; the models are
     # what the COMMANDS are checked against, and the envelope is checked by
@@ -66,28 +83,41 @@ def _answer(part: Part) -> dict[str, Any]:
     return {
         "payload": dump() if callable(dump) else payload,
         "error": failure.message if failure else None,
+        # The fan-out is only as fast as its slowest part, and WHICH part that is
+        # was not answerable from the payload: `elapsed_seconds` gives the total,
+        # so one slow panel and a serial regression look identical from outside.
+        "elapsed_seconds": round(elapsed, 2),
     }
 
 
-def fan_out(parts: Sequence[Part]) -> dict[str, dict[str, Any]]:
+def fan_out(parts: Sequence[Part], invoke: Invoke | None = None) -> dict[str, dict[str, Any]]:
     """Answer every part concurrently, keyed by :attr:`Part.key`.
 
     One thread per part. These block on the network essentially all of the time,
-    so the pool is sized to the work rather than to the machine -- and each part
-    builds its own Azure client, so there is no shared mutable state between
-    them.
+    so the pool is sized to the work rather than to the machine. The parts SHARE
+    an Azure client now (`blob._CONTAINERS`, so a long-lived server keeps one
+    pooled TLS connection rather than handshaking per call); the SDK's clients
+    are documented thread-safe for requests, and `published_record` already
+    fanned one out across a pool before this.
 
-    Concurrency is safe against the two caches in front of these reads, and that
-    is checked rather than assumed: `web.cache.TtlCache.get` is single-flight
-    per key, and `cloud.store.workspace.SharedTrees.acquire` is single-flight
-    and refcounted. Concurrent misses WAIT for the first producer instead of
-    each starting a sweep, so N parts asking the same underlying question still
-    cost one materialisation of the record.
+    ``invoke`` is how a part is run, so a caller that already memoises commands
+    can hand its memo in. The server does: without it a composed view re-ran
+    every command it is made of, so `tasks` -- a 15,684-row read and a 0.94s
+    join -- was paid again for each run a person clicked, while `/api/tasks`
+    served the same answer from cache.
+
+    Concurrency is safe against the caches in front of these reads, and that is
+    checked rather than assumed: `web.cache.TtlCache.get` is single-flight per
+    key, and `cloud.store.workspace.SharedTrees.acquire` is single-flight and
+    refcounted. Concurrent misses WAIT for the first producer instead of each
+    starting a sweep, so N parts asking the same underlying question still cost
+    one answer.
     """
     if not parts:
         return {}
+    run = invoke or _invoke
     with ThreadPoolExecutor(max_workers=len(parts)) as pool:
-        futures = {part.key: pool.submit(_answer, part) for part in parts}
+        futures = {part.key: pool.submit(_answer, part, run) for part in parts}
         return {key: future.result() for key, future in futures.items()}
 
 
@@ -95,6 +125,7 @@ def compose(
     op: str,
     parts: Sequence[Part],
     join: Callable[[dict[str, dict[str, Any]]], dict[str, Any]] | None = None,
+    invoke: Invoke | None = None,
 ) -> dict[str, Any]:
     """A composed payload: the parts, plus when they were answered and how long.
 
@@ -111,7 +142,7 @@ def compose(
     unavailable gives up the property the fan-out exists for.
     """
     started = time.perf_counter()
-    answered = fan_out(parts)
+    answered = fan_out(parts, invoke)
     composed = {
         "op": op,
         "at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),

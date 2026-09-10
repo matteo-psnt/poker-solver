@@ -25,7 +25,7 @@ from src.interfaces.commands import (
     tasks,
 )
 from src.interfaces.commands import runs as runs_command
-from src.interfaces.commands._compose import Part, compose, payloads
+from src.interfaces.commands._compose import Invoke, Part, compose, payloads
 
 # A glanceable screen cannot carry two hundred rows, and the cost of fetching
 # them is the point: `tasks` is the slowest read in the console.
@@ -37,7 +37,7 @@ LIVE_LIMIT = 10
 RUN_LIST_JOB_LIMIT = 50
 
 
-def now() -> dict[str, Any]:
+def now(*, invoke: Invoke | None = None) -> dict[str, Any]:
     """What is happening right now, and did anything die.
 
     Three questions. `pool-status` carries the nodes and the pool's own last
@@ -56,6 +56,7 @@ def now() -> dict[str, Any]:
             Part("jobs", jobs.COMMAND, {"limit": LIVE_LIMIT}),
             Part("tasks", tasks.COMMAND),
         ],
+        invoke=invoke,
     )
     composed["parts"]["tasks"] = _live_and_recent(composed["parts"]["tasks"])
     return composed
@@ -83,7 +84,7 @@ def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run(run_id: str) -> dict[str, Any]:
+def run(run_id: str, *, invoke: Invoke | None = None) -> dict[str, Any]:
     """Everything about one run: what it is, how it trained, what it scored.
 
     `ledger` has a `--run` flag, so asking it for one run's evals is the command's
@@ -112,12 +113,13 @@ def run(run_id: str) -> dict[str, Any]:
             Part("tasks", tasks.COMMAND),
         ],
         join=lambda parts: {"run_tasks": _tasks_for(run_id, parts)},
+        invoke=invoke,
     )
     composed["parts"]["tasks"] = _summarised(composed["parts"]["tasks"])
     return composed
 
 
-def runs() -> dict[str, Any]:
+def runs(*, invoke: Invoke | None = None) -> dict[str, Any]:
     """Every published run, with what is needed to check its claimed status.
 
     A run's `status` is a CLAIM: it is written by the training process, so it
@@ -139,6 +141,7 @@ def runs() -> dict[str, Any]:
             Part("tasks", tasks.COMMAND),
         ],
         join=lambda parts: {"task_runs": _task_runs(parts)},
+        invoke=invoke,
     )
     composed["parts"]["tasks"] = _summarised(composed["parts"]["tasks"])
     return composed

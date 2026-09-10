@@ -1760,6 +1760,11 @@
       "Part_CurvePayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1788,6 +1793,11 @@
       "Part_JobsPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1816,6 +1826,11 @@
       "Part_LedgerPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1844,6 +1859,11 @@
       "Part_PoolPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1872,6 +1892,11 @@
       "Part_ProgressPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1900,6 +1925,11 @@
       "Part_RunInfoPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1928,6 +1958,11 @@
       "Part_RunsPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1956,6 +1991,11 @@
       "Part_TasksPayload_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
@@ -1984,6 +2024,11 @@
       "Part_TasksSummary_": {
         "additionalProperties": true,
         "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
           "error": {
             "anyOf": [
               {
