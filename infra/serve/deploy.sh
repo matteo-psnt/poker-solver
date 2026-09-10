@@ -301,6 +301,21 @@ if [ -n "${RUNGS:-}" ]; then
     done
 fi
 
+# $EXTRA_RUNS stages runs the seat will NOT play: the same `run[:at]` list, put
+# on local disk so a duel can be run against the fielded ladder without giving a
+# candidate the chair first. A candidate has to beat what is deployed before it
+# replaces it, and the box is where that is measured -- staging it by hand was a
+# second copy of every rule `stage_run` already encodes.
+if [ -n "${EXTRA_RUNS:-}" ]; then
+    IFS=',' read -ra _extra <<< "$EXTRA_RUNS"
+    for spec in "${_extra[@]}"; do
+        [ -n "$spec" ] || continue
+        IFS=':' read -r _name _at _thr <<< "$spec"
+        echo "==> staging $_name (not seated)"
+        stage_run "$_name" "${_at:-}"
+    done
+fi
+
 # --------------------------------------------------------------------------- #
 # dependencies
 # --------------------------------------------------------------------------- #
