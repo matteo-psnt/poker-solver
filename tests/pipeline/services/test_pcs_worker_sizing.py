@@ -14,6 +14,7 @@ from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.vector import compile_tree
 from src.engine.solver.vector.kernel import DTYPE
+from src.pipeline.abstraction.vector_universe import build_hand_context
 from src.pipeline.services import pcs_training
 from src.pipeline.services.pcs_training import worker_footprint
 from src.pipeline.training.pcs_parallel import (
@@ -47,13 +48,13 @@ def test_the_turn_footprint_clamps_the_worker_count_harder():
     64-core box that holds 8 — an OOM minutes into a 23-hour run."""
     rules = GameRules(1, 2)
     tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
-    terminals = compile_tree(tree, rules).num_terminals
+    compiled = compile_tree(tree, rules)
     box = 64 * 1024**3
     turn = ram_safe_workers(
-        tree, terminals, shared_bytes=0, memory=box, **worker_footprint(_config(**TURN))
+        compiled, shared_bytes=0, memory=box, **worker_footprint(_config(**TURN))
     )
     flop = ram_safe_workers(
-        tree, terminals, shared_bytes=0, memory=box, **worker_footprint(_config(**FLOP))
+        compiled, shared_bytes=0, memory=box, **worker_footprint(_config(**FLOP))
     )
     assert turn < flop
     assert turn >= 1
@@ -66,10 +67,9 @@ def test_each_kernel_costs_the_same_scratch_again():
     are equal. No magic byte counts -- the identity is what has to hold."""
     rules = GameRules(1, 2)
     tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
-    terminals = compile_tree(tree, rules).num_terminals
+    compiled = compile_tree(tree, rules)
     one, two, four = (
-        worker_bytes(tree, terminals, br_streets="turn_river", runouts=4, kernels=k)
-        for k in (1, 2, 4)
+        worker_bytes(compiled, br_streets="turn_river", runouts=4, kernels=k) for k in (1, 2, 4)
     )
     per_kernel = two - one
     assert per_kernel > 0
@@ -87,7 +87,7 @@ def test_train_pcs_hands_the_kernel_count_to_the_clamp(monkeypatch, tmp_path):
 
     seen: dict[str, object] = {}
 
-    def capture(tree, num_terminals, **kwargs):
+    def capture(compiled, **kwargs):
         seen.update(kwargs)
         raise StopError
 
@@ -130,15 +130,16 @@ def test_evaluate_terminals_transients_are_counted():
     """
     rules = GameRules(1, 2)
     tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
-    terminals = compile_tree(tree, rules).num_terminals
+    compiled = compile_tree(tree, rules)
 
-    walk = worker_bytes(tree, terminals, br_streets="river", showdown="walk")
-    counted = 2 * (terminals // 2) * LIVE_HANDS * np.dtype(DTYPE).itemsize
-    assert walk - worker_bytes(tree, 0, br_streets="river", showdown="walk") > counted
+    walk = worker_bytes(compiled, br_streets="river", showdown="walk")
+    matmul = worker_bytes(compiled, br_streets="river", showdown="matmul")
 
-    # `matmul` stacks BOTH seats before the product, so each array is twice as
-    # wide and the clamp must not size a matmul run off the walk figure.
-    assert worker_bytes(tree, terminals, br_streets="river", showdown="matmul") > walk
+    # `matmul` stacks BOTH seats before the product, so each of its two arrays
+    # is twice as wide as `walk`'s. The difference IS the transient term, so
+    # this pins its size rather than merely asserting it is nonzero.
+    showdowns = compiled.num_terminals // 2
+    assert matmul - walk == 2 * showdowns * LIVE_HANDS * np.dtype(DTYPE).itemsize
 
 
 def test_headroom_is_a_fraction_so_a_big_node_keeps_real_margin():
@@ -147,13 +148,36 @@ def test_headroom_is_a_fraction_so_a_big_node_keeps_real_margin():
     """
     rules = GameRules(1, 2)
     tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
-    terminals = compile_tree(tree, rules).num_terminals
+    compiled = compile_tree(tree, rules)
     fp = worker_footprint(_config(**FLOP))
 
-    small = ram_safe_workers(tree, terminals, shared_bytes=0, memory=128 * 1024**3, **fp)
-    big = ram_safe_workers(tree, terminals, shared_bytes=0, memory=512 * 1024**3, **fp)
-    per = worker_bytes(tree, terminals, **fp)
+    small = ram_safe_workers(compiled, shared_bytes=0, memory=128 * 1024**3, **fp)
+    big = ram_safe_workers(compiled, shared_bytes=0, memory=512 * 1024**3, **fp)
+    per = worker_bytes(compiled, **fp)
 
     # Both leave at least the fraction free, so neither runs at 99%.
     for workers, box in ((small, 128 * 1024**3), (big, 512 * 1024**3)):
         assert box - workers * per >= NODE_HEADROOM_FRACTION * box
+
+
+def test_the_clamp_sizes_the_ring_the_kernel_actually_allocates():
+    """The clamp's node term must equal `VectorCFR`'s real reach+value bytes.
+
+    These are two different modules reading one tree, and a divergence is
+    silent: the clamp hands out more workers than the node holds and the OOM
+    killer takes one, which is exactly what cost a 200 bb probe its whole run.
+    Measured against the arrays themselves rather than against a second copy of
+    the formula, so re-deriving the shape in either place fails here.
+    """
+    from src.engine.solver.vector.kernel import VectorCFR
+
+    rules = GameRules(1, 2)
+    config = _config()
+    tree = build_betting_tree(rules, ActionModel(config), Buckets(), starting_stack=20)
+    compiled = compile_tree(tree, rules)
+    context = build_hand_context(np.arange(5), Buckets())
+    kernel = VectorCFR(compiled, context)
+
+    allocated = kernel.reach.nbytes + kernel.value.nbytes
+    per_hand = 4 * context.num_hands * np.dtype(DTYPE).itemsize
+    assert allocated == 2 * compiled.widest_level * per_hand

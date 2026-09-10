@@ -106,11 +106,11 @@ class TestWorkerSizing:
         tree = build_betting_tree(
             GameRules(1, 2), ActionModel(config), Buckets(), starting_stack=20
         )
-        terminals = compile_tree(tree, GameRules(1, 2)).num_terminals
-        one = pcs_parallel.worker_bytes(tree, terminals)
+        compiled = compile_tree(tree, GameRules(1, 2))
+        one = pcs_parallel.worker_bytes(compiled)
         room = pcs_parallel.NODE_HEADROOM_BYTES + 3 * one + one // 2
-        assert pcs_parallel.ram_safe_workers(tree, terminals, shared_bytes=0, memory=room) == 3
-        assert pcs_parallel.ram_safe_workers(tree, terminals, shared_bytes=0, memory=0) == 1
+        assert pcs_parallel.ram_safe_workers(compiled, shared_bytes=0, memory=room) == 3
+        assert pcs_parallel.ram_safe_workers(compiled, shared_bytes=0, memory=0) == 1
 
 
 class TestCoordinator:
@@ -210,14 +210,11 @@ class TestMultiKernelSizing:
     than refusing at submit.
     """
 
-    def _tree(self):
+    def _compiled(self):
         config = make_test_config(seed=1, starting_stack=20)
-        return build_betting_tree(
-            GameRules(config.game.small_blind, config.game.big_blind),
-            ActionModel(config),
-            Buckets(),
-            starting_stack=20,
-        )
+        rules = GameRules(config.game.small_blind, config.game.big_blind)
+        tree = build_betting_tree(rules, ActionModel(config), Buckets(), starting_stack=20)
+        return compile_tree(tree, rules)
 
     def test_scratch_scales_linearly_with_the_kernel_count(self):
         """Exact, so it does not depend on the fixture tree's size.
@@ -225,22 +222,21 @@ class TestMultiKernelSizing:
         Only the per-kernel terms move; the interpreter overhead and the one
         chunk of block temporaries are fixed however many kernels are live.
         """
-        tree = self._tree()
+        compiled = self._compiled()
         sizes = {
-            k: pcs_parallel.worker_bytes(tree, 100, br_streets="river", kernels=k)
-            for k in (1, 2, 4)
+            k: pcs_parallel.worker_bytes(compiled, br_streets="river", kernels=k) for k in (1, 2, 4)
         }
         step = sizes[2] - sizes[1]
         assert step > 0
         assert sizes[4] - sizes[1] == 3 * step
 
     def test_more_kernels_means_fewer_workers(self):
-        tree = self._tree()
+        compiled = self._compiled()
         one = pcs_parallel.ram_safe_workers(
-            tree, 100, shared_bytes=0, memory=64 * 1024**3, br_streets="river", kernels=1
+            compiled, shared_bytes=0, memory=64 * 1024**3, br_streets="river", kernels=1
         )
         four = pcs_parallel.ram_safe_workers(
-            tree, 100, shared_bytes=0, memory=64 * 1024**3, br_streets="river", kernels=4
+            compiled, shared_bytes=0, memory=64 * 1024**3, br_streets="river", kernels=4
         )
         assert four < one
         assert four >= 1

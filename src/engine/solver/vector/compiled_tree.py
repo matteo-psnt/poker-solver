@@ -125,6 +125,17 @@ class CompiledTree:
         return int(self.terminal_kind.shape[0])
 
     @property
+    def widest_level(self) -> int:
+        """Nodes in the largest level -- the size of ONE frontier ring buffer.
+
+        A property because two places need it and they must not drift: the
+        kernel ALLOCATES the ring from it and the RAM clamp SIZES a worker from
+        it. A clamp reading a stale copy hands out more workers than the node
+        holds, and the OOM killer takes one.
+        """
+        return int(np.diff(self.level_offset).max())
+
+    @property
     def num_levels(self) -> int:
         return int(self.level_offset.shape[0]) - 1
 

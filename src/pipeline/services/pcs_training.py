@@ -197,9 +197,7 @@ def train_pcs(
     extra = pcs_parallel.trunk_arrays(config, tree)
     shared = 2 * tree.num_slots * 4 + tree.num_rows * (8 + 8 + 1) + 4 * sum(extra.values())
     footprint = worker_footprint(config)
-    safe = pcs_parallel.ram_safe_workers(
-        tree, compiled.num_terminals, shared_bytes=shared, **footprint
-    )
+    safe = pcs_parallel.ram_safe_workers(compiled, shared_bytes=shared, **footprint)
     requested = num_workers or (os.cpu_count() or 1)
     workers = min(requested, safe)
     logger.info(
@@ -208,7 +206,7 @@ def train_pcs(
         workers,
         requested,
         safe,
-        pcs_parallel.worker_bytes(tree, compiled.num_terminals, **footprint) / 1e9,
+        pcs_parallel.worker_bytes(compiled, **footprint) / 1e9,
         config.pcs.runouts_per_flop,
         config.pcs.cfr_br,
     )

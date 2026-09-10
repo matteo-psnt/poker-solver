@@ -244,8 +244,7 @@ class VectorCFR:
         # both directions -- forward reads k and writes k + 1, backward reads
         # k + 1 and writes k -- so the parity belongs to the level, not the pass.
         # At 200 bb this is 0.67 GB where the full tree was 1.40, per array.
-        widest = int(np.diff(compiled.level_offset).max())
-        shape = (2, 2, widest, self.num_hands)
+        shape = (2, 2, compiled.widest_level, self.num_hands)
         self.reach = np.zeros(shape, dtype=DTYPE)
         self.value = np.zeros(shape, dtype=DTYPE)
         self.terminal_reach = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
