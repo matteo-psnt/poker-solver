@@ -39,7 +39,12 @@ class Action:
     ``amount`` means a DIFFERENT thing per type, which is the trap:
 
         FOLD/CHECK/CALL  must be 0 -- a call's size comes from ``state.to_call``
-        BET              total chips bet
+        BET              chips committed NOW, on top of whatever this seat
+                         already has in for the round. Those differ exactly
+                         once: the big blind's option after a limp faces
+                         ``to_call == 0`` with a blind already posted, so
+                         ``BET(a)`` leaves its round wager at ``blind + a``,
+                         not at ``a``
         RAISE            chips ABOVE the call, so the total added is
                          ``state.to_call + amount``
         ALL_IN           the player's whole remaining stack, an absolute number
