@@ -226,4 +226,158 @@ class TestRunaway:
         tally = session.run(server, CheckCall(), num_hands=1, concurrency=1)
         assert tally.played == 0
         assert tally.failed == 1
-        assert len(server.sent) == session.MAX_DECISIONS_PER_HAND
+        # The cap, plus the one fold that hands the slot back on the way out.
+        assert len(server.sent) == session.MAX_DECISIONS_PER_HAND + 1
+        assert server.sent[-1] == ("f", None)
+
+
+class DyingServer:
+    """Deals a hand, then fails on our first action.
+
+    The shape of the leak: the hand EXISTS server-side, so the slot is taken,
+    and the thing that ends the run happens after that.
+    """
+
+    def __init__(self, *, legal: list[str]) -> None:
+        self.legal = legal
+        self.acts: list[tuple[int, str]] = []
+        self.dealt = False
+
+    def new_hand(self, game_name: str = "") -> Frame:
+        self.dealt = True
+        return Frame.parse(
+            {"hand_id": 7, "game": GAME, "game_state": state(history=[], legal=self.legal)}
+        )
+
+    def act(self, hand_id: int, action: str, amount: int | None = None) -> Frame:
+        self.acts.append((hand_id, action))
+        raise RuntimeError("engine died mid-hand")
+
+
+class TestSlotsComeBack:
+    """MEASURED: a 600-hand run played 423 and lost 177 to their 20-hand cap,
+    because eleven hands abandoned by earlier runs still held eleven slots. A
+    hand that dies mid-play is not scored either way -- but it must not keep
+    its slot, or every later run starts poorer than the last.
+    """
+
+    def test_a_hand_that_dies_mid_play_is_conceded(self) -> None:
+        server = DyingServer(legal=["f", "c", "b"])
+        with pytest.raises(RuntimeError):
+            session.play_hand(server, CheckCall())
+        # Two acts: the agent's call, then the fold that gives the slot back.
+        assert server.acts == [(7, "c"), (7, "f")]
+
+    def test_a_check_only_spot_is_conceded_by_checking(self) -> None:
+        # Folding is not always legal, and an illegal action leaves the hand
+        # exactly as open as doing nothing.
+        server = DyingServer(legal=["k", "b"])
+        with pytest.raises(RuntimeError):
+            session.play_hand(server, CheckCall())
+        assert server.acts == [(7, "k"), (7, "k")]
+
+    def test_a_run_does_not_leak_a_slot_per_failed_hand(self) -> None:
+        server = DyingServer(legal=["f", "c", "b"])
+        tally = session.run(server, CheckCall(), num_hands=3, concurrency=1)
+        assert tally.played == 0
+        assert tally.failed == 3
+        assert [action for _, action in server.acts].count("f") == 3
+
+
+class FakeLobby:
+    """Hands left open by somebody else's run, which is how they are found."""
+
+    def __init__(
+        self, *, open_ids: list[int], legal: list[str], refuse: set[int] | None = None
+    ) -> None:
+        self.open_ids = open_ids
+        self.legal = legal
+        self.refuse = refuse or set()
+        self.folded: list[int] = []
+
+    def in_progress(self, game_name: str = "") -> list[Frame]:
+        return [
+            Frame.parse(
+                {
+                    "hand_id": hand_id,
+                    "game": GAME,
+                    "game_state": state(history=[], legal=self.legal),
+                }
+            )
+            for hand_id in self.open_ids
+        ]
+
+    def act(self, hand_id: int, action: str, amount: int | None = None) -> Frame:
+        if hand_id in self.refuse:
+            raise RuntimeError("that hand is beyond saving")
+        self.folded.append(hand_id)
+        return Frame.parse(
+            {
+                "hand_id": hand_id,
+                "game": GAME,
+                "game_state": state(history=[action], over=True, legal=[], winnings=0.0, aivat=0.0),
+            }
+        )
+
+
+class TestDrain:
+    def test_every_open_hand_is_folded_and_reported(self) -> None:
+        lobby = FakeLobby(open_ids=[11, 12, 13], legal=["f", "c", "b"])
+        assert session.drain(lobby) == [11, 12, 13]
+        assert lobby.folded == [11, 12, 13]
+
+    def test_a_hand_that_will_not_close_is_not_reported_as_released(self) -> None:
+        # Absence reads as success unless the count is of what ACTUALLY closed.
+        lobby = FakeLobby(open_ids=[11, 12], legal=["f", "c", "b"], refuse={11})
+        assert session.drain(lobby) == [12]
+
+
+class CheckOnlyLobby:
+    """A hand where folding is not offered, which needs more than one action.
+
+    MEASURED: two of the eleven hands drained live sat in check-only spots. One
+    check handed the turn back to their engine, which acted and asked again --
+    so the hand was still open, and still holding its slot, after a drain that
+    called it released.
+    """
+
+    def __init__(self, *, checks_to_end: int) -> None:
+        self.checks_to_end = checks_to_end
+        self.acts: list[str] = []
+
+    def in_progress(self, game_name: str = "") -> list[Frame]:
+        return [
+            Frame.parse(
+                {"hand_id": 9, "game": GAME, "game_state": state(history=[], legal=["k", "b"])}
+            )
+        ]
+
+    def act(self, hand_id: int, action: str, amount: int | None = None) -> Frame:
+        self.acts.append(action)
+        done = len(self.acts) >= self.checks_to_end
+        return Frame.parse(
+            {
+                "hand_id": hand_id,
+                "game": GAME,
+                "game_state": state(
+                    history=self.acts,
+                    over=done,
+                    legal=[] if done else ["k", "b"],
+                    winnings=0.0 if done else None,
+                    aivat=0.0 if done else None,
+                ),
+            }
+        )
+
+
+class TestConcedingAHandThatWillNotFold:
+    def test_it_keeps_checking_until_the_hand_is_actually_over(self) -> None:
+        lobby = CheckOnlyLobby(checks_to_end=4)
+        assert session.drain(lobby) == [9]
+        assert lobby.acts == ["k", "k", "k", "k"]
+
+    def test_a_hand_still_open_at_the_cap_is_not_counted_as_released(self) -> None:
+        # The failure this guards is a COUNT that outruns what it counted.
+        lobby = CheckOnlyLobby(checks_to_end=10_000)
+        assert session.drain(lobby) == []
+        assert len(lobby.acts) == session.MAX_DECISIONS_PER_HAND

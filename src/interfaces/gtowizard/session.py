@@ -12,6 +12,10 @@ so **~2,000 hands buys +/-4.7 and ~50,000 buys +/-0.9**.
 Hands are played concurrently because each is mostly waiting on their engine.
 Their client caps concurrency at 20 and recommends fewer; a failed hand is
 dropped rather than retried, since a hand abandoned mid-way is not scored.
+
+The cap is per ACCOUNT and an open hand holds its slot indefinitely, so a hand
+that dies mid-play is conceded on the way out -- see :func:`concede`. What is
+already stranded comes back through `poker-solver benchmark-drain`.
 """
 
 from __future__ import annotations
@@ -24,17 +28,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from src.interfaces.gtowizard.protocol import BET, GAME_NAME, Frame
+from src.interfaces.gtowizard.protocol import BET, CHECK, FOLD, GAME_NAME, Frame
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from src.interfaces.gtowizard.agents import Agent
 
 
-class Server(Protocol):
-    """The two calls a hand needs.
+class Table(Protocol):
+    """Sending one action -- all that ending a hand needs.
 
     A protocol rather than :class:`BenchmarkClient`, because the hand loop is
     the part that runs tens of thousands of times and the API key that would
@@ -43,9 +47,19 @@ class Server(Protocol):
     a type error rather than the test it is.
     """
 
+    def act(self, hand_id: int, action: str, amount: int | None = ...) -> Frame: ...
+
+
+class Server(Table, Protocol):
+    """Playing: a hand to deal, and the actions to play it with."""
+
     def new_hand(self, game_name: str = ...) -> Frame: ...
 
-    def act(self, hand_id: int, action: str, amount: int | None = ...) -> Frame: ...
+
+class Lobby(Table, Protocol):
+    """Draining: what is open, and a way to end it."""
+
+    def in_progress(self, game_name: str = ...) -> Sequence[Frame]: ...
 
 
 logger = logging.getLogger(__name__)
@@ -155,52 +169,112 @@ class Tally:
         return sum(hand.truncated for hand in self.hands)
 
 
+def concede(client: Table, frame: Frame) -> bool:
+    """End a hand we can no longer play, so its slot comes back.
+
+    A hand left open holds one of the account's twenty slots INDEFINITELY --
+    not until the process exits, not until the day rolls over. Eleven leaked
+    across two sessions, and the run that found this lost 177 of its 600 hands
+    to a cap it was holding against itself.
+
+    Folds where folding is offered and checks where it is not, because a fold
+    is not always legal and an illegal action leaves the hand exactly as open
+    as doing nothing. A CHECK does not close a hand though -- it hands the turn
+    back to their engine, which acts and asks us again -- so this reads the
+    frame it gets back and keeps going. MEASURED: a first cut acted once and
+    reported eleven slots freed, when the two check-only hands among the eleven
+    were still open afterwards.
+
+    Answers whether the hand actually ENDED, which is the only thing a caller
+    counting recovered slots can use.
+    """
+    for _ in range(MAX_DECISIONS_PER_HAND):
+        if frame.turn.is_hand_over:
+            return True
+        action = next((known for known in (FOLD, CHECK) if known in frame.turn.legal_actions), None)
+        if action is None:
+            logger.warning(
+                "Hand %s offers neither fold nor check; its slot stays taken.", frame.hand_id
+            )
+            return False
+        try:
+            frame = client.act(frame.hand_id, action)
+        except Exception:
+            logger.exception("Hand %s would not close; its slot stays taken.", frame.hand_id)
+            return False
+        if action == FOLD:
+            # A fold ends a hand. If theirs did not, another one will not either.
+            break
+    return frame.turn.is_hand_over
+
+
+def drain(client: Lobby, *, game_name: str = GAME_NAME) -> list[int]:
+    """Close every open hand, returning the ids that gave their slot back.
+
+    Each one is SCORED as the fold it is, against the account's public record.
+    That is the cheaper side of the trade: eleven abandoned hands cost eleven
+    small folds once, against every future run losing over half its concurrency
+    to them.
+    """
+    return [frame.hand_id for frame in client.in_progress(game_name) if concede(client, frame)]
+
+
 def play_hand(client: Server, agent: Agent, *, game_name: str = GAME_NAME) -> HandRecord:
     """One hand, start to finish.
 
     Their server acts for the villain between our turns, so every response is
     either the hand's end or our next decision -- there is nothing to poll.
+
+    Anything that goes wrong after the hand exists concedes it on the way out:
+    the hand is lost either way, but its slot need not be.
     """
     frame = client.new_hand(game_name)
-    decisions = 0
-    off_tree = 0
-    clamped = 0
-    truncated = False
-    while not frame.turn.is_hand_over:
-        if decisions >= MAX_DECISIONS_PER_HAND:
+    try:
+        decisions = 0
+        off_tree = 0
+        clamped = 0
+        truncated = False
+        while not frame.turn.is_hand_over:
+            if decisions >= MAX_DECISIONS_PER_HAND:
+                raise RuntimeError(
+                    f"Hand {frame.hand_id} passed {MAX_DECISIONS_PER_HAND} decisions; "
+                    "the loop is not reading the protocol."
+                )
+            if not frame.turn.legal_actions:
+                # Not over, and nothing offered. `allows` is strict, so every agent
+                # would fall through to its last resort and send an action the
+                # server rejects; a 4xx mid-hand abandons a hand that would have
+                # been scored. Say what happened instead.
+                raise RuntimeError(
+                    f"Hand {frame.hand_id} is not over but offers no legal action "
+                    f"on the {frame.turn.street}; the protocol is being misread."
+                )
+            move = agent.decide(frame)
+            amount = int(move.amount) if move.action == BET and move.amount is not None else None
+            frame = client.act(frame.hand_id, move.action, amount)
+            decisions += 1
+            off_tree += move.off_tree
+            clamped += int(move.clamped)
+            truncated = truncated or move.truncated
+        turn = frame.turn
+        if turn.winnings is None or turn.aivat_score is None:
             raise RuntimeError(
-                f"Hand {frame.hand_id} passed {MAX_DECISIONS_PER_HAND} decisions; "
-                "the loop is not reading the protocol."
+                f"Hand {frame.hand_id} ended without a score; the frame carried none."
             )
-        if not frame.turn.legal_actions:
-            # Not over, and nothing offered. `allows` is strict, so every agent
-            # would fall through to its last resort and send an action the
-            # server rejects; a 4xx mid-hand abandons a hand that would have
-            # been scored. Say what happened instead.
-            raise RuntimeError(
-                f"Hand {frame.hand_id} is not over but offers no legal action "
-                f"on the {frame.turn.street}; the protocol is being misread."
-            )
-        move = agent.decide(frame)
-        amount = int(move.amount) if move.action == BET and move.amount is not None else None
-        frame = client.act(frame.hand_id, move.action, amount)
-        decisions += 1
-        off_tree += move.off_tree
-        clamped += int(move.clamped)
-        truncated = truncated or move.truncated
-    turn = frame.turn
-    if turn.winnings is None or turn.aivat_score is None:
-        raise RuntimeError(f"Hand {frame.hand_id} ended without a score; the frame carried none.")
-    return HandRecord(
-        hand_id=frame.hand_id,
-        big_blind=frame.game.big_blind,
-        winnings=turn.winnings,
-        aivat=turn.aivat_score,
-        decisions=decisions,
-        off_tree=off_tree,
-        clamped=clamped,
-        truncated=truncated,
-    )
+        return HandRecord(
+            hand_id=frame.hand_id,
+            big_blind=frame.game.big_blind,
+            winnings=turn.winnings,
+            aivat=turn.aivat_score,
+            decisions=decisions,
+            off_tree=off_tree,
+            clamped=clamped,
+            truncated=truncated,
+        )
+    except Exception:
+        # The hand is lost either way; the SLOT does not have to be.
+        concede(client, frame)
+        raise
 
 
 def run(
