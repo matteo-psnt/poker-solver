@@ -323,13 +323,13 @@ class FakeLobby:
 class TestDrain:
     def test_every_open_hand_is_folded_and_reported(self) -> None:
         lobby = FakeLobby(open_ids=[11, 12, 13], legal=["f", "c", "b"])
-        assert session.drain(lobby) == [11, 12, 13]
+        assert session.drain(lobby, lobby.in_progress()) == [11, 12, 13]
         assert lobby.folded == [11, 12, 13]
 
     def test_a_hand_that_will_not_close_is_not_reported_as_released(self) -> None:
         # Absence reads as success unless the count is of what ACTUALLY closed.
         lobby = FakeLobby(open_ids=[11, 12], legal=["f", "c", "b"], refuse={11})
-        assert session.drain(lobby) == [12]
+        assert session.drain(lobby, lobby.in_progress()) == [12]
 
 
 class CheckOnlyLobby:
@@ -373,11 +373,11 @@ class CheckOnlyLobby:
 class TestConcedingAHandThatWillNotFold:
     def test_it_keeps_checking_until_the_hand_is_actually_over(self) -> None:
         lobby = CheckOnlyLobby(checks_to_end=4)
-        assert session.drain(lobby) == [9]
+        assert session.drain(lobby, lobby.in_progress()) == [9]
         assert lobby.acts == ["k", "k", "k", "k"]
 
     def test_a_hand_still_open_at_the_cap_is_not_counted_as_released(self) -> None:
         # The failure this guards is a COUNT that outruns what it counted.
         lobby = CheckOnlyLobby(checks_to_end=10_000)
-        assert session.drain(lobby) == []
+        assert session.drain(lobby, lobby.in_progress()) == []
         assert len(lobby.acts) == session.MAX_DECISIONS_PER_HAND

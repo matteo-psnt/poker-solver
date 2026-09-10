@@ -47,10 +47,15 @@ class DrainPayload(BaseModel):
 
 def run(args: argparse.Namespace) -> DrainPayload:
     with BenchmarkClient(key_from_environment()) as client:
-        open_hands = [frame.hand_id for frame in client.in_progress(args.game)]
-        released = [] if args.dry_run else session.drain(client, game_name=args.game)
+        # One listing, shared: what is reported open and what is acted on have
+        # to be the same hands, or the report describes a table it never saw.
+        open_frames = client.in_progress(args.game)
+        released = [] if args.dry_run else session.drain(client, open_frames)
     return DrainPayload(
-        game=args.game, open_hands=open_hands, released=released, dry_run=args.dry_run
+        game=args.game,
+        open_hands=[frame.hand_id for frame in open_frames],
+        released=released,
+        dry_run=args.dry_run,
     )
 
 
