@@ -193,8 +193,11 @@ def _render_panel(payload: PanelPayload) -> None:
         pool_status.render(payload)
     elif isinstance(payload, jobs.JobsPayload):
         jobs.render(payload)
-    else:
+    elif isinstance(payload, tasks.TasksPayload):
         tasks.render(payload)
+    # No `else`. A fourth panel added to `PANELS` and not to `PanelPayload` is a
+    # heading with nothing under it, which is visible; falling through to the
+    # last renderer would draw it as a task table, which is not.
 
 
 def _render_once(payload: StatusPayload) -> None:

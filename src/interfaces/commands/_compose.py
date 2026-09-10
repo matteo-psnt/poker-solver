@@ -95,12 +95,23 @@ def _answer(part: Part, invoke: Invoke) -> dict[str, Any]:
 def fan_out(parts: Sequence[Part], invoke: Invoke | None = None) -> dict[str, dict[str, Any]]:
     """Answer every part concurrently, keyed by :attr:`Part.key`.
 
-    One thread per part. These block on the network essentially all of the time,
-    so the pool is sized to the work rather than to the machine. The parts SHARE
-    an Azure client now (`blob._CONTAINERS`, so a long-lived server keeps one
-    pooled TLS connection rather than handshaking per call); the SDK's clients
-    are documented thread-safe for requests, and `published_record` already
-    fanned one out across a pool before this.
+    One thread per part, in a pool built for THIS call and thrown away. That is
+    what makes it safe to nest: `pool_status`, `tasks`, `runs` and
+    `autoscale_check` each fan out internally, so a part submitted to a shared
+    bounded executor could sit waiting for a worker its own children are holding.
+    Consolidating these into one process-wide pool is the plausible-looking
+    tidy-up that deadlocks the console.
+
+    These block on the network essentially all of the time, so the pool is sized
+    to the work rather than to the machine. The parts SHARE an Azure client now
+    (`blob._CONTAINERS`, so a long-lived server keeps one pooled TLS connection
+    rather than handshaking per call); the SDK's clients are documented
+    thread-safe for requests, and `published_record` already fanned one out
+    across a pool before this.
+
+    It is not on the hot path either way. The console memoises a composed view,
+    so behind a browser polling three screens from four tabs this ran twice in
+    ten seconds against 88 requests -- measured 09-10.
 
     ``invoke`` is how a part is run, so a caller that already memoises commands
     can hand its memo in. The server does: without it a composed view re-ran
