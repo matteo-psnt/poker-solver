@@ -164,20 +164,53 @@ class TestWireAmount:
         # so the wire carries 600 + 100 = 700, not the bare 100.
         this = frame(history=["b600"], raise_max=STACK)
         spot = reconstruct(blueprint, this, scale)
-        amount = wire_amount(Action(ActionType.RAISE, 50), this.turn, this.game, spot)
+        amount, _ = wire_amount(Action(ActionType.RAISE, 50), this.turn, this.game, spot)
         assert amount == 700
 
     def test_an_all_in_is_their_maximum(self, blueprint, scale) -> None:
         this = frame(history=["b600"], raise_max=STACK)
         spot = reconstruct(blueprint, this, scale)
-        assert wire_amount(Action(ActionType.ALL_IN, 400), this.turn, this.game, spot) == STACK
+        assert wire_amount(Action(ActionType.ALL_IN, 400), this.turn, this.game, spot) == (
+            STACK,
+            False,
+        )
 
     def test_a_size_outside_their_range_is_clamped_not_rejected(self, blueprint, scale) -> None:
         this = frame(history=["b600"], raise_min=1200, raise_max=1500)
         spot = reconstruct(blueprint, this, scale)
         for ours in (1, 10_000):
-            amount = wire_amount(Action(ActionType.RAISE, ours), this.turn, this.game, spot)
+            amount, clamped = wire_amount(
+                Action(ActionType.RAISE, ours), this.turn, this.game, spot
+            )
+            assert clamped, "a size outside their range is a size we did not choose"
             assert 1200 <= amount <= 1500
+
+    def test_a_bet_after_a_limp_carries_the_blind_that_is_already_in(
+        self, blueprint, scale
+    ) -> None:
+        """The BB's option is the one spot where BET and RAISE differ on the wire.
+
+        `Action.amount` is chips committed NOW, so postflop -- nothing in yet --
+        a BET's amount IS the round wager and the two readings agree. After a
+        limp the BB has a blind posted and still faces `to_call == 0`, so its
+        round wager ends at `blind + amount`. Expected from the ENGINE rather
+        than from arithmetic here: a hand-computed constant is how this was
+        misread as an off-by-one-blind bug in the first place.
+        """
+        this = frame(history=["c"])
+        spot = reconstruct(blueprint, this, scale)
+        assert spot.state.to_call == 0, "the BB's option faces nothing to call"
+
+        # Above their raise_min, or the clamp answers instead of the sizing.
+        for ours in (150, 200, 250):
+            seat = spot.state.current_player
+            before = spot.state.stacks[seat]
+            after = blueprint.rules.apply_action(spot.state, Action(ActionType.BET, ours))
+            committed = before - after.stacks[seat]
+            posted = blueprint.config.game.starting_stack - before
+            sent, clamped = wire_amount(Action(ActionType.BET, ours), this.turn, this.game, spot)
+            assert not clamped
+            assert sent == scale.to_theirs(posted + committed)
 
     def test_betting_where_it_is_not_offered_is_an_error_not_a_zero(self, blueprint, scale) -> None:
         this = frame(history=["b600"], raise_max=0, legal=["f", "c"])

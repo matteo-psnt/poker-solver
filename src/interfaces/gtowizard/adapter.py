@@ -318,8 +318,8 @@ def round_wagers(turn: Turn, game: Game) -> list[int]:
     return wagers
 
 
-def wire_amount(chosen: Action, turn: Turn, game: Game, spot: Spot) -> int:
-    """Our aggressive action as a CUMULATIVE round wager in their chips.
+def wire_amount(chosen: Action, turn: Turn, game: Game, spot: Spot) -> tuple[int, bool]:
+    """Our aggressive action as a CUMULATIVE round wager, and whether it moved.
 
     A raise-to total is the round's current high wager plus what we are adding,
     so it is built from THEIR chips throughout and only the increment crosses
@@ -330,7 +330,8 @@ def wire_amount(chosen: Action, turn: Turn, game: Game, spot: Spot) -> int:
     if turn.raise_max <= 0:
         raise AdapterError("The blueprint wants to bet where betting is not offered.")
     if chosen.type is ActionType.ALL_IN:
-        return turn.raise_max
+        return turn.raise_max, False
     high = max(round_wagers(turn, game))
     total = high + spot.scale.to_theirs(chosen.amount)
-    return max(turn.raise_min, min(total, turn.raise_max))
+    sent = max(turn.raise_min, min(total, turn.raise_max))
+    return sent, sent != total

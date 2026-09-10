@@ -30,15 +30,18 @@ class Move:
     ``amount`` is the CUMULATIVE wager for the round, and is required for a bet.
 
     ``off_tree`` counts the opponent actions this spot had to snap to a legal
-    size, and ``truncated`` marks a history our tree ran out of room for. Both
-    are the honest measure of how far the label drifted from the table, and the
-    numbers to watch when a blueprint plays worse here than it scores at home.
+    size, ``truncated`` marks a history our tree ran out of room for, and
+    ``clamped`` marks OUR OWN size being moved into their raise range. All three
+    measure how far what was played drifted from what was chosen, and they are
+    the numbers to watch when a blueprint plays worse here than it scores at
+    home -- a clamp in particular is a size the strategy never asked for.
     """
 
     action: str
     amount: int | None = None
     off_tree: int = 0
     truncated: bool = False
+    clamped: bool = False
 
 
 class Agent(Protocol):

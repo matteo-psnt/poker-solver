@@ -151,6 +151,8 @@ class BenchmarkPayload(BaseModel):
     aivat_std_bb_per_100: float
     raw_bb_per_100: float
     off_tree_per_hand: float = 0.0
+    #: Our own bets their raise range moved. A size the strategy did not choose.
+    clamped_per_hand: float = 0.0
     truncated_hands: int = 0
     expected: str = ""
     within_expectation: bool | None = None
@@ -256,6 +258,7 @@ def run(args: argparse.Namespace) -> BenchmarkPayload:
         aivat_std_bb_per_100=tally.aivat_std_bb_per_100,
         raw_bb_per_100=tally.raw_bb_per_100,
         off_tree_per_hand=tally.off_tree_rate,
+        clamped_per_hand=tally.clamp_rate,
         truncated_hands=tally.truncated_hands,
         expected=args.expect,
         within_expectation=within,
@@ -268,6 +271,12 @@ def render(payload: BenchmarkPayload) -> None:
     print(f"  hands           {payload.hands_played} played, {payload.hands_failed} failed")
     print(f"  AIVAT bb/100    {payload.aivat_bb_per_100:.2f} ± {payload.aivat_std_bb_per_100:.2f}")
     print(f"  raw bb/100      {payload.raw_bb_per_100:.2f}  (luck, not skill — not the score)")
+    if payload.clamped_per_hand:
+        # A size the strategy did not choose. Reported beside off-tree because
+        # it is the same kind of drift, pointing the other way: off-tree is
+        # THEIR action snapped onto our menu, a clamp is OUR size moved onto
+        # theirs. A run carrying many is not measuring what was fielded.
+        print(f"  clamped         {payload.clamped_per_hand:.2f} of our bets/hand resized")
     if payload.off_tree_per_hand or payload.truncated_hands:
         print(
             f"  off-tree        {payload.off_tree_per_hand:.2f} snapped actions/hand, "
