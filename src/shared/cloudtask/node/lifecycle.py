@@ -305,11 +305,7 @@ def main() -> int:
         )
         return NO_RECORD_EXIT_CODE
     task = os.environ.get("AZ_BATCH_TASK_ID", "local")
-    log = TaskLogger(
-        paths.work / f"task-{task}.log",
-        paths.share,
-        _diagnostics_sas(),
-    )
+    log = TaskLogger(paths.work / f"task-{task}.log", _diagnostics_sas())
     _install_signal_handlers()
 
     code, outcome = 1, None

@@ -17,43 +17,42 @@ from tests.shared.cloudtask.node.conftest import SAS
 class TestEvaluateFetch:
     """`score --run X` with no `--at` means the latest checkpoint."""
 
-    def _published(self, paths, *, marked=True):
-        share = paths.archive / "run-a"
-        (share / "static-2000.zarr").mkdir(parents=True)
-        (share / "static-2000.zarr" / "chunk").write_text("data")
-        if marked:
-            (share / ".complete-static-2000.zarr").write_text("")
-        (share / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-2000.zarr", "iteration": 2000, "retained": []}'
+    def _published(self, container, run="run-a", *, rung="static-2000"):
+        """One published run in the container: the rung and the ladder naming it."""
+        container[f"{run}/{rung}.ckpt.zst"] = b"data"
+        container[f"{run}/STATIC_CHECKPOINT.json"] = (
+            f'{{"zarr": "{rung}.zarr", "iteration": 2000, "retained": []}}'.encode()
         )
-        return share
 
-    def test_no_rung_fetches_the_manifest_s_current_one(self, paths, log, monkeypatch):
+    def _with_retained(self, container, run="run-a"):
+        """A ladder of two rungs, so a fetch has something to choose between."""
+        container[f"{run}/static-1000.ckpt.zst"] = b"d"
+        container[f"{run}/static-2000.ckpt.zst"] = b"data"
+        container[f"{run}/STATIC_CHECKPOINT.json"] = (
+            b'{"zarr": "static-2000.zarr", "iteration": 2000, '
+            b'"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
+        )
+
+    def test_no_rung_fetches_the_manifest_s_current_one(self, paths, log, monkeypatch, container):
         """The shell had no branch for this and fell to a catch-all that copied
         the WHOLE published directory -- the entire ladder, to score one rung."""
-        self._published(paths)
+        self._published(container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
-        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", checkpoint_sas=SAS)
 
         assert handlers._evaluate(task, paths, log) == (0, None)
-        assert (paths.runs / "run-a" / "static-2000.zarr" / "chunk").exists()
+        assert (paths.runs / "run-a" / "static-2000.ckpt.zst").exists()
 
     def test_every_evaluation_fetch_carries_the_container_credential(
         self, paths, log, monkeypatch, container
     ):
-        """Two of the three fetch sites passed no SAS, so scoring read the
-        share exclusively and the container it was migrated into was never
-        consulted -- invisible while both stores held the rungs."""
-        self._published(paths)
-        (paths.archive / "run-a" / "static-1000.zarr").mkdir()
-        (paths.archive / "run-a" / ".complete-static-1000.zarr").write_text("")
-        (paths.archive / "run-a" / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-2000.zarr", "iteration": 2000, '
-            '"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
-        )
+        """Two of the three fetch sites passed no SAS, so scoring reached a
+        store it had no credential for -- invisible while a second store still
+        answered."""
+        self._with_retained(container)
         seen: list[str] = []
 
-        def record(_source, _destination, rungs, _log=None, sas="", **_kwargs):
+        def record(_run_id, _destination, rungs, sas, _log=None):
             seen.append(sas)
             return list(rungs)
 
@@ -63,7 +62,7 @@ class TestEvaluateFetch:
             op=TaskName.EVALUATE,
             run_id="run-a",
             eval_rungs=("1000", "2000"),
-            checkpoint_sas="https://example/checkpoints?sig=x",
+            checkpoint_sas=SAS,
         )
 
         handlers._evaluate(task, paths, log)
@@ -71,66 +70,56 @@ class TestEvaluateFetch:
         assert seen, "no evaluation fetch happened"
         assert all(sas == task.checkpoint_sas for sas in seen), seen
 
-    def test_a_run_with_nothing_published_is_refused(self, paths, log):
-        """A DIRECTORY IS NOT PUBLICATION. The old gate accepted any directory
-        under `archive/`, which is why it kept passing while the rungs moved to
-        the container -- and then refused every run once the share was emptied.
-        The manifest is what says a run has something to score."""
-        (paths.archive / "run-a").mkdir(parents=True)
-        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a")
+    def test_a_run_with_nothing_published_is_refused(self, paths, log, container):
+        """A DIRECTORY WAS NEVER PUBLICATION. The old gate accepted any
+        directory under a mount, which is why it kept passing while the rungs
+        moved -- and then refused every run once that mount went empty. The
+        manifest is what says a run has something to score."""
+        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", checkpoint_sas=SAS)
         assert handlers._evaluate(task, paths, log) == (1, None)
         assert "no such published run" in log.path.read_text()
 
-    def test_a_partial_sweep_is_reported_as_partial(self, paths, log, monkeypatch):
+    def test_a_partial_sweep_is_reported_as_partial(self, paths, log, monkeypatch, container):
         """Exit 0 keeps Batch from retrying 30 rungs to redo one, but it is not
         a claim that all 30 scored."""
-        self._published(paths)
-        (paths.archive / "run-a" / "static-1000.zarr").mkdir()
-        (paths.archive / "run-a" / "static-1000.zarr" / "chunk").write_text("d")
-        (paths.archive / "run-a" / ".complete-static-1000.zarr").write_text("")
-        # In the manifest too: it is what names a rung, and a fetch resolves
-        # the iteration through it rather than assuming a spelling.
-        (paths.archive / "run-a" / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-2000.zarr", "iteration": 2000, '
-            '"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
-        )
+        self._with_retained(container)
         codes = iter([0, 1])
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: next(codes))
-        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000"))
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("1000", "2000"), checkpoint_sas=SAS
+        )
 
         assert handlers._evaluate(task, paths, log) == (0, task_log.CAUSE_PARTIAL)
 
-    def test_a_clean_sweep_of_failures_is_worth_a_retry(self, paths, log, monkeypatch):
+    def test_a_clean_sweep_of_failures_is_worth_a_retry(self, paths, log, monkeypatch, container):
         """That is what a transient node fault looks like."""
-        self._published(paths)
+        self._published(container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 1)
-        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("2000",))
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("2000",), checkpoint_sas=SAS
+        )
 
         assert handlers._evaluate(task, paths, log) == (1, None)
 
-    def test_a_reassembled_average_fetches_the_rungs_it_reads(self, paths, log, monkeypatch):
+    def test_a_reassembled_average_fetches_the_rungs_it_reads(
+        self, paths, log, monkeypatch, container
+    ):
         """MEASURED: `--avg-window-from 400000000` died in zarr with
         `nothing found at path ''`. Fetching is selective -- a rung nobody asked
         to SCORE is simply absent on the node -- so a policy that reads a second
         rung has to say so here or fail minutes later in the loader."""
-        share = self._published(paths)
-        (share / "static-1000.zarr").mkdir()
-        (share / "static-1000.zarr" / "chunk").write_text("d")
-        (share / ".complete-static-1000.zarr").write_text("")
-        (share / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-2000.zarr", "iteration": 2000, '
-            '"retained": [{"iteration": 1000, "zarr": "static-1000.zarr"}]}'
-        )
+        self._with_retained(container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(
             op=TaskName.EVALUATE,
             run_id="run-a",
             eval_rungs=("2000",),
             eval_flags=("--avg-window-from", "1000"),
+            checkpoint_sas=SAS,
         )
 
         assert handlers._evaluate(task, paths, log) == (0, None)
-        assert (paths.runs / "run-a" / "static-1000.zarr" / "chunk").exists()
+        assert (paths.runs / "run-a" / "static-1000.ckpt.zst").exists()
 
     def test_a_reweighted_average_fetches_the_whole_ladder_below_it(self, paths):
         """`--avg-gamma` recombines every retained band, not just one."""
@@ -161,17 +150,14 @@ class TestEvaluateFetch:
         flags = ("--avg-gamma", "0", "--avg-window-from", "1000")
         assert handlers._support_rungs(flags, destination, ["2000"]) == ["1000", "1500"]
 
-    def test_a_mixture_fetches_the_other_run_too(self, paths, log, monkeypatch):
+    def test_a_mixture_fetches_the_other_run_too(self, paths, log, monkeypatch, container):
         """Rung fetching is per-run and the mixture partner is a different run
         entirely, so without this the mixture dies in the loader exactly as a
         windowed average did before its support rungs were fetched."""
-        self._published(paths)
-        partner = paths.archive / "run-b"
-        (partner / "static-800.zarr").mkdir(parents=True)
-        (partner / "static-800.zarr" / "chunk").write_text("d")
-        (partner / ".complete-static-800.zarr").write_text("")
-        (partner / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-800.zarr", "iteration": 800, "retained": []}'
+        self._published(container)
+        self._published(container, run="run-b", rung="static-800")
+        container["run-b/STATIC_CHECKPOINT.json"] = (
+            b'{"zarr": "static-800.zarr", "iteration": 800, "retained": []}'
         )
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(
@@ -179,33 +165,37 @@ class TestEvaluateFetch:
             run_id="run-a",
             eval_rungs=("2000",),
             eval_flags=("--mix-run", "run-b", "--mix-at", "800"),
+            checkpoint_sas=SAS,
         )
 
         assert handlers._evaluate(task, paths, log) == (0, None)
-        assert (paths.runs / "run-b" / "static-800.zarr" / "chunk").exists()
+        assert (paths.runs / "run-b" / "static-800.ckpt.zst").exists()
 
-    def test_a_mixture_naming_no_such_run_is_fatal(self, paths, log, monkeypatch):
-        self._published(paths)
+    def test_a_mixture_naming_no_such_run_is_fatal(self, paths, log, monkeypatch, container):
+        self._published(container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(
             op=TaskName.EVALUATE,
             run_id="run-a",
             eval_rungs=("2000",),
             eval_flags=("--mix-run", "run-nope"),
+            checkpoint_sas=SAS,
         )
         assert handlers._evaluate(task, paths, log) == (1, None)
         assert "names no published run" in log.path.read_text()
 
-    def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch):
+    def test_the_evaluator_is_told_where_to_report(self, paths, log, monkeypatch, container):
         """IT NEVER WAS. Only precompute and vector-sweep filled the path in, so
         `--progress-file` never reached an evaluation's command line and the
         branch counter it keeps had nowhere to go: every score fell back to
         counting rungs, which is 1, so the bar read 0% for the whole ten
         minutes."""
-        self._published(paths)
+        self._published(container)
         seen: list[list[str]] = []
         monkeypatch.setattr(handlers, "run_guarded", lambda argv, **k: seen.append(argv) or 0)
-        task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("2000",))
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE, run_id="run-a", eval_rungs=("2000",), checkpoint_sas=SAS
+        )
 
         handlers._evaluate(task, paths, log)
 
@@ -262,11 +252,11 @@ class TestMetadataComesFromWhereverTheRunIs:
     published, just not where this looked.
     """
 
-    def test_a_run_with_no_share_directory_is_not_an_error(self, tmp_path, container):
+    def test_a_run_the_node_has_never_seen_is_not_an_error(self, tmp_path, container):
         container["run-a/STATIC_CHECKPOINT.json"] = b'{"zarr": "static-10.ckpt.zst"}'
         destination = tmp_path / "node" / "run-a"
 
-        archive.fetch_metadata(tmp_path / "share" / "run-a", destination, SAS)
+        archive.fetch_metadata("run-a", destination, SAS)
 
         assert (destination / "STATIC_CHECKPOINT.json").read_bytes() == (
             b'{"zarr": "static-10.ckpt.zst"}'
@@ -281,24 +271,11 @@ class TestMetadataComesFromWhereverTheRunIs:
         container["run-a/static-10.ckpt.zst"] = b"RUNG"
         destination = tmp_path / "node" / "run-a"
 
-        archive.fetch_metadata(tmp_path / "share" / "run-a", destination, SAS)
+        archive.fetch_metadata("run-a", destination, SAS)
 
         assert (destination / ".run.json").exists()
         assert (destination / "progress.jsonl").exists()
         assert not (destination / "static-10.ckpt.zst").exists(), "a rung is not metadata"
-
-    def test_the_container_wins_over_a_share_copy(self, tmp_path, container):
-        """A pointer stored in two places drifts, and the container is the one
-        the rungs are in."""
-        source = tmp_path / "share" / "run-a"
-        source.mkdir(parents=True)
-        (source / "STATIC_CHECKPOINT.json").write_text("STALE")
-        container["run-a/STATIC_CHECKPOINT.json"] = b"CURRENT"
-        destination = tmp_path / "node" / "run-a"
-
-        archive.fetch_metadata(source, destination, SAS)
-
-        assert (destination / "STATIC_CHECKPOINT.json").read_text() == "CURRENT"
 
 
 class TestAResumeFindsItsLadder:
@@ -325,7 +302,7 @@ class TestAResumeFindsItsLadder:
         monkeypatch.setattr(
             handlers.archive,
             "fetch_current_rung",
-            lambda source, _dest, _log=None, sas="": fetched.append(source.name),
+            lambda run_id, _dest, _sas, _log=None: fetched.append(run_id),
         )
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
 
@@ -355,7 +332,7 @@ class TestAbstractionRefresh:
     """
 
     def _published_abstraction(
-        self, tmp_path, monkeypatch, name="buckets-F400T1200R600-rexact-e5c873dc"
+        self, tmp_path, container, name="buckets-F400T1200R600-rexact-e5c873dc"
     ):
         """One abstraction in the container, packed the way the node published
         it -- a real `.tar.zst`, so the fetch exercises its own unpack."""
@@ -364,30 +341,16 @@ class TestAbstractionRefresh:
         (source / "metadata.json").write_text('{"config_hash": "e5c873dc4eabc925"}')
         packed = tmp_path / archive.abstraction_object(name)
         archive.pack_abstraction(source, packed)
-        body = packed.read_bytes()
-
-        def _get(_sas, asked, into):
-            if asked != packed.name:
-                return False
-            into.mkdir(parents=True, exist_ok=True)
-            (into / asked).write_bytes(body)
-            return True
-
-        # Prefix-aware, because a metadata fetch lists ONE run and an
-        # abstraction fetch lists the whole container: answering the packed
-        # name to both would hand a run's fetch an abstraction.
-        monkeypatch.setattr(
-            archive.blobstore,
-            "list_container",
-            lambda _s, prefix="": [] if prefix else [packed.name],
-        )
-        monkeypatch.setattr(archive.blobstore, "get_object", _get)
+        # Into the SAME fake store: the abstractions container is reached with
+        # the same account token through `sibling_container`, and the object
+        # names cannot collide with a run's `<run>/...` keys.
+        container[packed.name] = packed.read_bytes()
         return name
 
     def test_training_pulls_an_abstraction_the_node_has_never_seen(
         self, paths, tmp_path, log, monkeypatch, container
     ):
-        self._published_abstraction(tmp_path, monkeypatch)
+        self._published_abstraction(tmp_path, container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(
             op=TaskName.TRAIN, config="quick_test", to=1000, run_id="run-a", checkpoint_sas=SAS
@@ -406,13 +369,10 @@ class TestAbstractionRefresh:
     def test_evaluation_pulls_it_too(self, paths, tmp_path, log, monkeypatch, container):
         """Scoring resolves the abstraction the checkpoint is PINNED to, so the
         same boot order breaks evaluation and not only training."""
-        self._published_abstraction(tmp_path, monkeypatch)
-        published = paths.archive / "run-a"
-        (published / "static-2000.zarr").mkdir(parents=True)
-        (published / "static-2000.zarr" / "chunk").write_text("data")
-        (published / ".complete-static-2000.zarr").write_text("")
-        (published / "STATIC_CHECKPOINT.json").write_text(
-            '{"zarr": "static-2000.zarr", "iteration": 2000, "retained": []}'
+        self._published_abstraction(tmp_path, container)
+        container["run-a/static-2000.ckpt.zst"] = b"data"
+        container["run-a/STATIC_CHECKPOINT.json"] = (
+            b'{"zarr": "static-2000.zarr", "iteration": 2000, "retained": []}'
         )
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
         task = node_plan.TaskPlan(op=TaskName.EVALUATE, run_id="run-a", checkpoint_sas=SAS)
@@ -459,7 +419,7 @@ class TestAbstractionRefresh:
         """A directory already present is skipped before the object is even
         fetched, which is why the steady-state cost is one HEAD each rather
         than 2.83 GiB per task on a busy pool."""
-        self._published_abstraction(tmp_path, monkeypatch)
+        self._published_abstraction(tmp_path, container)
         landed = paths.data / "combo_abstraction" / "buckets-F400T1200R600-rexact-e5c873dc"
         landed.mkdir(parents=True)
         (landed / "metadata.json").write_text("newer-on-the-node")

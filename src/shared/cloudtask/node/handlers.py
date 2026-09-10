@@ -83,7 +83,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
     # so a missing one is a task that cannot do its job, not one that can do
     # less of it.
     if getattr(plan, "warm_start_from", ""):
-        prior = paths.archive / plan.warm_start_from
+        prior = plan.warm_start_from
         if not archive.is_published(prior, plan.checkpoint_sas):
             log(
                 f"FATAL warm-start prior {plan.warm_start_from} is not published; "
@@ -104,7 +104,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             # THE PRIOR'S MANIFEST NAMES ITS RUNGS, and asking the share for a
             # directory is a second opinion that fails for every migrated run:
             # the rung is in the container and there is no directory to find.
-            name = dict(archive.manifest_entries(prior)).get(int(wanted), "")
+            name = dict(archive.manifest_entries(prior, plan.checkpoint_sas)).get(int(wanted), "")
             if not name:
                 log(f"FATAL warm-start prior has no rung {wanted} (its manifest names none)")
                 return 1, "missing-rung"
@@ -116,13 +116,12 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             archive.fetch_snapshot(prior, destination, name, plan.checkpoint_sas)
             log(f"fetched warm-start rung {name}")
         else:
-            archive.fetch_current_rung(prior, destination, log, plan.checkpoint_sas)
+            archive.fetch_current_rung(prior, destination, plan.checkpoint_sas, log)
     _refresh_abstractions(paths, log, plan.checkpoint_sas)
     run_id = plan.train_run_id
-    published = paths.archive / run_id
-    if archive.is_published(published, plan.checkpoint_sas):
+    if archive.is_published(run_id, plan.checkpoint_sas):
         log(f"fetching published checkpoint for {run_id}")
-        archive.fetch_current_rung(published, paths.runs / run_id, log, plan.checkpoint_sas)
+        archive.fetch_current_rung(run_id, paths.runs / run_id, plan.checkpoint_sas, log)
 
     plan = _reporting(plan, paths)
     progress.note_baseline(paths, plan)
@@ -161,11 +160,10 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     Rungs are scored in ONE task because the fetch dominates the cost: a whole
     convergence curve for the price of one.
     """
-    published = paths.archive / plan.run_id
-    if not archive.is_published(published, plan.checkpoint_sas):
+    if not archive.is_published(plan.run_id, plan.checkpoint_sas):
         log(f"FATAL no such published run: {plan.run_id}")
         return 1, None
-    rungs = _fetch_rungs(plan, paths, published, log)
+    rungs = _fetch_rungs(plan, paths, log)
     if rungs is None:
         return 1, None
     if not _fetch_mix_run(plan, paths, log):
@@ -222,27 +220,25 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     return 1, None
 
 
-def _fetch_rungs(
-    plan: TaskPlan, paths: NodePaths, published: Path, log: TaskLogger
-) -> list[str] | None:
+def _fetch_rungs(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> list[str] | None:
     """The rungs to score, pulled down; ``None`` when there is nothing to score.
 
     An empty request means "the latest checkpoint", so the manifest's current
     rung is exactly what has to come down. The shell had no branch for this and
-    fell to a catch-all that copied the WHOLE published directory -- the entire
+    fell to a catch-all that copied the WHOLE published run -- the entire
     ladder, to score one rung of it.
     """
     requested = list(plan.eval_rungs)
     if not requested:
         if archive.fetch_current_rung(
-            published, paths.runs / plan.run_id, log, plan.checkpoint_sas
+            plan.run_id, paths.runs / plan.run_id, plan.checkpoint_sas, log
         ):
             return []
         log(f"FATAL {plan.run_id} has no published checkpoint to score")
         return None
     destination = paths.runs / plan.run_id
     fetched = archive.fetch_for_evaluation(
-        published, destination, requested, log, plan.checkpoint_sas
+        plan.run_id, destination, requested, plan.checkpoint_sas, log
     )
     if not fetched:
         log("FATAL none of the requested rungs could be fetched")
@@ -251,7 +247,7 @@ def _fetch_rungs(
     if support:
         log(f"eval also READS {len(support)} more rung(s): {', '.join(support)}")
         support_fetched = archive.fetch_for_evaluation(
-            published, destination, support, log, plan.checkpoint_sas
+            plan.run_id, destination, support, plan.checkpoint_sas, log
         )
         if len(support_fetched) != len(support):
             log("FATAL a rung the reassembled average reads is missing")
@@ -270,20 +266,17 @@ def _fetch_mix_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
     other = options.get("--mix-run")
     if not other:
         return True
-    source = paths.archive / other
-    if not archive.is_published(source, plan.checkpoint_sas):
+    if not archive.is_published(other, plan.checkpoint_sas):
         log(f"FATAL --mix-run names no published run: {other}")
         return False
     wanted = [options["--mix-at"]] if "--mix-at" in options else []
     destination = paths.runs / other
     if wanted:
-        fetched = archive.fetch_for_evaluation(
-            source, destination, wanted, log, plan.checkpoint_sas
-        )
+        fetched = archive.fetch_for_evaluation(other, destination, wanted, plan.checkpoint_sas, log)
     else:
         fetched = (
             ["current"]
-            if archive.fetch_current_rung(source, destination, log, plan.checkpoint_sas)
+            if archive.fetch_current_rung(other, destination, plan.checkpoint_sas, log)
             else []
         )
     if not fetched:
@@ -318,7 +311,7 @@ def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str])
 
 def _retained_ladder(destination: Path) -> list[int]:
     """Every rung the run's manifest still points at."""
-    return [iteration for iteration, _name in archive.manifest_entries(destination)]
+    return [iteration for iteration, _name in archive.local_entries(destination)]
 
 
 def _publish_abstraction(plan: TaskPlan, output: Path, log: TaskLogger) -> int:

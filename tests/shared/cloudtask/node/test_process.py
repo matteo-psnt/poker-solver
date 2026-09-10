@@ -7,8 +7,6 @@ running, holding the /dev/shm segments that then killed the NEXT task.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from src.shared.cloudtask.node import process
@@ -82,28 +80,53 @@ class TestRunGuarded:
 
 
 class TestTaskLogger:
-    def test_publishing_lands_the_log_on_the_share(self, paths, log):
+    @staticmethod
+    def _logger(tmp_path, monkeypatch):
+        """A logger writing to a fake diagnostics container."""
+        sent: dict[str, bytes] = {}
+        monkeypatch.setattr(
+            process.blobstore,
+            "put_bytes",
+            lambda _s, name, body: sent.__setitem__(name, body) or len(body),
+        )
+        return process.TaskLogger(tmp_path / "task.log", "https://a/diagnostics?sig=x"), sent
+
+    def test_publishing_lands_the_log_in_the_container(self, tmp_path, monkeypatch):
+        log, sent = self._logger(tmp_path, monkeypatch)
         log("something worth reading later")
         log.publish()
-        published = paths.share / "logs" / "task.log"
-        assert "something worth reading later" in published.read_text()
+        assert b"something worth reading later" in sent["task.log"]
 
-    def test_only_the_tail_is_published(self, paths, log, monkeypatch):
+    def test_only_the_tail_is_published(self, tmp_path, monkeypatch):
         """A multi-hour tqdm stream is mostly progress-bar repaints that cost
-        more to copy than they inform."""
+        more to send than they inform."""
         monkeypatch.setattr(process, "PUBLISHED_LOG_BYTES", 64)
+        log, sent = self._logger(tmp_path, monkeypatch)
         log("x" * 500)
         log("the end")
         log.publish()
-        published = (paths.share / "logs" / "task.log").read_bytes()
-        assert len(published) == 64
-        assert b"the end" in published
+        assert len(sent["task.log"]) == 64
+        assert b"the end" in sent["task.log"]
 
-    def test_an_unwritable_share_does_not_kill_the_task(self, paths, log, monkeypatch):
+    def test_a_store_that_refuses_does_not_kill_the_task(self, tmp_path, monkeypatch):
+        """The observer must never fail the work it is observing."""
+
         def refuse(*args, **kwargs):
-            raise OSError("share went away")
+            raise OSError("the container went away")
 
-        monkeypatch.setattr(Path, "mkdir", refuse)
+        monkeypatch.setattr(process.blobstore, "put_bytes", refuse)
+        log = process.TaskLogger(tmp_path / "task.log", "https://a/diagnostics?sig=x")
+        log("something")
+        log.publish()
+
+    def test_without_a_credential_it_publishes_nothing(self, tmp_path, monkeypatch):
+        """A task sealed with no diagnostics SAS keeps its log node-local; there
+        is no second store to fall back to."""
+        monkeypatch.setattr(
+            process.blobstore, "put_bytes", lambda *_a: pytest.fail("published with no SAS")
+        )
+        log = process.TaskLogger(tmp_path / "task.log")
+        log("something")
         log.publish()
 
 

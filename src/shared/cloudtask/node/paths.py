@@ -16,13 +16,14 @@ from pathlib import Path
 class NodePaths:
     """The results of the node's disk layout, not the act of creating it.
 
-    Discovery and mounting are NOT done here -- ``infra/main.tf``'s start task
-    formats and mounts the data disk before any task runs, and the share is
-    mounted by the pool. This only names the results.
+    Discovery is NOT done here -- ``infra/main.tf``'s start task formats and
+    mounts the data disk before any task runs. This only names the results.
+
+    There is no share. Every store a task reaches is Blob over HTTPS, addressed
+    by RUN ID rather than by a path, so there is no third directory to name.
     """
 
     work: Path
-    share: Path
     code: Path
 
     @property
@@ -33,18 +34,12 @@ class NodePaths:
     def runs(self) -> Path:
         return self.data / "runs"
 
-    @property
-    def archive(self) -> Path:
-        return self.share / "archive"
-
     @classmethod
     def from_environment(cls, environ: dict[str, str] | None = None) -> NodePaths:
         env = dict(os.environ if environ is None else environ)
         work = Path(env.get("RUN_WORK_DIR") or "/mnt/work")
-        mounts = env.get("AZ_BATCH_NODE_MOUNTS_DIR") or "/mnt/batch/tasks/fsmounts"
         return cls(
             work=work,
-            share=Path(env.get("RUN_SHARE_DIR") or f"{mounts}/shared"),
             # Set by the task command line, which extracts there. Task-owned,
             # and unique per task, so concurrent tasks on one node cannot share
             # a tree.
