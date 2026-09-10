@@ -48,7 +48,8 @@ locals {
 
   # Node-level setup, run once per node by the pool start task.
   #   /mnt/work    the data disk -- fast local scratch for runs and checkpoints
-  #   $AZ_BATCH_NODE_MOUNTS_DIR/shared   the durable share (SMB)
+  # There is no mount. Every store is Blob over HTTPS, reached with a SAS the
+  # task carries.
   start_script = <<-EOT
     set -euo pipefail
 
