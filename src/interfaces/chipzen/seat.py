@@ -266,6 +266,20 @@ class BlueprintSeat:
     #: one the CURRENT hand selected; a one-rung ladder behaves exactly as before.
     ladder: DepthLadder | None = None
     use_resolver: bool | None = None
+    #: Run the resolver ONLY once the hand has left our tree.
+    #:
+    #: The resolver's benefit is off-tree -- +528 mbb/hand, measured where the
+    #: opponent bets sizes the blueprint has no node for. Its COST is
+    #: everywhere: `DEC-0013` shows its local tree ends at the next street, so
+    #: it has no future betting to extract with and no future fold equity to
+    #: wait for, and CFR converges to shipping stacks whenever equity is ahead.
+    #:
+    #: MEASURED 09-10: on tree the resolver is worth -203.6 +/- 133.1 mbb/hand
+    #: (1.5 sigma, i.e. nothing) while DOUBLING the stack-off rate, 5.25% vs
+    #: 2.37% over ~5,500 decisions. Doubling variance for a statistically-zero
+    #: edge is a losing trade in an ELIMINATION format, where a stack-off that
+    #: loses ends the match and there is no next hand to realise an edge in.
+    resolver_only_off_tree: bool = False
     budget_ms: int = DEFAULT_BUDGET_MS
     tally: SeatTally = field(default_factory=SeatTally)
     #: Highest big blind seen this match. NOT the last one posted: a big blind
@@ -284,6 +298,7 @@ class BlueprintSeat:
         *,
         use_resolver: bool | None = None,
         budget_ms: int | None = None,
+        resolver_only_off_tree: bool = False,
     ) -> BlueprintSeat:
         """Build a seat from ``match_start``, refusing a table we cannot denominate.
 
@@ -325,6 +340,7 @@ class BlueprintSeat:
             seat=seat,
             ladder=ladder,
             use_resolver=use_resolver,
+            resolver_only_off_tree=resolver_only_off_tree,
             budget_ms=budget,
         )
         seated.warm()
@@ -543,7 +559,13 @@ class BlueprintSeat:
         """
         from src.engine.search.agent import BlueprintAgent  # noqa: PLC0415 -- see below
 
-        agent = BlueprintAgent(self.blueprint, use_resolver=self.use_resolver)
+        use_resolver = self.use_resolver
+        if self.resolver_only_off_tree and use_resolver is not False:
+            # `off_tree` is cumulative over the hand, so once a hand leaves the
+            # tree the resolver stays on for the rest of it -- which is the
+            # right shape: what is off-tree is the HISTORY, not one decision.
+            use_resolver = spot.off_tree > 0
+        agent = BlueprintAgent(self.blueprint, use_resolver=use_resolver)
         return agent.act(spot.state, time_budget_ms=self.budget_ms)
 
     @staticmethod
@@ -708,6 +730,7 @@ def run_seat(
     token: str | None,
     env: str,
     use_resolver: bool | None = None,
+    resolver_only_off_tree: bool = False,
     budget_ms: int | None = None,
     max_matches: int | None = None,
     seek_matches: bool = True,
@@ -800,6 +823,7 @@ def run_seat(
                 match_info,
                 seat=_self_seat(match_info),
                 use_resolver=use_resolver,
+                resolver_only_off_tree=resolver_only_off_tree,
                 budget_ms=budget_ms,
             )
 
