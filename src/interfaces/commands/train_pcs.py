@@ -15,7 +15,12 @@ if TYPE_CHECKING:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver train-pcs`."""
-    parser.add_argument("--config", required=True, help="Config stem under config/training/.")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Config stem under config/training/ for a FRESH run. A continuation "
+        "(--run) trains the config on the run's record and refuses this.",
+    )
     parser.add_argument(
         "--iterations",
         type=int,
@@ -54,8 +59,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=[],
         dest="overrides",
         metavar="KEY=VALUE",
-        help="Nested config override, `__` as the separator. Repeatable. The sampler's "
-        "own knobs live under `pcs__` (alternating, runouts_per_flop, showdown).",
+        help="Nested config override, `__` as the separator. Repeatable; fresh runs "
+        "only. The sampler's own knobs live under `pcs__`.",
     )
     parser.add_argument("--experiment", default=None, help="Experiment id this run is an arm of.")
     parser.add_argument("--arm", default=None, help="Arm within the experiment.")

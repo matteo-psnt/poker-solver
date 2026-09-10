@@ -54,14 +54,13 @@ class TestMergeBehavior:
         """Verify deep merging works."""
         base = Config()
         overrides = {
-            "training": {"num_iterations": 50_000, "runs_dir": "elsewhere"},
+            "training": {"num_iterations": 50_000},
             "game": {"big_blind": 4},
         }
 
         merged = base.merge(overrides)
 
         assert merged.training.num_iterations == 50_000
-        assert merged.training.runs_dir == "elsewhere"
         assert merged.game.big_blind == 4
 
     def test_merge_empty_overrides(self):
@@ -100,7 +99,6 @@ class TestLoadBehavior:
                 """
 training:
   num_iterations: 50000
-  runs_dir: elsewhere
 
 game:
   starting_stack: 300
@@ -113,7 +111,6 @@ game:
 
             # Overridden values
             assert cfg.training.num_iterations == 50_000
-            assert cfg.training.runs_dir == "elsewhere"
             assert cfg.game.starting_stack == 300
 
         finally:
@@ -177,7 +174,6 @@ action_abstraction:
                 """
 training:
   num_iterations: 1000
-  runs_dir: elsewhere
 solver:
   cfr_plus: true
 """
@@ -193,7 +189,6 @@ training:
             cfg = load_config(child_path)
 
             assert cfg.training.num_iterations == 9999  # child wins
-            assert cfg.training.runs_dir == "elsewhere"  # inherited from base
             assert cfg.solver.cfr_plus is True  # inherited from base
 
     def test_all_training_profiles_load(self):

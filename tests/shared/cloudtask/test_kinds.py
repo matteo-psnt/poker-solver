@@ -27,6 +27,7 @@ def _spec(**kwargs):
         "config": "production",
         "to": 0,
         "run_id": "",
+        "sets": (),
         "arm": "",
         "eval_at": "",
         "eval_flags": (),
@@ -127,11 +128,21 @@ class TestLookup:
 
 
 class TestValidation:
-    def test_a_continuing_train_still_needs_its_config(self):
-        """The checkpoint stores neither the tree nor the solver, so `--run x`
-        alone died on the node after a snapshot upload and every retry."""
-        with pytest.raises(BadTaskError, match="config"):
-            kinds.kind(TaskName.TRAIN).validate(_spec(config="", run_id="run-a", to=10))
+    @pytest.mark.parametrize("op", [TaskName.TRAIN, TaskName.TRAIN_PCS])
+    def test_a_fresh_train_needs_a_config(self, op):
+        with pytest.raises(BadTaskError, match="needs a config"):
+            kinds.kind(op).validate(_spec(config="", run_id="", to=10))
+
+    @pytest.mark.parametrize("op", [TaskName.TRAIN, TaskName.TRAIN_PCS])
+    def test_a_continuation_trains_the_config_on_its_record(self, op):
+        """Naming one would rebuild the trainer from this task's flags, which is
+        how a CFR-BR ladder was once one forgotten `--set` from continuing as
+        plain PCS."""
+        kinds.kind(op).validate(_spec(config="", run_id="run-a", to=10))
+        with pytest.raises(BadTaskError, match="drop --config and --set"):
+            kinds.kind(op).validate(_spec(config="production", run_id="run-a", to=10))
+        with pytest.raises(BadTaskError, match="drop --config and --set"):
+            kinds.kind(op).validate(_spec(config="", sets=("a=b",), run_id="run-a", to=10))
 
     def test_a_relative_target_is_refused(self):
         with pytest.raises(BadTaskError, match="ABSOLUTE"):

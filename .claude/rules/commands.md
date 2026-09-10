@@ -44,10 +44,12 @@ either.
   published record, materialised into a temp tree and discarded. The eval index
   is rebuilt from per-run documents on every read, so `ledger --rebuild` and
   `--migrate` do not exist.
-- **`train-static` covers starting AND continuing.** `--iterations` is an
-  ABSOLUTE target and `--run <id>` continues an existing directory, so
-  re-running past the target is a no-op — that is what makes a scheduler retry
-  converge instead of training twice. There is no separate `resume`.
+- **`train-static` and `train-pcs` cover starting AND continuing.**
+  `--iterations` is an ABSOLUTE target and `--run <id>` continues an existing
+  run, so re-running past the target is a no-op — that is what makes a
+  scheduler retry converge instead of training twice. There is no separate
+  `resume`, and a continuation takes no `--config`/`--set`: it trains the
+  config on the run's record.
 - **Nothing on the laptop reads a card abstraction.** Submitting must not call
   `build_card_abstraction` — it loads ~773 MB to answer a question about another
   machine. Config overrides go through `--set k=v` and nothing else.

@@ -5,6 +5,7 @@ from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.pipeline.training.run_tracker.tracker import (
     RunTracker,
     has_run_record,
+    refuse_config_on_continue,
 )
 
 __all__ = (
@@ -13,4 +14,5 @@ __all__ = (
     "RunMetadata",
     "RunTracker",
     "has_run_record",
+    "refuse_config_on_continue",
 )

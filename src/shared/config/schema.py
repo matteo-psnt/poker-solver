@@ -22,10 +22,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Where runs live when nothing says otherwise. Backs both this module's
-# ``TrainingConfig.runs_dir`` and the ``--runs-dir`` flag on every command that
-# takes one -- ten of which used to spell it as a bare literal, while their
-# sibling ``--ledger`` correctly pointed at ``DEFAULT_LEDGER_PATH``.
+# Where runs live when nothing says otherwise: the trainers' default and the
+# ``--runs-dir`` flag on every reader that takes one. Node-relative -- the node
+# symlinks its data disk to `data/` -- and never the share.
 DEFAULT_RUNS_DIR = "data/runs"
 
 # ---------------------------------------------------------------------------
@@ -70,7 +69,6 @@ class TrainingConfig(StrictFrozenModel):
     """Training loop configuration."""
 
     num_iterations: PositiveInt = Field(default=100_000)
-    runs_dir: str = Field(default=DEFAULT_RUNS_DIR)
 
 
 class StorageConfig(StrictFrozenModel):

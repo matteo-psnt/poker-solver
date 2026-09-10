@@ -27,9 +27,10 @@ def test_the_target_is_absolute_here_too():
         _leg(to=0).validate()
 
 
-def test_a_pcs_leg_needs_a_config_even_when_continuing():
-    with pytest.raises(BadTaskError, match="config"):
-        _leg(config="", run_id="run-a").validate()
+def test_a_continuing_pcs_leg_carries_no_config():
+    _leg(config="", run_id="run-a").validate()
+    with pytest.raises(BadTaskError, match="drop --config"):
+        _leg(config="production", run_id="run-a").validate()
 
 
 def test_retention_reaches_the_node_and_a_scalar_leg_leaves_it_empty():

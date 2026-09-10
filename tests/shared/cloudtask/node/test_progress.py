@@ -300,7 +300,6 @@ class TestProgressReadsThisTasksRun:
         for key in ("RUN_OP", "RUN_CONFIG", "RUN_TO", "RUN_ID"):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("RUN_OP", "train")
-        monkeypatch.setenv("RUN_CONFIG", "quick_test")
         monkeypatch.setenv("RUN_TO", "150000000")
         monkeypatch.setenv("RUN_ID", "run-a")
         plan = node_plan.parse_environment()

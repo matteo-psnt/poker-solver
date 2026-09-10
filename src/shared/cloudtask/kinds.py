@@ -81,6 +81,8 @@ class TaskFields(Protocol):
     def to(self) -> int: ...
     @property
     def run_id(self) -> str: ...
+    @property
+    def sets(self) -> Sequence[str]: ...
 
 
 class Submission(TaskFields, Protocol):
@@ -121,8 +123,6 @@ class NodePlan(TaskFields, Protocol):
     def arm(self) -> str: ...
     @property
     def parent(self) -> str: ...
-    @property
-    def sets(self) -> Sequence[str]: ...
     @property
     def eval_method(self) -> str: ...
     @property
@@ -384,6 +384,26 @@ def _iterations_done(plan: NodePlan, state: Mapping[str, object], unit: str) -> 
     return Progress(max(counts), float(plan.to), unit)
 
 
+def _validate_training_target(task: TaskFields) -> None:
+    """A fresh run names a config; a continuation names a run and NOTHING about
+    its config, which it trains off the record. Both kinds share this because
+    the rule is about the ladder, not the kernel."""
+    if task.run_id:
+        if task.config or task.sets:
+            raise BadTaskError(
+                "a continuation trains the config on the run's record: drop --config and "
+                "--set, or start a new run"
+            )
+    elif not task.config:
+        raise BadTaskError("a fresh training run needs a config")
+    if task.to <= 0:
+        raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+
+
+def _config_argv(plan: NodePlan) -> list[str]:
+    return ["--config", plan.config] if plan.config else []
+
+
 class TrainTask(TaskKind):
     """Train a run to an ABSOLUTE iteration target."""
 
@@ -393,20 +413,12 @@ class TrainTask(TaskKind):
     progress_file = "train-progress.json"
 
     def validate(self, task: TaskFields) -> None:
-        if not task.config:
-            # A CONTINUING task needs it too: the config builds the tree and the
-            # solver, and the checkpoint stores neither. `--run x` without one
-            # reached the node and died on `Config file not found` -- after a
-            # snapshot upload, a pool spin-up and every retry.
-            raise BadTaskError("a training task needs a config, even when continuing a run")
-        if task.to <= 0:
-            raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+        _validate_training_target(task)
 
     def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = [
             "train-static",
-            "--config",
-            plan.config,
+            *_config_argv(plan),
             "--iterations",
             str(plan.to),
             "--run",
@@ -431,8 +443,9 @@ class TrainTask(TaskKind):
         ):
             if value:
                 argv += [flag, value]
-        for override in plan.sets:
-            argv += ["--set", override]
+        if not plan.run_id:
+            for override in plan.sets:
+                argv += ["--set", override]
         return [argv]
 
     def label(self, task: Submission) -> str:
@@ -468,16 +481,12 @@ class TrainPcsTask(TaskKind):
     progress_file = "train-progress.json"
 
     def validate(self, task: TaskFields) -> None:
-        if not task.config:
-            raise BadTaskError("a training task needs a config, even when continuing a run")
-        if task.to <= 0:
-            raise BadTaskError("the iteration target is ABSOLUTE and must be positive")
+        _validate_training_target(task)
 
     def commands(self, plan: NodePlan) -> list[list[str]]:
         argv = [
             "train-pcs",
-            "--config",
-            plan.config,
+            *_config_argv(plan),
             "--iterations",
             str(plan.to),
             "--run",
@@ -500,8 +509,9 @@ class TrainPcsTask(TaskKind):
         ):
             if value:
                 argv += [flag, value]
-        for override in plan.sets:
-            argv += ["--set", override]
+        if not plan.run_id:
+            for override in plan.sets:
+                argv += ["--set", override]
         return [argv]
 
     def label(self, task: Submission) -> str:

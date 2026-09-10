@@ -69,8 +69,9 @@ just console-dev   # Vite on :5173 with hot reload, proxying /api to :8765
 
 The iteration target is **absolute**: re-submitting the same run with the same
 number is a no-op, which is what makes a retry converge instead of training
-twice. Continuing a run is `submit --run <id> --to <larger-number>`; there is no
-separate resume.
+twice. Continuing a run is `submit --run <id> --to <larger-number>`, with no
+`--config` or `--set`: a continuation trains the config on the run's record.
+There is no separate resume.
 
 `train-static`, `precompute` and `evaluate` still exist as local subcommands —
 they are what a node invokes, and they remain useful for seconds-long probes.

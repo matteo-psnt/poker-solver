@@ -29,3 +29,13 @@ class TestTheDefaultKernel:
     def test_an_explicit_kernel_is_never_second_guessed(self):
         assert submit._kernel(_args(kernel="pcs", to=200_000)) == "pcs"
         assert submit._kernel(_args(kernel="scalar", to=200_000)) == "scalar"
+
+
+class TestAContinuationKeepsItsKernel:
+    def test_the_record_answers_when_no_kernel_is_named(self, monkeypatch):
+        monkeypatch.setattr(submit, "_recorded_kernel", lambda run_id: "scalar")
+        assert submit._kernel(_args(to=200_000), run_id="run-a") == "scalar"
+
+    def test_an_explicit_kernel_still_wins(self, monkeypatch):
+        monkeypatch.setattr(submit, "_recorded_kernel", lambda run_id: "scalar")
+        assert submit._kernel(_args(kernel="pcs"), run_id="run-a") == "pcs"

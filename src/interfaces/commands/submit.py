@@ -10,6 +10,7 @@ diverge are how one of them stops being exercised.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from src.interfaces.cloud.tasks import dispatch, spec
@@ -25,7 +26,12 @@ if TYPE_CHECKING:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver submit`."""
-    parser.add_argument("--config", default="", help="Training config stem (fresh runs).")
+    parser.add_argument(
+        "--config",
+        default="",
+        help="Training config stem for a FRESH run. A continuation (--run) trains the "
+        "config on the run's record and takes neither this nor --set.",
+    )
     parser.add_argument(
         "--to",
         type=int,
@@ -117,10 +123,13 @@ _OPS = {
 PCS_DEFAULT_TO_CEILING = 20_000
 
 
-def _kernel(args: argparse.Namespace) -> str:
-    """The kernel, defaulting to pcs -- unless the target says otherwise."""
+def _kernel(args: argparse.Namespace, run_id: str = "") -> str:
+    """The kernel: named, else the continued run's own, else pcs -- unless the
+    target says otherwise."""
     if args.kernel is not None:
         return args.kernel
+    if run_id:
+        return _recorded_kernel(run_id)
     if args.to > PCS_DEFAULT_TO_CEILING:
         raise CommandError(
             f"--to {args.to:,} with the default kernel (pcs) is {args.to:,} BOARDS, at "
@@ -128,6 +137,18 @@ def _kernel(args: argparse.Namespace) -> str:
             "`--kernel scalar`; if you mean that many boards, pass `--kernel pcs`."
         )
     return "pcs"
+
+
+def _recorded_kernel(run_id: str) -> str:
+    """Which trainer wrote a run, off its record; runs older than the field are scalar."""
+    from src.adapters.postgres import connect  # noqa: PLC0415 -- composition root
+    from src.pipeline.services import load_run_metadata  # noqa: PLC0415 -- --help stays cheap
+    from src.shared.config import DEFAULT_RUNS_DIR  # noqa: PLC0415 -- see above
+
+    metadata = load_run_metadata(
+        Path(DEFAULT_RUNS_DIR) / run_id, connect.record_source_from_environment()
+    )
+    return metadata.kernel or "scalar"
 
 
 def _arm(args: argparse.Namespace) -> str:
@@ -172,7 +193,12 @@ def run(args: argparse.Namespace) -> SubmitPayload:
     # Only a CONTINUE carries a run id, and only then can it be a fragment the
     # node cannot match. A fresh run's id does not exist yet.
     run_id = resolve_published_run(args.run) if args.run else args.run
-    kernel = _kernel(args)
+    if run_id and (args.config or args.sets):
+        raise CommandError(
+            f"{run_id} already has a config on its record, and a continuation trains "
+            "exactly that: drop --config and --set, or start a new run."
+        )
+    kernel = _kernel(args, run_id)
     payload = dispatch.stage_and_queue(
         pool=args.pool,
         make_tasks=lambda snapshot: [

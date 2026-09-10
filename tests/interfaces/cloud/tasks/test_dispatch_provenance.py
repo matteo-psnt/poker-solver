@@ -261,7 +261,8 @@ class TestQueueLoop:
         calls: list[dict] = []
         self._stub(monkeypatch, calls)
 
-        payload = dispatch.stage_and_queue(lambda snap: [_task(), _task(run_id="run-b")])
+        continued = spec.TaskSpec(code_snapshot="snap", config="", to=1000, run_id="run-b")
+        payload = dispatch.stage_and_queue(lambda snap: [_task(), continued])
 
         assert len(calls) == 2
         assert [c["id"] for c in calls] == payload.tasks

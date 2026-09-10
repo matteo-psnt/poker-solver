@@ -112,7 +112,7 @@ class TestTrainArgv:
         assert "--checkpoint-every" not in _plan(RUN_CHECKPOINT_EVERY="").commands[0]
 
     def test_a_given_run_id_is_continued(self):
-        assert _plan(RUN_ID="run-abc").train_run_id == "run-abc"
+        assert _plan(RUN_ID="run-abc", RUN_CONFIG="").train_run_id == "run-abc"
 
     def test_a_fresh_run_id_is_derived_from_the_task(self, monkeypatch):
         """A Batch retry keeps the task id, so it continues this run rather
@@ -150,9 +150,7 @@ class TestEvaluateArgv:
 
 
 class TestValidation:
-    def test_a_training_task_without_a_config_is_refused(self):
-        """The config builds the tree and the solver; the checkpoint stores
-        neither, so a CONTINUING task needs it too."""
+    def test_a_fresh_training_task_without_a_config_is_refused(self):
         with pytest.raises(node_plan.BadEnvironmentError, match="needs a config"):
             _plan(RUN_CONFIG="")
 
@@ -275,9 +273,16 @@ class TestTheSubmitterContract:
             "code_snapshot": "s",
             "config": "p",
             "to": 1,
-            "run_id": "run-base",
+            "run_id": "",
         }
-        task = spec.TaskSpec(**{**base, key.spec: sent})
+        # A continuation carries no config and no overrides; a fresh run
+        # carries no run id. The crossing is the same either way.
+        override: dict[str, Any] = {key.spec: sent}
+        if key.spec == "run_id":
+            override["config"] = ""
+        if key.spec == "op":
+            override["run_id"] = "run-base"  # an evaluation scores an existing run
+        task = spec.TaskSpec(**{**base, **override})
         parsed = node_plan.parse_environment(task.environment())
         assert getattr(parsed, key.plan) == expected
 
@@ -295,7 +300,6 @@ class TestTheSubmitterContract:
             code_snapshot="snap",
             config="production",
             to=25_000_000,
-            run_id="run-a",
             experiment="exp-7",
             arm="variant",
             sets=("solver__dcfr=1.5", "system__note=two words"),
@@ -304,7 +308,7 @@ class TestTheSubmitterContract:
         parsed = node_plan.parse_environment(task.environment())
         assert parsed.config == "production"
         assert parsed.to == 25_000_000
-        assert parsed.run_id == "run-a"
+        assert parsed.run_id == ""
         assert parsed.experiment == "exp-7"
         assert parsed.arm == "variant"
         assert parsed.sets == ("solver__dcfr=1.5", "system__note=two words")

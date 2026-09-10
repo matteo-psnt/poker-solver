@@ -18,7 +18,12 @@ if TYPE_CHECKING:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver train-static`."""
-    parser.add_argument("--config", required=True, help="Config stem under config/training/.")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Config stem under config/training/ for a FRESH run. A continuation "
+        "(--run) trains the config on the run's record and refuses this.",
+    )
     parser.add_argument(
         "--workers",
         type=int,

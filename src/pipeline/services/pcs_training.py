@@ -25,9 +25,15 @@ from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.vector import compile_tree
 from src.pipeline import blueprint
 from src.pipeline.training import pcs_parallel
-from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
+from src.pipeline.training.run_tracker import (
+    ExperimentTag,
+    RunTracker,
+    has_run_record,
+    refuse_config_on_continue,
+)
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
+from src.shared.config import DEFAULT_RUNS_DIR
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
@@ -63,17 +69,6 @@ class PcsTrainingOutput(BaseModel):
     status: str
 
 
-# The config sections that decide what the PCS trainer IS. `--set` overrides do
-# not carry into a continuation, so the run's own record is the only thing that
-# knows; RunTracker.verify_trainer_knobs is where that is enforced.
-#
-# `game` is in here because it sizes the TREE: a dropped
-# `--set game__starting_stack=400` rebuilds a 100 bb tree and appends its rungs
-# to a 200 bb checkpoint, and the action hash, the abstraction hash and the
-# kernel name all still match.
-TRAINER_BLOCKS = ("game", "solver", "pcs")
-
-
 class WorkerFootprint(TypedDict):
     br_streets: str
     runouts: int
@@ -95,7 +90,7 @@ def worker_footprint(config: Config) -> WorkerFootprint:
 
 
 def train_pcs(
-    config_name: str,
+    config_name: str | None,
     *,
     iterations: int,
     num_workers: int | None = None,
@@ -120,14 +115,13 @@ def train_pcs(
     node's RAM holds (``pcs_parallel.ram_safe_workers``), since each worker's
     hand-space scratch is private. ``retain_every`` of 0 keeps EVERY rung --
     a ladder is the only way to find a sampling trainer's best point.
-    """
-    overrides: dict[str, object] = dict(config_overrides or {})
-    if seed is not None:
-        overrides["system__seed"] = seed
-    config: Config = load_training_config(config_name, **overrides)
-    configure_logging(config.system.log_level)
 
-    base_dir = Path(runs_dir) if runs_dir is not None else Path(config.training.runs_dir)
+    A continuation trains what it was: the config comes off the run's own
+    record, and ``config_name``, ``config_overrides`` and ``seed`` are refused,
+    because a task that rebuilt the config from its own flags once continued a
+    CFR-BR ladder as plain PCS with every other guard passing.
+    """
+    base_dir = Path(runs_dir) if runs_dir is not None else Path(DEFAULT_RUNS_DIR)
     if run_id is None:
         run_id = f"pcs-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
     run_dir = base_dir / run_id
@@ -136,19 +130,29 @@ def train_pcs(
     # after the flip -- which mints fresh metadata over a live ladder and
     # restarts training from zero.
     resuming = has_run_record(run_dir, record_source)
+    if resuming:
+        refuse_config_on_continue(run_id, config_name, config_overrides, seed)
+        tracker = RunTracker.load(run_dir, record_source, sink)
+        config: Config = tracker.metadata.config
+    else:
+        if not config_name:
+            raise ValueError("a fresh run needs a config name; only a continuation goes without")
+        overrides: dict[str, object] = dict(config_overrides or {})
+        if seed is not None:
+            overrides["system__seed"] = seed
+        config = load_training_config(config_name, **overrides)
+    configure_logging(config.system.log_level)
 
     action_model = ActionModel(config)
     abstraction = blueprint.build_card_abstraction(config)
     abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
     if resuming:
-        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(
                 f"Run '{run_id}' was trained by the {tracker.metadata.kernel!r} kernel; "
                 "continuing it by public chance sampling would mix two lineages in one ladder."
             )
-        tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()
@@ -267,4 +271,4 @@ def train_pcs(
     )
 
 
-__all__ = ("KERNEL", "TRAINER_BLOCKS", "PcsTrainingOutput", "train_pcs")
+__all__ = ("KERNEL", "PcsTrainingOutput", "train_pcs")

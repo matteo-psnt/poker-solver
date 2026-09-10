@@ -34,9 +34,12 @@ unreadable by design.
   thing (`production_linplus.yaml` is the pattern); it is deleted when the
   question closes.
 - **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`,
-  with `--set k=v` for config overrides; the tags are recorded on every eval.
-  `--set` flags are dropped on resume — check for a continuation boundary
-  before reading a mid-ladder turn as a result.
+  with `--set k=v` for config overrides on a FRESH run; the tags are recorded
+  on every eval. **A continuation trains what it was**: `submit --run X --to N`
+  takes no `--config` and no `--set`, because the node reloads the config off
+  the run's record. Runs continued before 09-13 could silently revert to the
+  stem's defaults at the boundary — check `runinfo` for a continuation before
+  reading a mid-ladder turn in an older ladder as a result.
 - **`reference/` may not import the estimators it validates.** The oracles
   check the production estimators to 1e-9; an oracle importing what it
   validates makes that agreement circular while the test still passes. This is

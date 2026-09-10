@@ -25,9 +25,15 @@ from pydantic import BaseModel
 from src.core.actions.action_model import ActionModel
 from src.pipeline import blueprint
 from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
-from src.pipeline.training.run_tracker import ExperimentTag, RunTracker, has_run_record
+from src.pipeline.training.run_tracker import (
+    ExperimentTag,
+    RunTracker,
+    has_run_record,
+    refuse_config_on_continue,
+)
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
+from src.shared.config import DEFAULT_RUNS_DIR
 from src.shared.config.loader import load_training_config
 from src.shared.log import configure_logging
 
@@ -38,11 +44,6 @@ if TYPE_CHECKING:
 PROGRESS_ARTIFACT = "train-progress.json"
 
 logger = logging.getLogger(__name__)
-
-# What the scalar trainer IS, for the resume guard. No `pcs` section: this
-# trainer never reads one, so a difference there is not a lineage break. `game`
-# is one, though -- it sizes the tree the checkpoint is shaped for.
-TRAINER_BLOCKS = ("game", "solver")
 
 
 class StaticTrainingOutput(BaseModel):
@@ -67,7 +68,7 @@ class StaticTrainingOutput(BaseModel):
 
 
 def train_static(
-    config_name: str,
+    config_name: str | None,
     *,
     num_workers: int = 1,
     num_iterations: int | None = None,
@@ -88,7 +89,8 @@ def train_static(
     """Train a static-tree solver from a named config and return a portable summary.
 
     Args:
-        config_name: Stem of a config under ``config/training``.
+        config_name: Stem of a config under ``config/training``. Refused on a
+            continuation, which trains the config on the run's own record.
         num_workers: Worker processes. A pure throughput knob: the table is
             shared and there are no per-worker maps, so raising it does not
             raise memory.
@@ -104,7 +106,7 @@ def train_static(
         seed: Overrides ``system.seed``.
         config_overrides: Nested config overrides (``__`` separator).
         experiment: Experiment/arm/parent recorded on the run.
-        runs_dir: Base runs directory; defaults to the config's.
+        runs_dir: Base runs directory (default `data/runs`, node-relative).
         progress_file: Where to publish iterations done while they are being
             done. The checkpoint is the durable answer, but one lands every
             million iterations -- minutes to half an hour apart -- and that is
@@ -114,16 +116,7 @@ def train_static(
         FileNotFoundError: The card abstraction is missing (precompute it first).
         AbstractionHashMismatchError: The abstraction on disk is stale (recompute it).
     """
-    overrides: dict[str, object] = dict(config_overrides or {})
-    if seed is not None:
-        overrides["system__seed"] = seed
-    config: Config = load_training_config(config_name, **overrides)
-    # The run's own verbosity. Workers repeat this from the same field, so all
-    # processes agree; --log-level still outranks it via the environment.
-    configure_logging(config.system.log_level)
-    iterations = num_iterations or config.training.num_iterations
-
-    base_dir = Path(runs_dir) if runs_dir is not None else Path(config.training.runs_dir)
+    base_dir = Path(runs_dir) if runs_dir is not None else Path(DEFAULT_RUNS_DIR)
     # Random suffix: second resolution collides, and two runs sharing a
     # directory interleave their checkpoints silently.
     if run_id is None:
@@ -141,12 +134,25 @@ def train_static(
     # after the flip -- which mints fresh metadata over a live ladder and
     # restarts training from zero.
     resuming = has_run_record(run_dir, record_source)
+    if resuming:
+        refuse_config_on_continue(run_id, config_name, config_overrides, seed)
+        tracker = RunTracker.load(run_dir, record_source, sink)
+        config: Config = tracker.metadata.config
+    else:
+        if not config_name:
+            raise ValueError("a fresh run needs a config name; only a continuation goes without")
+        overrides: dict[str, object] = dict(config_overrides or {})
+        if seed is not None:
+            overrides["system__seed"] = seed
+        config = load_training_config(config_name, **overrides)
+    # The run's own verbosity. Workers repeat this from the same field, so all
+    # processes agree; --log-level still outranks it via the environment.
+    configure_logging(config.system.log_level)
+    iterations = num_iterations or config.training.num_iterations
 
     action_model = ActionModel(config)
     if resuming:
-        tracker = RunTracker.load(run_dir, record_source, sink)
         tracker.verify_action_config_hash(action_model.get_config_hash())
-        tracker.verify_trainer_knobs(config, TRAINER_BLOCKS)
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()

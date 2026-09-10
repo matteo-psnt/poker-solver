@@ -24,9 +24,9 @@ def _solver() -> SimpleNamespace:
     return SimpleNamespace(tree=SimpleNamespace(fingerprint=lambda: "treefp0000000000"))
 
 
-def _fake_config(runs_dir: str = "data/runs", abstraction: str = "quick_test") -> SimpleNamespace:
+def _fake_config(abstraction: str = "quick_test") -> SimpleNamespace:
     return SimpleNamespace(
-        training=SimpleNamespace(runs_dir=runs_dir, num_iterations=2000),
+        training=SimpleNamespace(num_iterations=2000),
         card_abstraction=SimpleNamespace(config=abstraction),
         # train_static applies the run's own log level once loaded.
         system=SimpleNamespace(log_level="INFO"),
@@ -50,7 +50,7 @@ def _patch_abstraction_failure(monkeypatch, tmp_path, exc):
     monkeypatch.setattr(
         services_training,
         "load_training_config",
-        lambda name, **ov: _fake_config(runs_dir=str(tmp_path)),
+        lambda name, **ov: _fake_config(),
     )
     monkeypatch.setattr(services_training, "ActionModel", lambda cfg: MagicMock())
 
@@ -65,7 +65,7 @@ def test_train_static_translates_missing_abstraction(monkeypatch, tmp_path):
     _patch_abstraction_failure(monkeypatch, tmp_path, FileNotFoundError("no such file"))
 
     with pytest.raises(FileNotFoundError, match="Precompute it"):
-        services.train_static("quick_test")
+        services.train_static("quick_test", runs_dir=tmp_path)
 
 
 def test_train_static_translates_stale_abstraction(monkeypatch, tmp_path):
@@ -75,7 +75,7 @@ def test_train_static_translates_stale_abstraction(monkeypatch, tmp_path):
     )
 
     with pytest.raises(AbstractionHashMismatchError, match="stale"):
-        services.train_static("quick_test")
+        services.train_static("quick_test", runs_dir=tmp_path)
 
 
 def test_train_static_reraises_unrelated_value_error(monkeypatch, tmp_path):
