@@ -11,12 +11,13 @@ refusal, because a Batch retry of a FRESH run re-runs that run's own argv --
 
 from __future__ import annotations
 
-import logging
+from unittest.mock import MagicMock
 
 import pytest
 
 from src.pipeline.services import pcs_training, static_training
 from src.pipeline.training.run_tracker import RunTracker, continued_config
+from src.pipeline.training.run_tracker import tracker as tracker_module
 from src.shared.config import Config
 
 
@@ -30,20 +31,23 @@ def _tracker(tmp_path) -> RunTracker:
     )
 
 
-def test_the_record_wins_over_whatever_the_task_carried(tmp_path, caplog):
+def test_the_record_wins_over_whatever_the_task_carried(tmp_path, monkeypatch):
+    """Through a mock, not caplog: `configure_logging` elsewhere in the suite
+    detaches the root handler caplog listens on."""
+    log = MagicMock()
+    monkeypatch.setattr(tracker_module, "logger", log)
     tracker = _tracker(tmp_path)
-    with caplog.at_level(logging.INFO):
-        config = continued_config(tracker, "production", {"solver__cfr_plus": "false"}, seed=7)
+    config = continued_config(tracker, "production", {"solver__cfr_plus": "false"}, seed=7)
     assert config == tracker.metadata.config
     assert config.solver.cfr_plus is True
-    assert "ignoring --config, --set, --seed" in caplog.text
+    assert log.info.call_args.args[-1] == "--config, --set, --seed"
 
 
-def test_a_bare_continuation_says_nothing(tmp_path, caplog):
-    tracker = _tracker(tmp_path)
-    with caplog.at_level(logging.INFO):
-        continued_config(tracker, None, {}, None)
-    assert "ignoring" not in caplog.text
+def test_a_bare_continuation_says_nothing(tmp_path, monkeypatch):
+    log = MagicMock()
+    monkeypatch.setattr(tracker_module, "logger", log)
+    continued_config(_tracker(tmp_path), None, {}, None)
+    log.info.assert_not_called()
 
 
 SERVICES = [
