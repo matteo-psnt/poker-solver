@@ -4,8 +4,8 @@ from src.pipeline.training.run_tracker.attempts import AttemptRecord, Experiment
 from src.pipeline.training.run_tracker.metadata import RunMetadata
 from src.pipeline.training.run_tracker.tracker import (
     RunTracker,
+    continued_config,
     has_run_record,
-    refuse_config_on_continue,
 )
 
 __all__ = (
@@ -13,6 +13,6 @@ __all__ = (
     "ExperimentTag",
     "RunMetadata",
     "RunTracker",
+    "continued_config",
     "has_run_record",
-    "refuse_config_on_continue",
 )

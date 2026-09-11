@@ -28,8 +28,8 @@ from src.pipeline.training import pcs_parallel
 from src.pipeline.training.run_tracker import (
     ExperimentTag,
     RunTracker,
+    continued_config,
     has_run_record,
-    refuse_config_on_continue,
 )
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
@@ -117,9 +117,10 @@ def train_pcs(
     a ladder is the only way to find a sampling trainer's best point.
 
     A continuation trains what it was: the config comes off the run's own
-    record, and ``config_name``, ``config_overrides`` and ``seed`` are refused,
-    because a task that rebuilt the config from its own flags once continued a
-    CFR-BR ladder as plain PCS with every other guard passing.
+    record and whatever this task carried is logged and ignored -- a Batch
+    retry re-runs a FRESH submission's argv against the record its first
+    attempt wrote, so refusing here would kill every retried run. The
+    operator-facing refusal lives in `submit` and the task kinds.
     """
     base_dir = Path(runs_dir) if runs_dir is not None else Path(DEFAULT_RUNS_DIR)
     if run_id is None:
@@ -131,9 +132,8 @@ def train_pcs(
     # restarts training from zero.
     resuming = has_run_record(run_dir, record_source)
     if resuming:
-        refuse_config_on_continue(run_id, config_name, config_overrides, seed)
         tracker = RunTracker.load(run_dir, record_source, sink)
-        config: Config = tracker.metadata.config
+        config: Config = continued_config(tracker, config_name, config_overrides, seed)
     else:
         if not config_name:
             raise ValueError("a fresh run needs a config name; only a continuation goes without")
@@ -144,9 +144,11 @@ def train_pcs(
     configure_logging(config.system.log_level)
 
     action_model = ActionModel(config)
-    abstraction = blueprint.build_card_abstraction(config)
-    abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
     if resuming:
+        # By the HASH the run recorded, so a preset renamed or deleted since
+        # does not stop its own ladder; the resolver skips the YAML when pinned.
+        abstraction_hash = tracker.metadata.card_abstraction_hash
+        abstraction = blueprint.build_card_abstraction(config, abstraction_hash=abstraction_hash)
         tracker.verify_action_config_hash(action_model.get_config_hash())
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(
@@ -155,6 +157,8 @@ def train_pcs(
             )
         tracker.mark_resumed()
     else:
+        abstraction = blueprint.build_card_abstraction(config)
+        abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
         tag = experiment or ExperimentTag()
         tracker = RunTracker(
             sink=sink,

@@ -123,15 +123,15 @@ field. `production.yaml` is the recipe the blueprint box fields; a treatment arm
 
 ## Evaluation
 
-The primary quality metric is **exploitability**, measured with **Local Best Response (LBR)**: an exploiter plays against the frozen blueprint and its winnings (in mbb/g) form a *lower bound* on true exploitability. Key knobs define the comparison tier:
+The quality metric is **exploitability** in mbb/g, measured by `exact_br`: a
+deterministic best response on a sampled public tree, so two runs scored on
+the same boards differ exactly and need no p-value. `score --run <id> --at
+<rungs>` dispatches it; every result is one row in the record's `evals` table
+with git provenance and the pinned abstraction hash, and `ledger`, `curve`
+and `arms` read those rows. A row is comparable only within its tier -- the
+board plan, the strategy transform and the resolver knobs it was taken with.
 
-- `--scorer lookahead` — depth-limited best-response scoring (the standard for on-tree evaluation; the default `myopic` scorer understates exploitability)
-- `--opponent blueprint|deployed` — raw strategy table vs. blueprint + runtime resolver
-- `--include-off-tree` — allow the exploiter off the trained action tree (shadow-state translation)
-
-Every evaluation is one row in the record's `evals` table, with git provenance and the pinned abstraction hash. `poker-solver ledger` reads those rows; several boxes can evaluate at once because each writes its own row and nothing indexes them.
-
-See [Evaluation README](src/pipeline/evaluation/README.md) for methodology and best practices.
+See [Evaluation README](src/pipeline/evaluation/README.md) for methodology.
 
 ## Development
 

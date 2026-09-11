@@ -144,6 +144,13 @@ class TestValidation:
         with pytest.raises(BadTaskError, match="drop --config and --set"):
             kinds.kind(op).validate(_spec(config="", sets=("a=b",), run_id="run-a", to=10))
 
+    @pytest.mark.parametrize("op", [TaskName.TRAIN, TaskName.TRAIN_PCS])
+    def test_a_retry_of_a_fresh_run_re_runs_its_own_argv(self, op):
+        """A Batch retry keeps the fresh submission's env -- config, sets, and
+        NO run id -- and derives the run id from the task on the node. That
+        shape must validate, or every retried fresh run dies on the node."""
+        kinds.kind(op).validate(_spec(config="production", sets=("a=b",), run_id="", to=10))
+
     def test_a_relative_target_is_refused(self):
         with pytest.raises(BadTaskError, match="ABSOLUTE"):
             kinds.kind(TaskName.TRAIN).validate(_spec(to=0))

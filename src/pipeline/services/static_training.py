@@ -28,8 +28,8 @@ from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.training.run_tracker import (
     ExperimentTag,
     RunTracker,
+    continued_config,
     has_run_record,
-    refuse_config_on_continue,
 )
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
@@ -89,7 +89,7 @@ def train_static(
     """Train a static-tree solver from a named config and return a portable summary.
 
     Args:
-        config_name: Stem of a config under ``config/training``. Refused on a
+        config_name: Stem of a config under ``config/training``. Ignored on a
             continuation, which trains the config on the run's own record.
         num_workers: Worker processes. A pure throughput knob: the table is
             shared and there are no per-worker maps, so raising it does not
@@ -135,9 +135,8 @@ def train_static(
     # restarts training from zero.
     resuming = has_run_record(run_dir, record_source)
     if resuming:
-        refuse_config_on_continue(run_id, config_name, config_overrides, seed)
         tracker = RunTracker.load(run_dir, record_source, sink)
-        config: Config = tracker.metadata.config
+        config: Config = continued_config(tracker, config_name, config_overrides, seed)
     else:
         if not config_name:
             raise ValueError("a fresh run needs a config name; only a continuation goes without")

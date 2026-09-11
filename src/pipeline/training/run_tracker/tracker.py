@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from src.shared.ports.record import RecordSink, RecordSource
 
 
+logger = logging.getLogger(__name__)
+
+
 class RunTracker:
     """
     Tracks a single training run.
@@ -387,17 +390,19 @@ def has_run_record(run_dir: Path, source: RecordSource | None = None) -> bool:
     return run_events.log_path(directory).exists() or (directory / ".run.json").exists()
 
 
-def refuse_config_on_continue(
-    run_id: str,
+def continued_config(
+    tracker: RunTracker,
     config_name: str | None,
     overrides: Mapping[str, object] | None,
     seed: int | None,
-) -> None:
-    """A continuation trains the config on the run's record and nothing else.
+) -> Config:
+    """The config a continuation trains: the run's own, whatever the task said.
 
     Rebuilding it from this task's flags is how a CFR-BR ladder was once one
     forgotten `--set` from continuing as plain PCS, with the action hash, the
-    abstraction hash and the kernel name all still matching.
+    abstraction hash and the kernel name all still matching. The task's flags
+    are still LOGGED, because a Batch retry of a fresh run re-runs that run's
+    argv and lands here -- which is also why this cannot refuse.
     """
     named = [
         flag
@@ -405,7 +410,9 @@ def refuse_config_on_continue(
         if value
     ]
     if named:
-        raise ValueError(
-            f"Run '{run_id}' already has a config on its record, and a continuation trains "
-            f"exactly that. Drop {', '.join(named)}; to train a different config, start a run."
+        logger.info(
+            "Continuing %s with the config on its record; ignoring %s",
+            tracker.run_id,
+            ", ".join(named),
         )
+    return tracker.metadata.config

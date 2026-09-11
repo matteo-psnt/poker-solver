@@ -28,6 +28,7 @@ from src.adapters.postgres import connect, queries
 from src.interfaces import run_names
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
+from src.shared import records
 from src.shared.gitinfo import is_ancestor
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ def plan_runs(
             reasons.append("old-game")
         if row.config_name == SMOKE_CONFIG:
             reasons.append("smoke")
-        if not any(name != "STATIC_CHECKPOINT.json" for name in objects):
+        if not any(name != records.STATIC_CHECKPOINT for name in objects):
             reasons.append("empty")
         if wanted is not None:
             reasons = [reason for reason in reasons if reason in wanted]

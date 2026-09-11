@@ -4,53 +4,52 @@ The config a task carries -- `--config` plus its own `--set` flags -- once
 rebuilt the trainer on every continuation, and a CFR-BR ladder was one
 forgotten flag from continuing as plain PCS with the action hash, the
 abstraction hash and the kernel name all still matching. Now the record's
-config is the only one a continuation reads, and naming another is refused.
+config is the only one a continuation reads. It is adopted, not enforced by
+refusal, because a Batch retry of a FRESH run re-runs that run's own argv --
+`--config` and `--set` included -- against the record its first attempt wrote.
 """
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from src.pipeline.services import pcs_training, static_training
-from src.pipeline.training.run_tracker import refuse_config_on_continue
+from src.pipeline.training.run_tracker import RunTracker, continued_config
+from src.shared.config import Config
 
 
-@pytest.mark.parametrize(
-    "named",
-    [
-        {"config_name": "production"},
-        {"overrides": {"solver__cfr_plus": "true"}},
-        {"seed": 7},
-        {"config_name": "production", "overrides": {"pcs__cfr_br": "river"}, "seed": 1},
-    ],
-)
-def test_a_continuation_refuses_anything_that_would_rebuild_its_config(named):
-    with pytest.raises(ValueError, match="already has a config on its record"):
-        refuse_config_on_continue(
-            "run-a",
-            named.get("config_name"),
-            named.get("overrides"),
-            named.get("seed"),
-        )
+def _tracker(tmp_path) -> RunTracker:
+    stored = Config.default().merge({"solver": {"cfr_plus": True}})
+    return RunTracker(
+        run_dir=tmp_path / "run-a",
+        config_name="test",
+        config=stored,
+        action_config_hash="abc123",
+    )
 
 
-def test_a_bare_continuation_passes():
-    refuse_config_on_continue("run-a", None, {}, None)
+def test_the_record_wins_over_whatever_the_task_carried(tmp_path, caplog):
+    tracker = _tracker(tmp_path)
+    with caplog.at_level(logging.INFO):
+        config = continued_config(tracker, "production", {"solver__cfr_plus": "false"}, seed=7)
+    assert config == tracker.metadata.config
+    assert config.solver.cfr_plus is True
+    assert "ignoring --config, --set, --seed" in caplog.text
+
+
+def test_a_bare_continuation_says_nothing(tmp_path, caplog):
+    tracker = _tracker(tmp_path)
+    with caplog.at_level(logging.INFO):
+        continued_config(tracker, None, {}, None)
+    assert "ignoring" not in caplog.text
 
 
 SERVICES = [
     lambda name, **kw: pcs_training.train_pcs(name, iterations=10, **kw),
     lambda name, **kw: static_training.train_static(name, num_iterations=10, **kw),
 ]
-
-
-@pytest.mark.parametrize("train", SERVICES, ids=["pcs", "scalar"])
-def test_the_service_refuses_before_touching_the_run(tmp_path, train):
-    """Refused on the record alone: no tracker load, no abstraction, no tree."""
-    (tmp_path / "run-a").mkdir()
-    (tmp_path / "run-a" / ".run.json").write_text("{}")
-    with pytest.raises(ValueError, match="already has a config on its record"):
-        train("production", run_id="run-a", runs_dir=tmp_path)
 
 
 @pytest.mark.parametrize("train", SERVICES, ids=["pcs", "scalar"])
