@@ -130,6 +130,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "reconcile-runs",
                 "Close runs whose task died without recording a terminal status (dry run by default).",
             ),
+            CommandRef(
+                "forget-runs",
+                "Remove settled runs from the record and the container (dry run by default).",
+            ),
         ),
     ),
     CommandGroup(

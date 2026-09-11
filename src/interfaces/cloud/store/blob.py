@@ -21,11 +21,14 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.shared import records
 from src.shared.cloudtask.kinds import TaskName
 from src.shared.cloudtask.node import archive
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 CONTAINER = "checkpoints"
 
@@ -475,6 +478,43 @@ def published_rungs(config: Any) -> dict[str, set[str]]:
     return found
 
 
+def run_objects(config: Any) -> dict[str, dict[str, int]]:
+    """Every object the container holds, as `{run_id: {name: bytes}}`.
+
+    The ONE listing that reads properties: `published_rungs` deliberately asks
+    for names alone, and this is the reader that wants sizes -- a plan to drop
+    whole runs is priced from it in one round trip rather than one HEAD per rung.
+    """
+    found: dict[str, dict[str, int]] = {}
+    for item in _container(config, CONTAINER).list_blobs():
+        run, _, name = item.name.partition("/")
+        if name:
+            found.setdefault(run, {})[name] = int(item.size or 0)
+    return found
+
+
+def delete_run(config: Any, run_id: str, names: Iterable[str]) -> int:
+    """Remove a run's objects from the container; the manifest goes FIRST.
+
+    The manifest is the container's own claim that the rungs behind it exist,
+    and a claim without bytes fails on a node after an allocation, while bytes
+    without a claim are litter the next `forget-runs` lists as orphans. So the
+    pointer goes before the payload, and an interrupted delete errs the
+    recoverable way. Returns how many objects were removed.
+    """
+    from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
+
+    ordered = sorted(names, key=lambda name: name != records.STATIC_CHECKPOINT)
+    removed = 0
+    for name in ordered:
+        try:
+            _client(config, run_id, name).delete_blob()
+        except ResourceNotFoundError:
+            continue
+        removed += 1
+    return removed
+
+
 def rung_size(config: Any, run_id: str, object_name: str) -> int:
     """Bytes the container holds for one rung; 0 when it holds none."""
     from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
@@ -493,9 +533,10 @@ def holds_rung(config: Any, run_id: str, object_name: str) -> bool:
 def delete_rung(config: Any, run_id: str, object_name: str) -> bool:
     """Remove one rung from the container. False when it was not there.
 
-    The ONLY delete this project performs against the container, and it is
-    reached from `prune-checkpoints` alone -- no task SAS carries `delete`, so
-    nothing running on a node can do this even by accident.
+    One of the two deletes this project performs against the container (the
+    other is `delete_run`), reached from `prune-checkpoints` alone -- no task
+    SAS carries `delete`, so nothing running on a node can do this even by
+    accident.
     """
     from azure.core.exceptions import ResourceNotFoundError  # noqa: PLC0415 -- Azure only here
 

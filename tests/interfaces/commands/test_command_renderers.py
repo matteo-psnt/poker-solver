@@ -39,6 +39,7 @@ from src.interfaces.commands.chipzen_seat import ChipzenSeatPayload
 from src.interfaces.commands.configs import ConfigKind, ConfigsPayload
 from src.interfaces.commands.cost import CostPayload
 from src.interfaces.commands.curve import CurvePayload
+from src.interfaces.commands.forget_runs import ForgetPlan
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
@@ -645,6 +646,24 @@ PAYLOADS: dict[str, Any] = {
                 "gib_freed": 77.0,
             }
         ],
+    ),
+    "forget-runs": ForgetPlan(
+        applied=False,
+        runs_considered=364,
+        plan=[
+            {
+                "run": "run-train-production-to30M-w3000-114628-25986",
+                "reasons": ["old-game"],
+                "status": "completed",
+                "config": "production",
+                "objects": ["STATIC_CHECKPOINT.json", "static-30000000.ckpt.zst"],
+                "gib": 21.8,
+            }
+        ],
+        by_reason={"old-game": {"runs": 1, "gib": 21.8}},
+        protected=["run-pcs-production-to4k-r4-flop-043218-12003: running -- reconcile-runs first"],
+        unknown_lineage=["run-pcs-production-to100-probe-075512-3"],
+        freed_gib=21.8,
     ),
 }
 

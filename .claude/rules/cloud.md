@@ -74,9 +74,11 @@ paths:
   precompute collision guard, and once the share emptied each one answered
   confidently and wrongly rather than failing. **An empty listing never reads
   as "wrong store".** A gate and the thing it hands off to are two fixes.
-- **`blob.delete_rung` is the only delete against the container**, reached from
-  `prune-checkpoints` alone. No task SAS carries `delete`, so nothing running
-  on a node can remove a rung even by accident.
+- **`blob.delete_rung` and `blob.delete_run` are the only deletes against the
+  container**, reached from `prune-checkpoints` and `forget-runs` alone, both
+  dry-run by default. No task SAS carries `delete`, so nothing running on a
+  node can remove a rung even by accident. `forget-runs` also takes the record
+  row, and takes it FIRST: the claim before the bytes.
 - **A task carries TWO credentials.** The checkpoint SAS is an ACCOUNT token
   and is read-only for anything that does not publish rungs -- which also
   stripped write on `diagnostics`, so no score could publish the log explaining

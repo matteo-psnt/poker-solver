@@ -153,3 +153,28 @@ def commits_ahead_of(commit: str | None) -> int | None:
         return int(count)
     except ValueError:
         return None
+
+
+@lru_cache(maxsize=256)
+def is_ancestor(ancestor: str, commit: str | None) -> bool | None:
+    """Whether ``commit`` has ``ancestor`` in its history; None when unknowable.
+
+    `merge-base --is-ancestor` answers with its exit code alone: 0 yes, 1 no,
+    anything else (a sha this checkout has never seen) is neither.
+    """
+    if not commit:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, commit],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode == 0:
+        return True
+    return False if result.returncode == 1 else None
