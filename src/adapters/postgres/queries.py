@@ -152,6 +152,23 @@ _LEGS_FOR_RECENT_TASKS = sa.text("""
     FROM legs l JOIN recent r ON l.task_id = r.task_id
 """)
 
+# Every leg of every task that any leg attributes to one run.
+#
+# Two steps for a reason: the `run_id` COLUMN is blank on most `progress` and
+# `observed` legs (3,402 of 3,723 and 2,307 of 2,550), so filtering the legs
+# directly would return a task's start and drop its own progress. Selecting the
+# TASK ids first and joining back brings every leg of each along.
+#
+# A SUPERSET, deliberately: one task in 6,041 carries a run on a leg that the
+# joined row does not report, so the caller still filters on `TaskRow.run_id`.
+# Narrowing the FETCH is the point; deciding what belongs to a run stays where
+# it was. 4.88s of shipping the whole log to return 5 KB, against 0.1s.
+_LEGS_FOR_RUN = sa.text("""
+    WITH owned AS (SELECT DISTINCT task_id FROM legs WHERE run_id = :run_id)
+    SELECT l.task_id, l.attempt, l.leg, l.body
+    FROM legs l JOIN owned o ON l.task_id = o.task_id
+""")
+
 # How many task-attempts the log holds, counted where the rows are rather than
 # by fetching them. The UNION is `join_documents`' own rule for what earns a
 # row: every (task, attempt) the node started, plus the tasks Batch saw that it
@@ -166,21 +183,29 @@ _ATTEMPT_COUNT = sa.text("""
 """)
 
 
-def leg_rows(engine: Any, *, recent_tasks: int = 0) -> list[tuple[str, int, str, dict[str, Any]]]:
-    """Leg documents as `(task_id, attempt, leg, body)`, newest tasks or all.
+def leg_rows(
+    engine: Any, *, recent_tasks: int = 0, run_id: str = ""
+) -> list[tuple[str, int, str, dict[str, Any]]]:
+    """Leg documents as `(task_id, attempt, leg, body)`: one run's, the newest
+    tasks', or all of them.
 
-    Unbounded by default, which `--limit 0` and the run list still want: only
-    the whole log can say which runs have ever had a task.
+    Unbounded by default, which `--limit 0` still wants.
 
-    `recent_tasks` is the bound worth having. The whole log is 16,895 legs and
-    10.6 MB, and shipping it costs 1.65s of pure transfer -- Postgres itself
-    reads every body in 0.02s -- on a view the status bar polls every 5s. The
-    newest 300 tasks are 1,269 legs and 0.7 MB.
+    Either bound is worth having. The whole log is 16,895 legs and 10.6 MB, and
+    shipping it costs 1.65s of pure transfer -- Postgres itself reads every body
+    in 0.02s. The newest 300 tasks are 1,269 legs; one run's are fewer still.
+
+    `run_id` wins when both are given: the caller asked about a run, and a run
+    older than the window would come back empty rather than narrowed.
     """
-    query = _LEGS if recent_tasks <= 0 else _LEGS_FOR_RECENT_TASKS
+    if run_id:
+        query, params = _LEGS_FOR_RUN, {"run_id": run_id}
+    elif recent_tasks > 0:
+        query, params = _LEGS_FOR_RECENT_TASKS, {"tasks": recent_tasks}
+    else:
+        query, params = _LEGS, {}
     with _read(engine) as connection:
-        result = connection.execute(query, {"tasks": recent_tasks} if recent_tasks > 0 else {})
-        return [(row[0], row[1], row[2], row[3]) for row in result]
+        return [(row[0], row[1], row[2], row[3]) for row in connection.execute(query, params)]
 
 
 def attempt_count(engine: Any) -> int:

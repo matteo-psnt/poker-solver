@@ -89,6 +89,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Read a local legs/ directory instead of the record. Implies --skip-reconcile.",
     )
     parser.add_argument(
+        "--run",
+        default="",
+        help="Only this run's attempts. Narrows the QUERY, so the run page stops "
+        "shipping the whole log to draw a handful of rows -- and with it the ETA "
+        "population, which becomes this run's own history. That is the better "
+        "sample anyway (same config, same size), and a task reporting progress "
+        "estimates from its own measured rate before it reaches any history.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=0,
@@ -135,16 +144,23 @@ def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
     cheaper. What the database makes cheap is knowing WHICH tasks to ask about
     and which answers are new, neither of which needs the tree any more.
 
-    **`--limit n` is a bound on the QUERY, not a slice of the answer.** It used
+    **`--run` and `--limit n` are bounds on the QUERY, not slices of the answer.** It used
     to fetch every leg and throw most away: 16,895 rows and 10.6 MB over the
     wire, 1.65s of it pure transfer, to return ten. A task contributes at least
     one attempt, so the newest `n` tasks always hold at least the newest `n`
     attempts -- and the count of what was left behind comes from `attempt_count`
     rather than from the rows, which are no longer all of them.
     """
-    total = queries.attempt_count(engine) if args.limit > 0 else None
-    documents = task_log.documents_from_rows(queries.leg_rows(engine, recent_tasks=args.limit))
+    total = queries.attempt_count(engine) if args.limit > 0 and not args.run else None
+    documents = task_log.documents_from_rows(
+        queries.leg_rows(engine, recent_tasks=args.limit, run_id=args.run)
+    )
     rows = task_history.join_documents(documents)
+    if args.run:
+        # The query returns a SUPERSET -- one task in 6,041 carries a run on a
+        # leg its joined row does not report -- so what belongs to a run is still
+        # decided here, on the same field the console filtered on before.
+        rows = [row for row in rows if row.run_id == args.run]
     open_tasks = _still_open(rows)
     if args.skip_reconcile or not open_tasks:
         return _result(rows, None, args.limit, total)

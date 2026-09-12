@@ -109,9 +109,9 @@ def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
 def run(run_id: str, *, invoke: Invoke | None = None) -> dict[str, Any]:
     """Everything about one run: what it is, how it trained, what it scored.
 
-    `ledger` has a `--run` flag, so asking it for one run's evals is the command's
-    own answer to its own question. `tasks` has none, so the run's tasks are drawn
-    out of the full log by :func:`_tasks_for` -- the rule in miniature.
+    `ledger` and `tasks` both have a `--run` flag, so each answers its own
+    question about one run. `tasks` grew one because this view was the last thing
+    reading the whole log: 4.88s of shipping 10.6 MB to return 5 KB.
 
     `progress` is fetched with ``last=0`` deliberately: `runinfo` carries a progress
     array too, truncated to its `--last` default of eight.
@@ -132,9 +132,9 @@ def run(run_id: str, *, invoke: Invoke | None = None) -> dict[str, Any]:
                 ledger.COMMAND,
                 {"run": run_id, "limit": 0},
             ),
-            Part("tasks", tasks.COMMAND),
+            Part("tasks", tasks.COMMAND, {"run": run_id}),
         ],
-        join=lambda parts: {"run_tasks": _tasks_for(run_id, parts)},
+        join=lambda parts: {"run_tasks": _tasks_for(parts)},
         invoke=invoke,
     )
     composed["parts"]["tasks"] = _summarised(composed["parts"]["tasks"])
@@ -201,12 +201,8 @@ def _summarised(part: dict[str, Any]) -> dict[str, Any]:
     return {**part, "payload": summary}
 
 
-def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[tasks.TaskRow]:
-    """The task-log rows belonging to one run.
-
-    The join is `task.run_id`, and it deliberately crosses jobs: a run outlives the
-    daily job its tasks land in, so grouping by job would split one lineage for a
-    reason that is purely about scheduling.
+def _tasks_for(parts: dict[str, dict[str, Any]]) -> list[tasks.TaskRow]:
+    """The run's task-log rows, as the command already narrowed them.
 
     Read from the task log rather than `runinfo.tasks`, which is empty for runs
     whose records predate it -- the production run among them.
@@ -218,7 +214,7 @@ def _tasks_for(run_id: str, parts: dict[str, dict[str, Any]]) -> list[tasks.Task
     available = payloads(parts).get("tasks")
     if not isinstance(available, tasks.TasksPayload):
         return []
-    return [row for row in available.rows if row.run_id == run_id]
+    return list(available.rows)
 
 
 def _task_runs(parts: dict[str, dict[str, Any]]) -> dict[str, str]:

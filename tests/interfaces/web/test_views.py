@@ -87,6 +87,12 @@ def answers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
 
     def _invoke(self: Command, **kwargs: Any) -> Any:
         calls.append((self.name, kwargs))
+        # `tasks` HONOURS `--run` here, because the real one does: it narrows the
+        # query and filters what comes back. A fake that ignored the flag would
+        # let a view pass these tests while shipping the whole log.
+        if self.name == "tasks" and kwargs.get("run"):
+            kept = [row for row in TASK_ROWS if row.run_id == kwargs["run"]]
+            return tasks_command.TasksPayload(rows=kept)
         return bodies.get(self.name, {"op": self.name, "seen": kwargs})
 
     monkeypatch.setattr(Command, "invoke", _invoke)
@@ -192,17 +198,21 @@ class TestTheJoins:
         composed = views.run("run-a")
         assert all(row.run_id == "run-a" for row in composed["run_tasks"])
 
-    def test_the_full_task_log_does_not_go_on_the_wire(self, answers):
-        """The whole point of joining here. Filtering server-side while still
-        shipping every row under `parts` would move the work and keep the bytes
-        -- and the bytes are what made this page slow."""
+    def test_the_full_task_log_is_neither_fetched_nor_shipped(self, answers):
+        """Two bytes problems, and the first one hid the second.
+
+        Shipping every row under `parts` would move the filtering server-side
+        and keep the bytes. But READING every row is the larger half: this page
+        spent 4.88s fetching 10.6 MB to return 5 KB, so the view asks `tasks`
+        for one run and the query narrows to it.
+        """
         composed = views.run("run-a")
+        assert dict(answers)["tasks"] == {"run": "run-a"}, "the whole log was read"
         # No `rows` AT ALL, not an empty one: the trimmed part is a
         # `TasksSummary`, which has no such field for a page to misread.
         summary = composed["parts"]["tasks"]["payload"]
         assert not hasattr(summary, "rows")
-        assert summary.source_rows == 4
-        assert summary.source_rows == len(TASK_ROWS)
+        assert summary.source_rows == 2
         assert len(composed["run_tasks"]) == 2
 
     def test_trimming_a_part_does_not_edit_what_the_command_returned(self, answers):
@@ -304,16 +314,19 @@ class TestOverHttp:
         assert [row["task_id"] for row in first["run_tasks"]] == ["t1", "t3"]
         assert [row["task_id"] for row in second["run_tasks"]] == ["t2"]
 
-    def test_two_views_sharing_a_part_answer_it_once(self, client, answers):
-        """`tasks` is in all three views, and it is a 15,684-row read and a 0.94s
-        join. The fan-out used to call commands DIRECTLY, so it re-ran every
-        part the server was already caching -- clicking through runs paid for
-        the same task log each time while `/api/tasks` served it from memo."""
+    def test_each_run_page_reads_only_its_own_tasks(self, client, answers):
+        """Two run pages used to SHARE one `tasks` entry, because both asked the
+        same question -- the whole log -- and the memo amortised a 10.6 MB read
+        across them. Narrowing the query is worth losing that: each page now
+        reads its own run, which is ~0.1s against the 2.5s they were sharing.
+
+        What must not come back is either page reading the log unfiltered.
+        """
         client.get("/api/view/run/run-a")
         before = list(answers)
         client.get("/api/view/run/run-b")
-        fresh = [name for name, _ in answers[len(before) :]]
-        assert "tasks" not in fresh, f"a shared part was answered twice: {fresh}"
+        asked = [kwargs for name, kwargs in answers[len(before) :] if name == "tasks"]
+        assert asked == [{"run": "run-b"}]
 
     def test_a_parameterised_endpoint_keeps_its_own_entry(self, client, answers):
         """NOT a missed optimisation. `/api/tasks?limit=N` is a different
