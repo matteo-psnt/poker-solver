@@ -64,8 +64,11 @@ The loop is **try → prove → clean → merge**. A session's job is to close i
    unused. Then take the refactor the change made obvious — decouple what got
    tangled, name what got repeated, add an abstraction where one now pays for
    itself. A negative result leaves nothing behind except a memory entry.
-4. **Merge.** Re-check `main` moved, rebase, `git merge --ff-only` from the
-   primary checkout, then remove the worktree and branch.
+4. **Merge.** Re-check `main` moved, rebase, then **squash** the branch onto
+   `main` from the primary checkout — `git merge --squash wt-<name>` plus one
+   commit whose message carries the result. A branch is dozens of agent
+   commits; `main` carries one per change. Then remove the worktree, and
+   `git branch -D` it — a squash leaves it unmerged so `-d` refuses.
 
 ## Deciding and asking
 

@@ -110,7 +110,13 @@ not filename.
 tree, which then shows the whole changeset as uncommitted deletions.
 
     # ExitWorktree({action: "keep"}), then from the primary checkout:
-    git merge --ff-only wt-<name>        # or worktree-<name>
+    git merge --squash wt-<name>         # or worktree-<name>
+    git commit                           # one commit, carrying the result
+
+A branch is dozens of agent commits and `main` carries one per change, so the
+merge is a SQUASH. The branch is then not an ancestor of `main`: `git branch -d`
+refuses it and `git merge-base --is-ancestor` reads "unmerged" — confirm with
+`git diff main wt-<name>` being empty instead, and delete with `-D`.
 
 Never `git add -A` — a hook blocks it, because parallel sessions share the
 primary checkout and it has swept their work into a commit three times.
@@ -122,7 +128,8 @@ A worktree created with `git worktree add` is not session-owned, so
 
     # ExitWorktree({action: "keep"}), then:
     git worktree remove .claude/worktrees/<name>
-    git branch -d wt-<name>          # -d, so git refuses if anything is unmerged
+    git branch -D wt-<name>          # -D: a squash merge leaves it "unmerged"
     # (an EnterWorktree one: ExitWorktree({action: "remove"}) does both)
 
-Confirm "fully merged" with `git merge-base --is-ancestor`, not `git cherry`.
+Confirm "fully merged" with an empty `git diff main wt-<name>` — after a squash
+neither `git merge-base --is-ancestor` nor `git cherry` can see it.
