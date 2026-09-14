@@ -15,6 +15,27 @@ memory is flat in iteration count. Runs are loadable iff they carry
 `STATIC_CHECKPOINT.json`; checkpoints from the deleted dynamic backend are
 unreadable by design.
 
+- **EXPLOITABILITY ALONE CANNOT PROMOTE A CHANGE.** It is a worst-case bound, so
+  it is maximised by refusing to play: folding every hand scores
+  `1000*(sb+bb)/(2*bb)` = **750 mbb/g**, and the arms this project called its
+  best read 722-748. `evaluate` prints that floor beside every exact-BR score —
+  an arm near it is not a poker strategy whatever its trend. Exploitability is
+  separately known not to track one-on-one play (Waugh et al. 2009; Johanson et
+  al., AAMAS 2013), and we measured the reversal: `river-r4` beats `turn-river`
+  by 41 AIVAT bb/100 against GTO Wizard while exploitability ranks them the
+  other way.
+- **A change ships only if it passes all three.** They fail in different
+  directions, so no one of them is enough:
+  1. **Exploitation** — `poker-solver match --run A --vs B`, duplicate deals
+     (seats swapped off one deck, so ~2k deals do what ~46k unpaired would).
+     Folding cannot win a chip match.
+  2. **Progress** — the same match against a FROZEN reference arm. One-on-one
+     results can be intransitive, which is harmless against a fixed yardstick
+     and fatal when ranking a field.
+  3. **Safety** — exploitability and LBR, read WITH the 750 floor.
+  Quote VPIP beside any score (`--policy-profile`): an arm folding the SB >50%
+  is not a candidate. For postflop skill use `--decompose` postflop / postflop
+  reach — the total is reach-weighted, so a folder hides a broken postflop in it.
 - **Never compare arms across knob tiers.** Nothing enforces this; check
   `base_seed` and every tier knob before putting two numbers together, and
   never hand-transcribe a score. `poker-solver arms --experiment X --control Y`
@@ -28,10 +49,11 @@ unreadable by design.
   rung. **Score before pruning**, and fix that reader before trusting it.
 - **`--config production` IS the best measured PCS/CFR-BR setup** — a
   river-legal best response over four runouts sharing a flop and a turn
-  (`river-r4`, 748.6 mbb thresholded on the gate). Most of that is plain K-fold
-  averaging: `runouts_per_flop=4` alone reaches 820.7, and R=8 is WORSE than
-  R=4. A treatment arm is a YAML that `extends: production.yaml` and moves ONE
-  thing (`production_linplus.yaml` is the pattern); it is deleted when the
+  (`river-r4`, 748.6 mbb thresholded on the gate — which IS the fold-everything
+  floor, so read it as the best of a bad field, not as good). Most of that is
+  plain K-fold averaging: `runouts_per_flop=4` alone reaches 820.7, and R=8
+  is WORSE than R=4. A treatment arm is a YAML that `extends:
+  production.yaml` and moves ONE thing (`production_linplus.yaml` is the pattern); it is deleted when the
   question closes.
 - **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`,
   with `--set k=v` for config overrides on a FRESH run; the tags are recorded
