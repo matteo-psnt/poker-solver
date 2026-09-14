@@ -399,6 +399,16 @@ def render(payload: services.EvaluationPayload) -> None:
         f"  Exploitability: {results['exploitability_mbb']:.2f} mbb/g "
         f"(± {results['std_error_mbb']:.2f})"
     )
+    # The reference nobody had: production arms read 722-748 against a 750
+    # baseline and nobody noticed they were level with folding every hand.
+    folding = results.get("fold_everything_mbb")
+    if folding:
+        margin = folding - results["exploitability_mbb"]
+        verdict = "BEATS" if margin > 0 else "WORSE THAN"
+        print(
+            f"  vs folding:     {folding:.0f} mbb/g is fold-every-hand — "
+            f"this {verdict} it by {abs(margin):.0f}"
+        )
     for seat in results.get("seat_values_mbb") or []:
         if "self_play_mbb" not in seat:
             continue

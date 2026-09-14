@@ -247,6 +247,16 @@ class PublicBRResult:
     """
 
     exploitability_mbb: float
+    fold_everything_mbb: float
+    """What a strategy that FOLDS EVERY HAND scores on this same scale, from the
+    blinds alone: 1000*(sb+bb)/(2*bb). The reference nobody had -- production
+    arms were quoted at 722-748 against a 750 baseline, i.e. level with folding,
+    and one seat of the best arm was WORSE than folding (1165 vs 1000). A number
+    at or above this is not a poker strategy, whatever the trend says.
+
+    Exploitability is also known not to track one-on-one performance (Waugh et
+    al. 2009; Johanson et al. AAMAS 2013), so read it beside a real-opponent
+    score, never alone."""
     seat_results: tuple[SeatResult, ...]
     missing_policy_mass: float
     nodes_visited: int
@@ -543,6 +553,9 @@ class PublicTreeBestResponse:
         )
         return PublicBRResult(
             exploitability_mbb=exploitability,
+            fold_everything_mbb=1000.0
+            * (self._rules.small_blind + self._rules.big_blind)
+            / (2.0 * self._rules.big_blind),
             seat_results=tuple(seat_results),
             missing_policy_mass=total_missing / total_decision if total_decision else 0.0,
             nodes_visited=total_nodes,

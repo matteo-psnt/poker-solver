@@ -80,6 +80,7 @@ def evaluate_run_exact_br(
     )
     results: dict[str, Any] = {
         "exploitability_mbb": result.exploitability_mbb,
+        "fold_everything_mbb": result.fold_everything_mbb,
         "std_error_mbb": 0.0,
         "num_hands": 0,
         "seat_values_mbb": [

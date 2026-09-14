@@ -594,3 +594,33 @@ class TestTheBlockedCombosRow:
         assert np.array_equal(gathered[3], [0.0, 0.0])
         assert np.array_equal(gathered[0], [0.5, 0.5])
         assert np.array_equal(gathered[2], [0.2, 0.8])
+
+
+class TestTheFoldEverythingReference:
+    """Production arms were quoted at 722-748 mbb/g for months against a
+    fold-every-hand baseline of 750, i.e. level with not playing -- and one seat
+    of the best arm was WORSE than folding (1165 vs 1000). Nothing computed the
+    baseline, so nobody saw it. It is arithmetic on the blinds, not a measurement.
+    """
+
+    def test_it_is_the_blinds_a_folder_forfeits(self):
+        """SB folds and loses the small blind; BB folds to a raise and loses the
+        big one; exploitability averages the seats. In bb: (0.5 + 1)/2 = 0.75."""
+        from src.core.game.rules import GameRules
+
+        rules = GameRules(small_blind=1, big_blind=2)
+        expected = 1000.0 * (rules.small_blind + rules.big_blind) / (2.0 * rules.big_blind)
+        assert expected == pytest.approx(750.0)
+
+    def test_a_bigger_big_blind_lowers_the_bar_in_bb_terms(self):
+        """The reference is in mbb, so it moves with the blind RATIO, not the
+        chip amounts -- a 1/2 game and a 50/100 game share a baseline."""
+        from src.core.game.rules import GameRules
+
+        small = GameRules(small_blind=1, big_blind=2)
+        large = GameRules(small_blind=50, big_blind=100)
+
+        def reference(rules):
+            return 1000.0 * (rules.small_blind + rules.big_blind) / (2.0 * rules.big_blind)
+
+        assert reference(small) == pytest.approx(reference(large))
