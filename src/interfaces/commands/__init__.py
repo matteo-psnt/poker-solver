@@ -171,6 +171,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "benchmark-board",
                 "The public GTO Wizard leaderboard, ranked by AIVAT bb/100 (no API key needed).",
             ),
+            CommandRef(
+                "match",
+                "Duplicate-deal head-to-head: which blueprint wins chips off the other.",
+            ),
             CommandRef("ledger", "List recorded evaluations from the eval ledger."),
             CommandRef(
                 "curve",

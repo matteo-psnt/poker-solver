@@ -35,6 +35,9 @@ NODE_SIDE = frozenset(
         "benchmark",
         "chipzen-seat",
         "chart",
+        # Two checkpoints and two card abstractions off local disk, for the same
+        # reason `evaluate` is here: a chip match is played, not looked up.
+        "match",
     }
 )
 

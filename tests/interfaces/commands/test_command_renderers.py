@@ -43,6 +43,7 @@ from src.interfaces.commands.forget_runs import ForgetPlan
 from src.interfaces.commands.jobs import JobsPayload
 from src.interfaces.commands.ledger import LedgerPayload, LedgerRow
 from src.interfaces.commands.logs import LogsPayload
+from src.interfaces.commands.match import MatchPayload
 from src.interfaces.commands.pool_status import PoolPayload, PoolView
 from src.interfaces.commands.precompute import PrecomputePayload
 from src.interfaces.commands.profile import ProfilePayload
@@ -171,6 +172,14 @@ PAYLOADS: dict[str, Any] = {
             ],
             unplaceable_records=1,
         ),
+    ),
+    "match": MatchPayload(
+        run_a="run-arm",
+        run_b="run-reference",
+        deals=2000,
+        a_mbb_per_hand=-41.6,
+        se_mbb=8.1,
+        results={"run_a": "run-arm", "run_b": "run-reference"},
     ),
     "ledger": LedgerPayload(
         matched=1,
