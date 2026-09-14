@@ -26,6 +26,14 @@
 # Idempotent by SIZE: a rung is re-fetched only when what is on disk does not
 # match what the container holds. Node-local state is not evidence of a complete
 # copy, and a truncated snapshot fails deep in the reader minutes later.
+#
+# DO NOT DEPLOY BETWEEN 00:00 AND 05:00 UTC. Measured 09-14 off the seat journal:
+# chipzen allows 20 matches per HOUR and the queue only opens for about five
+# hours a day, so 00:00-05:00 is the entire day's ~100 matches. Deploying restarts
+# the seat, and each restart re-joins the queue. On 09-14 three redeploys at
+# 01:21-01:34 sit exactly inside a day that produced 20 matches where the seven
+# days before it produced ~101 each. Not proven to be the cause -- but the window
+# is the only one there is, and it costs nothing to deploy after 05:00 UTC.
 
 set -euo pipefail
 
