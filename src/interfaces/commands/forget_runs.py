@@ -39,7 +39,7 @@ GB = 1024**3
 
 # The big blind's option behind a limp. Runs whose code predates this are a
 # different game -- see `test_tree_shape_is_pinned`, re-pinned the same day.
-GAME_CHANGED_AT = "e9f80c0"
+GAME_CHANGED_AT = "5ba5391"
 SMOKE_CONFIG = "quick_test"
 LIVE = frozenset({"running", "queued"})
 
