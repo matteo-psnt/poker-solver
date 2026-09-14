@@ -195,6 +195,22 @@ def budget_for(clock_ms: int | None) -> int:
     ``None`` means the frame did not carry one, which is itself the signal for a
     fast-clock match -- so it resolves to the tight assumption rather than to
     anything roomier.
+
+    THE STRICTEST OF THREE BOUNDS, because they answer different questions and
+    each is the binding one somewhere:
+
+      clock/2 - 800   what one decision may take on average. Binds the SHORT
+                      clocks, where the fixed frame overhead dominates.
+      clock * 0.163   what one decision may take in the TAIL, once the measured
+                      3.69x overshoot from concurrent decisions is applied.
+                      Binds the middle -- a 5,000 ms clock asks 1,700 ms under
+                      the first rule, whose worst case is 6,273 ms.
+      MAX_BUDGET_MS   how much thinking is worth paying for at all. Binds the
+                      30 s clock, which is 1,202 of the 1,227 matches played.
+
+    Two models of the same quantity is not elegance, but dropping either loses a
+    case: the additive one is the more conservative below ~3 s, the multiplicative
+    one above it.
     """
     clock = int(clock_ms) if clock_ms else TIGHT_CLOCK_MS
     sized = max(50, int(clock * CLOCK_FRACTION) - OVERSHOOT_ALLOWANCE_MS)
@@ -707,6 +723,37 @@ _QUEUE_RETRY_AFTER_MAX_S = 900.0
 _QUEUE_LIMIT_RELOG_S = 300.0
 
 
+class _RateLimitLog:
+    """Announces a rate limit, and keeps announcing for as long as it lasts.
+
+    Logging only the FIRST 429 made an hour-long block read exactly like one
+    blip: on 09-14 the seat sat limited from 00:37 with a single line in the
+    journal, 20 matches into a day whose previous three ran 100 each, and
+    nothing said otherwise. Silence has to mean something here.
+    """
+
+    def __init__(self) -> None:
+        self._began = 0.0
+        self._said = 0.0
+
+    def note(self, backoff: float) -> None:
+        now = time.monotonic()
+        if not self._began:
+            self._began = self._said = now
+            logger.warning("queue: rate limited; retrying in %.0fs", backoff)
+        elif now - self._said >= _QUEUE_LIMIT_RELOG_S:
+            self._said = now
+            logger.warning(
+                "queue: STILL rate limited after %.0f min; retrying in %.0fs",
+                (now - self._began) / 60.0,
+                backoff,
+            )
+
+    def clear(self) -> None:
+        """The limit lifted; the next one starts its own clock."""
+        self._began = self._said = 0.0
+
+
 def _retry_after(headers: Mapping[str, str], previous: float) -> float:
     """Seconds to wait after a rate-limited join -- their header, else doubling.
 
@@ -761,7 +808,7 @@ async def _keep_queued(
     period = _QUEUE_POLL_S
     last_state: str | None = None
     backoff = 0.0
-    limited_first = limited_since = 0.0
+    limit = _RateLimitLog()
 
     async with httpx.AsyncClient(base_url=base, headers=headers, timeout=15.0) as http:
         while True:
@@ -791,24 +838,8 @@ async def _keep_queued(
                     and exc.response.status_code == TOO_MANY_REQUESTS
                 ):
                     backoff = _retry_after(exc.response.headers, backoff)
-                    # Re-announce a limit that will not clear. Logging only the
-                    # FIRST 429 made an hour-long block look exactly like one
-                    # blip: on 09-14 the seat sat limited from 00:37 with a
-                    # single line in the journal, 20 matches into a day whose
-                    # previous three ran 100, and nothing said so.
-                    now = time.monotonic()
-                    if last_state != "limited" or now - limited_since >= _QUEUE_LIMIT_RELOG_S:
-                        if last_state == "limited":
-                            logger.warning(
-                                "queue: STILL rate limited after %.0f min; retrying in %.0fs",
-                                (now - limited_first) / 60.0,
-                                backoff,
-                            )
-                        else:
-                            logger.warning("queue: rate limited; retrying in %.0fs", backoff)
-                            limited_first = now
-                        limited_since = now
-                        last_state = "limited"
+                    limit.note(backoff)
+                    last_state = "limited"
                 # Their side being down must never take the socket with it: the
                 # lobby can still be handed a challenge while the queue is out.
                 elif last_state != "error":
@@ -816,6 +847,7 @@ async def _keep_queued(
                     last_state = "error"
             else:
                 backoff = 0.0
+                limit.clear()
                 if state != last_state:
                     logger.info("queue: %s", state)
                     last_state = state
