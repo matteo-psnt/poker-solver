@@ -52,9 +52,9 @@ unreadable by design.
   (`river-r4`, 748.6 mbb thresholded on the gate — which IS the fold-everything
   floor, so read it as the best of a bad field, not as good). Most of that is
   plain K-fold averaging: `runouts_per_flop=4` alone reaches 820.7, and R=8
-  is WORSE than R=4. A treatment arm is a YAML that `extends:
-  production.yaml` and moves ONE thing (`production_linplus.yaml` is the pattern); it is deleted when the
-  question closes.
+  is WORSE than R=4. A treatment arm is a YAML that `extends: production.yaml`
+  and moves ONE thing (`production_linplus.yaml` is the pattern); it is deleted
+  when the question closes.
 - **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`,
   with `--set k=v` for config overrides on a FRESH run; the tags are recorded
   on every eval. **A continuation trains what it was**: `submit --run X --to N`
