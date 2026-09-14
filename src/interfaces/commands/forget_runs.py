@@ -39,7 +39,13 @@ GB = 1024**3
 
 # The big blind's option behind a limp. Runs whose code predates this are a
 # different game -- see `test_tree_shape_is_pinned`, re-pinned the same day.
-GAME_CHANGED_AT = "5ba5391"
+#
+# ONE commit, TWO shas: the history was re-dated on 09-14 and every hash moved,
+# but every run recorded before that day names a commit of the OLD history --
+# which still exists beside the new one and descends from neither of its
+# commits. A run is current if it descends from this commit in EITHER history;
+# a run whose commit resolves in neither is unknown, which protects.
+GAME_CHANGED_AT = ("e9f80c0", "5ba5391")
 SMOKE_CONFIG = "quick_test"
 LIVE = frozenset({"running", "queued"})
 
@@ -162,6 +168,20 @@ def _add(
     tally["gib"] = round(tally["gib"] + gib, 1)
 
 
+def new_game(
+    commit: str | None, *, ancestor: Callable[[str, str | None], bool | None] = is_ancestor
+) -> bool | None:
+    """Whether ``commit`` includes the game change, in whichever history it lives.
+
+    True as soon as either sha is its ancestor; None only when neither history
+    can place it, so a commit git has forgotten protects rather than drops.
+    """
+    answers = [ancestor(sha, commit) for sha in GAME_CHANGED_AT]
+    if any(answer is True for answer in answers):
+        return True
+    return None if all(answer is None for answer in answers) else False
+
+
 def run(args: argparse.Namespace) -> ForgetPlan:
     """Plan against the live record and container; delete only under `--apply`."""
     from src.interfaces.cloud.config import CloudConfig  # noqa: PLC0415 -- Azure only here
@@ -184,7 +204,7 @@ def run(args: argparse.Namespace) -> ForgetPlan:
     plan = plan_runs(
         rows,
         held,
-        new_game=lambda commit: is_ancestor(GAME_CHANGED_AT, commit),
+        new_game=new_game,
         named=named,
         only=args.only,
     )

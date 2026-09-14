@@ -92,3 +92,35 @@ class TestTheExecutableList:
         plan = _plan(rows, {"run-a": RUNG, "run-b": RUNG})
         assert plan.by_reason == {"old-game": {"runs": 2, "gib": 6.0}}
         assert plan.freed_gib == 6.0
+
+
+class TestTwoHistoriesOneCommit:
+    """The 09-14 re-dating moved every hash; runs recorded before it name the
+    old history. `plan_runs` once answered with the new sha alone and marked 41
+    post-limp runs old-game -- the 300M f32/f64 arms and the recall probes."""
+
+    def _ancestor(self, table):
+        return lambda sha, commit: table.get((sha, commit))
+
+    def test_descending_in_the_old_history_is_current(self):
+        old_sha, new_sha = forget_runs.GAME_CHANGED_AT
+        table = {(old_sha, "run-commit"): True, (new_sha, "run-commit"): False}
+        assert forget_runs.new_game("run-commit", ancestor=self._ancestor(table)) is True
+
+    def test_descending_in_the_new_history_is_current(self):
+        old_sha, new_sha = forget_runs.GAME_CHANGED_AT
+        table = {(old_sha, "run-commit"): False, (new_sha, "run-commit"): True}
+        assert forget_runs.new_game("run-commit", ancestor=self._ancestor(table)) is True
+
+    def test_predating_both_is_old_game(self):
+        old_sha, new_sha = forget_runs.GAME_CHANGED_AT
+        table = {(old_sha, "run-commit"): False, (new_sha, "run-commit"): False}
+        assert forget_runs.new_game("run-commit", ancestor=self._ancestor(table)) is False
+
+    def test_a_commit_neither_history_knows_is_unknown(self):
+        assert forget_runs.new_game("gone", ancestor=self._ancestor({})) is None
+
+    def test_one_forgotten_history_still_answers_from_the_other(self):
+        _, new_sha = forget_runs.GAME_CHANGED_AT
+        table = {(new_sha, "run-commit"): False}  # the old objects were gc'd
+        assert forget_runs.new_game("run-commit", ancestor=self._ancestor(table)) is False
