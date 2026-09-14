@@ -110,7 +110,8 @@ serve-ssh:
 # yours -- `at`, the rung to stage and seat (without it both the reader and the
 # seat take the manifest head) -- and `rungs`, a comma-separated
 # `run[:at[:threshold]]` list of SHALLOWER blueprints, each staged and turned
-# into a `--rung` so the seat plays a depth ladder rather than one tree -- and
+# into a `--rung` so the seat plays a depth ladder rather than one tree, and
+# DEFAULTS to the fielded eight when omitted (`rungs=none` to field one tree) --
 # `offtree=1`, which confines the resolver to hands that have left our tree,
 # the only place its edge was ever measured. `extra` stages runs the seat will
 # NOT play, so a candidate can be duelled against the fielded ladder on the box

@@ -284,6 +284,34 @@ fi
 # $RUNGS is a comma-separated `run[:at]` list: the SHALLOWER blueprints of the
 # depth ladder. Each is staged exactly like the deepest, and each becomes a
 # `--rung` on the seat's command line.
+# THE FIELDED LADDER, here rather than in a caller's argument.
+#
+# On 09-13 at 05:28 another session ran `serve-deploy` for unrelated work and,
+# because this file is rewritten from ITS arguments, every `--rung` vanished.
+# The seat played 1 bb-effective spots on the 100 bb blueprint for a day and
+# nothing said so: the journal line reads "1 rung(s) loaded" and looks fine.
+# `--no-resolver` survived the same deploy because its default lives here, and
+# the rungs deserve the same protection.
+#
+# Pass `rungs=...` to override, or `rungs=none` to field the deepest run alone.
+# A DEFAULT rather than a refusal on purpose: a deploy that fails is noticed, but
+# a deploy that half-works is what actually happened, and the safe half is the
+# ladder staying up.
+DEFAULT_RUNGS="run-pcs-production-to12k-d50-long-s7-161947-15074:12000:0.20,\
+run-pcs-production-to12k-d35-long-s7-161938-11549:12000:0.20,\
+run-pcs-production-to12k-d25-long-s7-102205-23109:12000:0.20,\
+run-pcs-production-to4k-d15-cfrbr-s7-082749-388:4000:0.20,\
+run-pcs-production-to4k-d10-cfrbr-s7-082804-23297:4000:0.20,\
+run-pcs-production-to4k-d06-cfrbr-s7-082811-16288:4000:0.20,\
+run-pcs-production-to4k-d03-cfrbr-s7-095309-24766:4000:0.20"
+if [ -z "${RUNGS:-}" ]; then
+    RUNGS="$DEFAULT_RUNGS"
+    echo "==> no rungs given; fielding the default 8-rung ladder"
+elif [ "${RUNGS}" = "none" ]; then
+    RUNGS=""
+    echo "==> rungs=none; the deepest run plays every depth alone"
+fi
+
 SEAT_RUNGS=""
 if [ -n "${RUNGS:-}" ]; then
     IFS=',' read -ra _rungs <<< "$RUNGS"
