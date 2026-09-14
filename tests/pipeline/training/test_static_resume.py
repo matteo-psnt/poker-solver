@@ -13,13 +13,52 @@ from __future__ import annotations
 
 import pytest
 
-from src.engine.solver.storage.static_checkpoint import StaticCheckpointManifest
+from src.core.actions.action_model import ActionModel
+from src.core.game.rules import GameRules
+from src.engine.solver.betting_tree import build_betting_tree
+from src.engine.solver.storage.static_array import StaticArrayStorage
+from src.engine.solver.storage.static_checkpoint import (
+    AbstractionMismatchError,
+    StaticCheckpointManifest,
+    save_checkpoint,
+)
 from src.pipeline.training.static_parallel import (
     train_static_parallel,
     worker_iteration_indices,
     worker_seed,
 )
 from tests.pipeline.training.test_static_parallel import Buckets, _config, session
+
+
+@pytest.mark.parametrize("actual", ["original", "replacement"])
+def test_resume_checks_the_checkpoint_abstraction_before_accepting_its_rows(tmp_path, actual):
+    config = _config()
+    tree = build_betting_tree(
+        GameRules(1, 2), ActionModel(config), Buckets(), starting_stack=config.game.starting_stack
+    )
+    storage = StaticArrayStorage(tree, session_id=session("identity-source"))
+    try:
+        save_checkpoint(storage, tmp_path, iteration=2, abstraction_id="original")
+    finally:
+        storage.close()
+
+    def resume():
+        return train_static_parallel(
+            config,
+            num_iterations=2,
+            num_workers=1,
+            session_id=session("identity-resume"),
+            checkpoint_dir=tmp_path,
+            resume=True,
+            abstraction=Buckets(),
+            abstraction_id=actual,
+        )
+
+    if actual == "replacement":
+        with pytest.raises(AbstractionMismatchError):
+            resume()
+    else:
+        assert resume().iterations == 2
 
 
 class TestChunkIndicesTileTheRange:

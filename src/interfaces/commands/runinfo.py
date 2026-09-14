@@ -10,7 +10,7 @@ from pydantic import Field
 from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
-    ledger_for,
+    eval_index_rows,
     num,
     pct,
     records_root,
@@ -69,9 +69,10 @@ def run(args: argparse.Namespace) -> RunInfoPayload:
     the one place that holds the joins so you do not have to.
     """
     with records_root(args) as root:
+        run_dir = resolve_run_dir(args.run, str(root))
         digest = services.run_digest(
-            resolve_run_dir(args.run, str(root)),
-            ledger_path=ledger_for(root),
+            run_dir,
+            evaluation_records=eval_index_rows(connect.engine_from_environment(), run_dir.name),
             tier_index=args.tier,
             tasks_dir=Path(args.tasks_dir) if args.tasks_dir else None,
             record_source=connect.record_source_from_environment(),

@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any
 
 from src.interfaces import run_names
 from src.interfaces.errors import CommandError
-from src.pipeline.evaluation.ledger import rebuild_ledger
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -274,19 +273,6 @@ def records_root(args: argparse.Namespace, *, run: str | None = None) -> Iterato
         yield root
 
 
-def ledger_for(root: Path) -> Path:
-    """The eval index, REBUILT from the published documents.
-
-    There is deliberately no ledger FILE on the share: a second writable file
-    on a share with no atomic append is the contention the per-run records were
-    introduced to remove. Each published document carries its own provenance,
-    so the index is derived on demand instead of stored.
-    """
-    derived = root / "eval_ledger.jsonl"
-    rebuild_ledger(root, derived)
-    return derived
-
-
 def pct(value: Any) -> str:
     """Blank rather than a placeholder when a field predates its schema version."""
     return f"{value:.1%}" if isinstance(value, int | float) else ""
@@ -294,3 +280,12 @@ def pct(value: Any) -> str:
 
 def num(value: Any, fmt: str) -> str:
     return fmt.format(value) if isinstance(value, int | float) else ""
+
+
+def ledger_for(root: Path) -> Path:
+    """Build the derived ledger file for legacy file-backed reader tests."""
+    from src.pipeline.evaluation.ledger import rebuild_ledger  # noqa: PLC0415 -- help stays lazy
+
+    derived = root / "eval_ledger.jsonl"
+    rebuild_ledger(root, derived)
+    return derived

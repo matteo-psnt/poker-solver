@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 from typing import TYPE_CHECKING, Any
@@ -143,6 +144,12 @@ def latest_record_for_run(
     return match
 
 
+def has_exploitability(record: dict[str, Any]) -> bool:
+    """Chip-edge matches and missing scores cannot enter exploitability comparisons."""
+    value = (record.get("results") or {}).get("exploitability_mbb")
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
+
+
 def curve_series(
     records: list[dict[str, Any]], run_id: str
 ) -> list[tuple[str, dict[int, dict[str, Any]]]]:
@@ -159,7 +166,7 @@ def curve_series(
         if record.get("run_id") != run_id:
             continue
         iteration = record.get("checkpoint_iteration")
-        if iteration is None:
+        if iteration is None or not has_exploitability(record):
             continue
         key = tier_key(record)
         labels.setdefault(key, tier_label(record))

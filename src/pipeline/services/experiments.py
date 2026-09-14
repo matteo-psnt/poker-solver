@@ -50,9 +50,7 @@ class CurveOutput(BaseModel):
     # so a reader cannot recover the N of any other tier without this.
     tier_index: int = 0
     retained_iterations: list[int]
-    # Rows for this run that predate `checkpoint_iteration` being recorded. They
-    # cannot be placed on an axis -- an unlabelled point is not a point -- but an
-    # empty curve beside a non-empty ledger otherwise reads as a bug.
+    # Rows without a checkpoint iteration or a finite exploitability score.
     unplaceable_records: int = 0
 
     @computed_field
@@ -75,15 +73,10 @@ class CurveOutput(BaseModel):
 def exploitability_curve(
     run_dir: Path,
     *,
-    ledger_path: Path,
+    evaluation_records: list[dict[str, Any]],
     tier_index: int = 0,
 ) -> CurveOutput:
-    """Join the retained checkpoint ladder to recorded evaluations, as a curve.
-
-    The SHARE'S half: read the ladder from the manifest and the evals from the
-    index, then hand both to :func:`curve_from`. A caller with the same two
-    things from anywhere else calls that directly.
-    """
+    """Join the published manifest to evaluations supplied by the record reader."""
     # The directory name IS the run id (RunTracker defines it that way), so this
     # reads nothing that a legacy or torn .run.json could make it fail on.
     run_id = run_dir.name
@@ -97,7 +90,7 @@ def exploitability_curve(
     return curve_from(
         run_id,
         retained=retained,
-        records=eval_ledger.read_records(ledger_path),
+        records=evaluation_records,
         tier_index=tier_index,
     )
 
@@ -121,7 +114,10 @@ def curve_from(
     """
     series = eval_ledger.curve_series(records, run_id)
     unplaceable = sum(
-        1 for r in records if r.get("run_id") == run_id and r.get("checkpoint_iteration") is None
+        1
+        for r in records
+        if r.get("run_id") == run_id
+        and (r.get("checkpoint_iteration") is None or not eval_ledger.has_exploitability(r))
     )
 
     if not series:
@@ -230,14 +226,15 @@ def experiment_arms(
     standard error rather than pretending to be exact.
     """
     rows = [r for r in records if r.get("experiment_id") == experiment_id]
-    unplaceable = sum(1 for r in rows if r.get("checkpoint_iteration") is None)
+    unplaceable = 0
 
     # (tier, arm, iteration) -> record; a re-evaluation supersedes its predecessor.
     grouped: dict[tuple[Any, ...], dict[tuple[str, int], dict[str, Any]]] = {}
     labels: dict[tuple[Any, ...], str] = {}
     for record in rows:
         iteration = record.get("checkpoint_iteration")
-        if iteration is None:
+        if iteration is None or not eval_ledger.has_exploitability(record):
+            unplaceable += 1
             continue
         arm = record.get("arm") or record.get("run_id") or "?"
         key = eval_ledger.tier_key(record)
@@ -288,7 +285,7 @@ def _arm_point(
 ) -> ArmPoint:
     record = cells[(arm, iteration)]
     results = record.get("results") or {}
-    value = float(results.get("exploitability_mbb", 0.0))
+    value = float(results["exploitability_mbb"])
     error = float(results.get("std_error_mbb", 0.0) or 0.0)
     point = ArmPoint(
         arm=arm,
@@ -303,7 +300,7 @@ def _arm_point(
     if against is None:
         return point
     base = against.get("results") or {}
-    point.vs_control_mbb = value - float(base.get("exploitability_mbb", 0.0))
+    point.vs_control_mbb = value - float(base["exploitability_mbb"])
     base_error = float(base.get("std_error_mbb", 0.0) or 0.0)
     if error or base_error:
         point.vs_control_stderr_mbb = (error**2 + base_error**2) ** 0.5
@@ -353,7 +350,7 @@ class RunDigest(BaseModel):
 def run_digest(
     run_dir: Path,
     *,
-    ledger_path: Path,
+    evaluation_records: list[dict[str, Any]],
     tier_index: int = 0,
     tasks_dir: Path | None = None,
     record_source: RecordSource | None = None,
@@ -372,7 +369,9 @@ def run_digest(
         else []
     )
     progress = run_events.checkpoints(recorded or run_events.read(run_dir))
-    curve = exploitability_curve(run_dir, ledger_path=ledger_path, tier_index=tier_index)
+    curve = exploitability_curve(
+        run_dir, evaluation_records=evaluation_records, tier_index=tier_index
+    )
     tasks = (
         [row for row in task_history.read_tasks(tasks_dir) if row.run_id == run_dir.name]
         if tasks_dir

@@ -8,6 +8,7 @@ the COUNTS agreed through.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from typing import Any
 
 from src.interfaces.commands import _base, arms, curve
@@ -91,6 +92,28 @@ def test_arms_reads_the_database_when_one_is_configured(monkeypatch):
     monkeypatch.setattr(arms, "eval_index_rows", lambda _e: [row])
     payload = arms.run(argparse.Namespace(experiment="e1", control=None))
     assert [a for tier in payload.result.tiers for a in tier.arms] == ["a1"]
+
+
+def test_runinfo_reads_database_scores_without_a_ledger_file(monkeypatch, tmp_path, record):
+    from src.interfaces.commands import runinfo
+    from tests.pipeline.services.test_run_digest import _run
+
+    run_dir = _run(tmp_path, record)
+    asked = []
+    monkeypatch.setattr(runinfo, "records_root", lambda _args: nullcontext(tmp_path))
+    monkeypatch.setattr(runinfo, "resolve_run_dir", lambda *_args: run_dir)
+    monkeypatch.setattr(runinfo.connect, "engine_from_environment", lambda: object())
+    monkeypatch.setattr(runinfo.connect, "record_source_from_environment", lambda: record)
+    monkeypatch.setattr(
+        runinfo,
+        "eval_index_rows",
+        lambda _engine, run_id: asked.append(run_id) or [eval_ledger.ledger_row(DOCUMENT)],
+        raising=False,
+    )
+    out = runinfo.run(argparse.Namespace(run="run-a", tier=0, tasks_dir=None, last=3))
+    assert [point.exploitability_mbb for point in out.curve.points] == [854.0]
+    assert not any("no evaluations recorded" in gap for gap in out.gaps)
+    assert asked == ["run-a"]
 
 
 def test_ledger_cuts_its_page_in_sql(monkeypatch):

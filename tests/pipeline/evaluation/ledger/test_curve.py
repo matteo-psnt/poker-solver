@@ -65,6 +65,12 @@ class TestCurveSeries:
         [(_, points)] = ledger.curve_series(rows, "run-a")
         assert len(points) == 1
 
+    @pytest.mark.parametrize("score", [None, float("nan"), float("inf")])
+    def test_a_missing_score_does_not_replace_a_valid_measurement(self, score):
+        rows = [_row(mbb=100.0), _row(mbb=score)]
+        [(_, points)] = ledger.curve_series(rows, "run-a")
+        assert points[1000]["results"]["exploitability_mbb"] == 100.0
+
 
 class TestExploitabilityCurve:
     """The services-layer join of the on-disk ladder to recorded evaluations."""
@@ -76,11 +82,6 @@ class TestExploitabilityCurve:
         run = tmp_path / "run-a"
         run.mkdir()
         return run
-
-    def _ledger(self, tmp_path, rows):
-        path = tmp_path / "led.jsonl"
-        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        return path
 
     def _manifest(self, run_dir, current, retained):
         (run_dir / STATIC_CHECKPOINT).write_text(
@@ -94,35 +95,33 @@ class TestExploitabilityCurve:
             )
         )
 
-    def test_reports_ladder_rungs_that_have_no_evaluation(self, run_dir, tmp_path):
+    def test_reports_ladder_rungs_that_have_no_evaluation(self, run_dir):
         from src.pipeline import services
 
         self._manifest(run_dir, 3000, [1000, 2000])
-        path = self._ledger(tmp_path, [_row(iteration=1000)])
-        out = services.exploitability_curve(run_dir, ledger_path=path)
+        out = services.exploitability_curve(run_dir, evaluation_records=[_row(iteration=1000)])
         assert [p.iteration for p in out.points] == [1000]
         assert out.missing_iterations == [2000, 3000], "a curve with holes must say so"
 
-    def test_counts_rows_that_predate_checkpoint_iteration(self, run_dir, tmp_path):
+    def test_counts_rows_that_predate_checkpoint_iteration(self, run_dir):
         from src.pipeline import services
 
         self._manifest(run_dir, 1000, [])
         rows = [{**_row(), "checkpoint_iteration": None} for _ in range(3)]
-        out = services.exploitability_curve(run_dir, ledger_path=self._ledger(tmp_path, rows))
+        out = services.exploitability_curve(run_dir, evaluation_records=rows)
         assert out.points == []
         assert out.unplaceable_records == 3, "an empty curve beside a full ledger reads as a bug"
 
-    def test_survives_a_legacy_or_torn_manifest(self, run_dir, tmp_path):
+    def test_survives_a_legacy_or_torn_manifest(self, run_dir):
         from src.pipeline import services
 
         # Missing 'key_table' — the shape a real pre-v3 run on disk has.
         (run_dir / "CHECKPOINT.json").write_text(json.dumps({"iteration": 13000}))
-        path = self._ledger(tmp_path, [_row(iteration=13000)])
-        out = services.exploitability_curve(run_dir, ledger_path=path)
+        out = services.exploitability_curve(run_dir, evaluation_records=[_row(iteration=13000)])
         assert [p.iteration for p in out.points] == [13000], "a report must not die on the ladder"
         assert out.retained_iterations == []
 
-    def test_lists_unplotted_tiers_rather_than_dropping_them(self, run_dir, tmp_path):
+    def test_lists_unplotted_tiers_rather_than_dropping_them(self, run_dir):
         from src.pipeline import services
 
         self._manifest(run_dir, 2000, [1000])
@@ -131,25 +130,23 @@ class TestExploitabilityCurve:
             _row(iteration=2000),
             _row(iteration=1000, scorer="lookahead"),
         ]
-        out = services.exploitability_curve(run_dir, ledger_path=self._ledger(tmp_path, rows))
+        out = services.exploitability_curve(run_dir, evaluation_records=rows)
         assert len(out.points) == 2
         assert any("lookahead" in t for t in out.other_tiers)
 
-    def test_decay_ratio_is_first_over_last(self, run_dir, tmp_path):
+    def test_decay_ratio_is_first_over_last(self, run_dir):
         from src.pipeline import services
 
         self._manifest(run_dir, 2000, [1000])
         rows = [_row(iteration=1000, mbb=400.0), _row(iteration=2000, mbb=100.0)]
-        out = services.exploitability_curve(run_dir, ledger_path=self._ledger(tmp_path, rows))
+        out = services.exploitability_curve(run_dir, evaluation_records=rows)
         assert out.decay_ratio == pytest.approx(4.0)
 
-    def test_decay_ratio_is_none_with_a_single_point(self, run_dir, tmp_path):
+    def test_decay_ratio_is_none_with_a_single_point(self, run_dir):
         from src.pipeline import services
 
         self._manifest(run_dir, 1000, [])
-        out = services.exploitability_curve(
-            run_dir, ledger_path=self._ledger(tmp_path, [_row(iteration=1000)])
-        )
+        out = services.exploitability_curve(run_dir, evaluation_records=[_row(iteration=1000)])
         assert out.decay_ratio is None
 
 
@@ -160,21 +157,19 @@ class TestTierSelectorBounds:
         run = tmp_path / "run-a"
         run.mkdir()
         rows = [_row(iteration=1000, scorer=f"s{i}") for i in range(tiers)]
-        path = tmp_path / "led.jsonl"
-        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
-        return run, path
+        return run, rows
 
     def test_out_of_range_tier_raises_a_named_error(self, tmp_path):
         from src.pipeline import services
 
-        run, path = self._setup(tmp_path, tiers=1)
+        run, rows = self._setup(tmp_path, tiers=1)
         with pytest.raises(IndexError, match="out of range"):
-            services.exploitability_curve(run, ledger_path=path, tier_index=5)
+            services.exploitability_curve(run, evaluation_records=rows, tier_index=5)
 
     def test_negative_tier_is_rejected_not_wrapped(self, tmp_path):
         # Python would index from the end and quietly return a different tier.
         from src.pipeline import services
 
-        run, path = self._setup(tmp_path, tiers=2)
+        run, rows = self._setup(tmp_path, tiers=2)
         with pytest.raises(IndexError):
-            services.exploitability_curve(run, ledger_path=path, tier_index=-1)
+            services.exploitability_curve(run, evaluation_records=rows, tier_index=-1)

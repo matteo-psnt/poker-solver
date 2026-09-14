@@ -6,6 +6,7 @@ written down (`records`), and how they are read back (`queries`).
 
 from src.pipeline.evaluation.ledger.queries import (
     curve_series,
+    has_exploitability,
     latest_record_for_run,
     read_records,
     rebuild_ledger,
@@ -46,6 +47,7 @@ __all__ = (
     "build_resolver_match_knobs",
     "curve_series",
     "eval_slug",
+    "has_exploitability",
     "latest_record_for_run",
     "ledger_row",
     "load_payload",

@@ -192,10 +192,9 @@ class CFRBestResponse:
     """CFR-BR over sampled boards, writing the same ``(node, bucket, action)`` table.
 
     ``regrets``/``strategy_sum`` are the caller's shared blueprint arrays and
-    carry only the CFR player's rows for each seat; ``trunk_regrets`` is the
-    hybrid opponent's own store and is deliberately NOT checkpointed -- it is
-    scaffolding for the opponent, not part of the answer, and a resumed task
-    simply relearns it.
+    carry only the CFR player's rows for each seat. ``trunk_regrets`` stores
+    the hybrid opponent's learning state and is checkpointed with them so a
+    continuation preserves both sides of training.
     """
 
     def __init__(

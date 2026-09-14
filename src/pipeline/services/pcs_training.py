@@ -150,6 +150,7 @@ def train_pcs(
         abstraction_hash = tracker.metadata.card_abstraction_hash
         abstraction = blueprint.build_card_abstraction(config, abstraction_hash=abstraction_hash)
         tracker.verify_action_config_hash(action_model.get_config_hash())
+        tracker.verify_card_abstraction_hash(abstraction_hash)
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(
                 f"Run '{run_id}' was trained by the {tracker.metadata.kernel!r} kernel; "
@@ -236,6 +237,7 @@ def train_pcs(
             num_workers=workers,
             session_id=run_id,
             checkpoint_dir=run_dir,
+            abstraction_id=tracker.metadata.card_abstraction_hash,
             base_seed=config.system.seed if config.system.seed is not None else 42,
             checkpoint_retain_every=retain_every or checkpoint_every,
             abstraction=abstraction,

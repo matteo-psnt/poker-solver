@@ -94,8 +94,8 @@ def render(payload: ArmsPayload) -> None:
         )
     if result.unplaceable_records:
         print(
-            f"\n  {result.unplaceable_records} row(s) carry no checkpoint iteration "
-            "and cannot be placed against an arm."
+            f"\n  {result.unplaceable_records} row(s) lack a checkpoint iteration or "
+            "a finite exploitability score and cannot be placed against an arm."
         )
 
 

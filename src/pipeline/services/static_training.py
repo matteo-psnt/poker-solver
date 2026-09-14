@@ -152,6 +152,7 @@ def train_static(
     action_model = ActionModel(config)
     if resuming:
         tracker.verify_action_config_hash(action_model.get_config_hash())
+        tracker.verify_card_abstraction_hash(blueprint.resolve_card_abstraction_hash(config))
         tracker.mark_resumed()
     else:
         tag = experiment or ExperimentTag()

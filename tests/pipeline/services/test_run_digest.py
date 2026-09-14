@@ -56,7 +56,7 @@ def _progress(run_dir, record, iteration, coverage):
 
 
 def _digest(run_dir, tmp_path, record, **kw):
-    return run_digest(run_dir, ledger_path=tmp_path / "ledger.jsonl", record_source=record, **kw)
+    return run_digest(run_dir, evaluation_records=[], record_source=record, **kw)
 
 
 class TestIdentity:
@@ -238,5 +238,5 @@ def test_metadata_round_trips_through_the_digest(tmp_path, record):
     """The digest reads what RunTracker wrote, not a parallel notion of a run."""
     run_dir = _run(tmp_path, record)
     metadata = RunMetadata.load(run_dir, record)
-    digest = run_digest(run_dir, ledger_path=tmp_path / "ledger.jsonl", record_source=record)
+    digest = run_digest(run_dir, evaluation_records=[], record_source=record)
     assert (digest.run_id, digest.iterations) == (metadata.run_id, metadata.iterations)

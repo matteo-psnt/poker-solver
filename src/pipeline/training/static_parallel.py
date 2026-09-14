@@ -382,7 +382,7 @@ def train_static_parallel(
         start = start_iteration
         if resume and checkpoint_dir is not None and start == 0:
             try:
-                start = load_checkpoint(storage, checkpoint_dir)
+                start = load_checkpoint(storage, checkpoint_dir, abstraction_id=abstraction_id)
                 logger.info(f"[static] resumed from iteration {start:,}")
             except FileNotFoundError:
                 start = 0  # nothing banked yet; a fresh run

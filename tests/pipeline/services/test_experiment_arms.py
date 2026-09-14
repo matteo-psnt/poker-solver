@@ -154,6 +154,19 @@ class TestWhatAControlSelects:
 
 
 class TestWhatItRefusesToPlace:
+    def test_resolver_match_is_not_an_exploitability_score(self):
+        match = row(
+            "dcfr",
+            2000,
+            0.0,
+            method="resolver_match",
+            results={"exploitability_mbb": None, "resolver_mbb_per_hand": 271.28},
+        )
+        out = experiment_arms([row("dcfr", 2000, 780.0), match], "pcs-weighting")
+        assert out.unplaceable_records == 1
+        assert len(out.tiers) == 1
+        assert out.tiers[0].points[0].exploitability_mbb == 780.0
+
     def test_rows_with_no_checkpoint_iteration_are_counted_not_plotted(self):
         out = experiment_arms(
             [row("dcfr", 2000, 780.0), row("dcfr", 0, 900.0, checkpoint_iteration=None)],
