@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.interfaces.chipzen import seat as seat_module
 from src.interfaces.chipzen.protocol import TurnState
 from src.interfaces.chipzen.seat import (
     CLOCK_FRACTION,
@@ -617,6 +618,30 @@ class TestTheLadderInPlay:
         for _ in range(3):
             laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
         assert laddered.tally.rung_switches == 1
+
+    def test_the_switching_hand_replays_against_the_rung_it_switched_to(
+        self, laddered, monkeypatch
+    ):
+        # MEASURED 09-15 in live play: 38 decisions across 25 matches passed with
+        # a safe default, and EVERY one landed immediately after a rung switch --
+        # one match alone had 15, concentrated at <=10bb where the ladder is the
+        # whole point. `reconstruct` builds its initial state from
+        # `blueprint.config.game.starting_stack`, so running it before the rung
+        # was chosen replayed the first hand at a new depth against the PREVIOUS
+        # rung's stack, and the walk missed our seat.
+        seen: list[float] = []
+        real = seat_module.reconstruct
+
+        def spy(blueprint, turn, seat, scale):
+            seen.append(blueprint.config.game.starting_stack)
+            return real(blueprint, turn, seat, scale)
+
+        monkeypatch.setattr(seat_module, "reconstruct", spy)
+        laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))
+
+        assert laddered.tally.rung_switches == 1
+        # The 2 bb rung is a 200-chip blueprint; the deep one is STACK.
+        assert seen == [200], f"replayed against the {seen} rung, not the selected 200"
 
     def test_the_summary_reports_the_switches(self, laddered):
         laddered.decide_frame(self.shortstacked(mine=STACK // 2, theirs=STACK // 2))

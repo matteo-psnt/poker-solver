@@ -503,6 +503,13 @@ class BlueprintSeat:
             self.tally.fallbacks += 1
             return {"action": "fold", "params": {}}
 
+        # The rung is chosen BEFORE the replay: `reconstruct` builds its initial
+        # state from `blueprint.config.game.starting_stack`, so selecting after it
+        # replays the first hand at a new depth against the PREVIOUS rung's stack
+        # and the walk misses our seat.
+        self._note_depth(turn)
+        self._note_escalation(turn)
+
         try:
             spot = reconstruct(self.blueprint, turn, self.seat, self.scale)
         except Exception:
@@ -510,8 +517,6 @@ class BlueprintSeat:
             self.tally.fallbacks += 1
             return self._pass(turn)
 
-        self._note_depth(turn)
-        self._note_escalation(turn)
         self.tally.saw(turn.hand_number, spot.off_tree)
         if spot.truncated:
             self.tally.truncated += 1
