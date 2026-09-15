@@ -99,8 +99,10 @@ tree, which then shows the whole changeset as uncommitted deletions.
 
 A branch is dozens of agent commits and `main` carries one per change, so the
 merge is a SQUASH. The branch is then not an ancestor of `main`: `git branch -d`
-refuses it and `git merge-base --is-ancestor` reads "unmerged" — an empty
-`git diff main wt-<name>` is the only proof it landed.
+refuses it and `git merge-base --is-ancestor` reads "unmerged", and `git diff
+main wt-<name>` goes stale the moment main moves again. The proof that
+survives both: merging the branch would change nothing, which `just wt-rm`
+checks with `git merge-tree`.
 
 Never `git add -A` — a hook blocks it, because parallel sessions share the
 primary checkout and it has swept their work into a commit three times.
@@ -111,7 +113,7 @@ From the primary checkout:
 
     just wt-rm <name>
 
-It refuses while `git diff main wt-<name>` is non-empty (the branch still holds
-something main does not), then removes the worktree and `git branch -D`s the
-branch. A worktree made by `EnterWorktree` can instead go through
+It refuses while the worktree has uncommitted changes or the branch still
+holds something main does not (a `git merge-tree` of the two is not main's
+tree), then removes the worktree and `git branch -D`s the branch. A worktree made by `EnterWorktree` can instead go through
 `ExitWorktree({action: "remove"})`, which does both.
