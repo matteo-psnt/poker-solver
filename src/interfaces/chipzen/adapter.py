@@ -139,6 +139,10 @@ class Spot:
     seat: int
     off_tree: int
     truncated: bool
+    # Which of the three ways a replay can fail to land, or "" when it landed.
+    # Named rather than inferred: the last attempt to identify the cause from the
+    # journal read a `grep -B1` filter as a correlation and was wrong.
+    truncated_reason: str = ""
 
 
 def reconstruct(
@@ -173,11 +177,13 @@ def reconstruct(
     consumed = 0
     off_tree = 0
     truncated = False
+    reason = ""
     # Their per-round wagers, in their chips, so a raise-to can be read as the
     # increment our Action wants without trusting our own arithmetic for it.
     wagers = _opening_wagers(turn)
     phase = "preflop"
 
+    replayed = 0  # of their actions we got through before stopping
     for entry in turn.action_history:
         if entry.is_synthetic:
             continue
@@ -187,23 +193,38 @@ def reconstruct(
         state, consumed = advance_chance(state, board, consumed)
         if state.is_terminal:
             truncated = True
+            reason = f"our tree ended the hand {replayed} of their actions in"
             break
         legal = rules.get_legal_actions(state, action_model=action_model)
         if not legal:
             truncated = True
+            reason = f"our tree offered no legal action {replayed} of their actions in"
             break
         observed, snapped = _observed_action(entry, wagers, state, scale, legal)
         chosen = _on_tree(observed, state, action_model, rules, legal)
         off_tree += int(snapped or chosen != observed)
         state = state.apply_action(chosen, rules)
         wagers[entry.seat] = max(wagers[entry.seat], entry.amount)
+        replayed += 1
 
     state, consumed = advance_chance(state, board, consumed)
     if not truncated and (state.is_terminal or state.current_player != seat):
         # Their frame says it is our turn; if ours disagrees the replay drifted,
         # which is worth knowing about rather than answering from the wrong seat.
         truncated = True
-    return Spot(state=state, scale=scale, seat=seat, off_tree=off_tree, truncated=truncated)
+        reason = (
+            "our tree ended the hand"
+            if state.is_terminal
+            else f"replay landed on seat {state.current_player}, not {seat}"
+        )
+    return Spot(
+        state=state,
+        scale=scale,
+        seat=seat,
+        off_tree=off_tree,
+        truncated=truncated,
+        truncated_reason=reason,
+    )
 
 
 def _opening_wagers(turn: TurnState) -> list[int]:

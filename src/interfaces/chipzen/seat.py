@@ -520,7 +520,14 @@ class BlueprintSeat:
         self.tally.saw(turn.hand_number, spot.off_tree)
         if spot.truncated:
             self.tally.truncated += 1
-            logger.warning("Replay of hand %s did not land on our seat; passing.", turn.hand_number)
+            logger.warning(
+                "Replay of hand %s did not land on our seat (%s); passing. "
+                "%s bb effective, %s of their actions snapped off-tree.",
+                turn.hand_number,
+                spot.truncated_reason,
+                f"{self._depth(turn):.1f}" if self._depth(turn) else "?",
+                spot.off_tree,
+            )
             self.tally.fallbacks += 1
             return self._pass(turn)
 

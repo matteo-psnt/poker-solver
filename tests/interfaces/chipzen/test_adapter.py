@@ -258,6 +258,54 @@ class TestScale:
         assert not table_scale(shallow, blueprint).depth_matches
 
 
+class TestATruncatedReplaySaysWhy:
+    """Every way a replay can fail to land names itself.
+
+    MEASURED 09-15: the live seat answered ~4% of decisions with a safe default
+    because the replay truncated, and the cause had to be GUESSED from the
+    journal -- a guess that was wrong, because `truncated` was a bare bool and
+    every existing test asserted only `not spot.truncated`, so the failing path
+    had no coverage at all.
+    """
+
+    def test_a_hand_their_history_already_ended_says_so(self, blueprint, scale):
+        # They folded, so our replay reaches a terminal state and there is no
+        # decision for us at the end of it.
+        folded = turn_payload(
+            action_history=[
+                SMALL_BLIND_ENTRY,
+                BIG_BLIND_ENTRY,
+                simple_entry(0, "fold"),
+            ]
+        )
+        spot = reconstruct(blueprint, TurnState.parse(folded), seat=0, scale=scale)
+        assert spot.truncated
+        assert spot.truncated_reason, "a truncated replay must name its cause"
+
+    def test_their_history_outliving_our_tree_says_so(self, blueprint, scale):
+        # Their history keeps going after the point our tree calls the hand over.
+        # This is the branch `ty` caught reaching for a `GameState.history` that
+        # does not exist -- it had no coverage, so it would have raised in play
+        # and been swallowed by `decide_frame`'s bare except.
+        overrun = turn_payload(
+            action_history=[
+                SMALL_BLIND_ENTRY,
+                BIG_BLIND_ENTRY,
+                simple_entry(0, "fold"),
+                simple_entry(1, "check"),
+                simple_entry(0, "check"),
+            ]
+        )
+        spot = reconstruct(blueprint, TurnState.parse(overrun), seat=0, scale=scale)
+        assert spot.truncated
+        assert "our tree" in spot.truncated_reason
+
+    def test_a_replay_that_lands_keeps_the_reason_empty(self, blueprint, scale):
+        spot = reconstruct(blueprint, TurnState.parse(turn_payload()), seat=0, scale=scale)
+        assert not spot.truncated
+        assert spot.truncated_reason == ""
+
+
 class TestReconstruct:
     def test_the_opening_spot_is_the_small_blind_to_act(self, blueprint, scale):
         spot = reconstruct(blueprint, TurnState.parse(turn_payload()), seat=0, scale=scale)
