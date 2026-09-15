@@ -90,6 +90,8 @@ def run(args: argparse.Namespace) -> ConfigsPayload:
 
 
 def render(payload: ConfigsPayload) -> None:
+    if not payload.kinds:
+        print(f"no config directories under {payload.root}")
     for group in payload.kinds:
         print(f"{group.kind} ({group.flag}) — {len(group.names)} config(s)")
         for name in group.names:

@@ -145,6 +145,10 @@ def render(payload: LogsPayload) -> None:
         return
     for line in payload.lines or []:
         print(line)
+    if not payload.lines:
+        # A published log with nothing in it yet is a state, and a blank screen
+        # reads as the command having failed.
+        print(f"  (no lines published for {payload.task or 'this task'} yet)")
 
 
 COMMAND = Command(

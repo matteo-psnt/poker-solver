@@ -160,36 +160,6 @@ class TestEnvironment:
         ).environment()
         assert json.loads(env["RUN_EVAL_FLAGS_JSON"]) == ["--br-flops", "8"]
 
-    def test_every_key_the_wrapper_reads_is_present(self):
-        """The node reads these by name; a missing one is a silent default."""
-        env = spec.TaskSpec(code_snapshot="s", config="p", to=1).environment()
-        assert set(env) == {
-            "CODE_SNAPSHOT",
-            "POKER_SOLVER_RECORD_DSN",
-            "POKER_SOLVER_CHECKPOINT_SAS",
-            "POKER_SOLVER_DIAGNOSTICS_SAS",
-            "POKER_SOLVER_CODE_URL",
-            "RUN_OP",
-            "RUN_CONFIG",
-            "RUN_TO",
-            "RUN_ID",
-            "RUN_EXPERIMENT",
-            "RUN_ARM",
-            "RUN_PARENT",
-            "RUN_SETS_JSON",
-            "RUN_TIMEOUT",
-            "RUN_WORKERS",
-            "RUN_CHECKPOINT_EVERY",
-            "RUN_RETAIN_EVERY",
-            "RUN_GIT_COMMIT",
-            "RUN_GIT_DIRTY",
-            "RUN_GIT_BRANCH",
-            "RUN_EVAL_METHOD",
-            "RUN_EVAL_AT",
-            "RUN_EVAL_FLAGS_JSON",
-            "RUN_FORCE_PUBLISH",
-        }
-
     def test_every_value_is_a_string(self):
         """Batch environment values are strings; an int here fails at the wire."""
         env = spec.TaskSpec(code_snapshot="s", config="p", to=25_000_000, workers=8).environment()

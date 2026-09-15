@@ -1,6 +1,11 @@
 """Test helpers for poker solver tests."""
 
-from typing import Any
+import enum
+import types
+from pathlib import Path
+from typing import Any, Literal, Union, get_args, get_origin
+
+from pydantic import BaseModel
 
 from src.core.actions.action_model import ActionModel
 from src.core.game.actions import Action
@@ -165,3 +170,57 @@ def seed_ledger(path: Any, *rows: dict[str, Any]) -> None:
     """
     for row in rows:
         record_store.append_log(path, row, record_store.REGISTRY["eval_ledger.jsonl"])
+
+
+def example_of[M: BaseModel](model: type[M], **overrides: Any) -> M:
+    """An instance of a payload model, built from its own field declarations.
+
+    Required fields get the smallest value of their type; optional ones keep
+    their defaults; a list or dict of models holds ONE member, so a renderer
+    that iterates prints a row. Overrides pin whatever a test asserts on. This
+    replaces a hand-written fixture that every new command had to be added to.
+    """
+    values: dict[str, Any] = {}
+    for name, field in model.model_fields.items():
+        if name in overrides or not field.is_required():
+            continue
+        values[name] = _example_value(field.annotation, name)
+    return model(**values, **overrides)
+
+
+def _example_value(annotation: Any, name: str) -> Any:
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is Literal:
+        return args[0]
+    if origin in (types.UnionType, Union):
+        inner = [arg for arg in args if arg is not type(None)]
+        return None if len(inner) < len(args) else _example_value(inner[0], name)
+    if origin in (list, tuple, set, frozenset):
+        item = args[0] if args else Any
+        members = [_example_value(item, name)] if _is_model(item) else []
+        return origin(members)
+    if origin is dict:
+        key, value = args if args else (str, Any)
+        if _is_model(value):
+            return {_example_value(key, name): _example_value(value, name)}
+        return {}
+    if _is_model(annotation):
+        return example_of(annotation)
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return next(iter(annotation))
+    if annotation is bool:
+        return False
+    if annotation is int:
+        return 1
+    if annotation is float:
+        return 1.0
+    if annotation is str:
+        return f"{name}-1"
+    if annotation is Path:
+        return Path(name)
+    return None
+
+
+def _is_model(annotation: Any) -> bool:
+    return isinstance(annotation, type) and issubclass(annotation, BaseModel)

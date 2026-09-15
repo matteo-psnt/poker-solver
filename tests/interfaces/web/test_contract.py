@@ -5,13 +5,11 @@ handler returning a `Response`, and every endpoint returns `PayloadResponse` so
 that `jsonio.dumps` keeps handling the numpy scalars and `Path` objects these
 payloads carry. So the enforcement is here.
 
-This is the link that replaced a hand-written one. The chain used to be: handler
-returns an untyped dict, a `PAYLOADS` example pins it, a fixture exports the
-example, and 682 lines of hand-written Zod declared it all over again. Now
-`PAYLOADS` is still the pinned example -- `test_command_renderers.py` drives
-every renderer from it, and `test_payloads_cover_every_command` there fails if a
-command is missing -- and THIS test says the models describe those examples. The
-TypeScript is generated from the models, so nobody writes a shape twice.
+The example each check runs on is BUILT from the command's own payload type
+(`example_of(command.payload_type())`), the same instance the renderer test
+drives, so there is no hand-written example to fall behind. THIS test says the
+console's models describe those instances. The TypeScript is generated from the
+models, so nobody writes a shape twice.
 
 What a failure here means
 -------------------------
@@ -29,11 +27,19 @@ import ast
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from src.interfaces.commands import BY_NAME
+from src.interfaces.commands.tasks import TasksPayload
 from src.interfaces.web import contract
 from src.shared import repo
-from tests.interfaces.commands.test_command_renderers import PAYLOADS
+from src.shared.task_history import TaskRow
+from tests.test_helpers import example_of
 
 APP = repo.SRC / "interfaces" / "web" / "app.py"
+
+
+def _payload(op: str):
+    """The smallest instance of what the command answers with."""
+    return example_of(BY_NAME[op].load().payload_type())
 
 
 def _commands_the_console_invokes() -> set[str]:
@@ -89,7 +95,7 @@ class TestTheModelsDescribeRealPayloads:
     def test_the_pinned_payload_validates(self, op: str):
         """Every modelled command's example payload satisfies its model."""
         try:
-            MODELS[op].model_validate(PAYLOADS[op])
+            MODELS[op].model_validate(_payload(op))
         except ValidationError as error:
             raise AssertionError(
                 f"`{op}`'s payload no longer matches {MODELS[op].__name__}. Something "
@@ -101,7 +107,7 @@ class TestTheModelsDescribeRealPayloads:
     def test_every_modelled_command_still_exists(self, op: str):
         """A model for a command that has been deleted is dead weight that still
         looks like a contract."""
-        assert op in PAYLOADS, f"{op} is modelled here but is not a command"
+        assert op in BY_NAME, f"{op} is modelled here but is not a command"
 
     def test_every_command_the_console_serves_has_a_model(self):
         """The hole the old system had, closed.
@@ -135,19 +141,19 @@ class TestTheModelsDescribeRealPayloads:
         drift this whole exercise measured, and the reason this test no longer
         has to be the thing standing between a rename and the console.
         """
-        widened = {**PAYLOADS["pool-status"].model_dump(), "a_field_added_next_week": 1}
+        widened = {**_payload("pool-status").model_dump(), "a_field_added_next_week": 1}
         assert not hasattr(contract.Pool.model_validate(widened), "a_field_added_next_week")
 
     def test_a_removed_field_is_caught(self):
         """The guard, verified rather than assumed. Without this, a model whose
         fields were all optional would pass everything and pin nothing."""
-        without = {k: v for k, v in PAYLOADS["pool-status"].model_dump().items() if k != "pools"}
+        without = {k: v for k, v in _payload("pool-status").model_dump().items() if k != "pools"}
         with pytest.raises(ValidationError):
             contract.Pool.model_validate(without)
 
     def test_a_retyped_field_is_caught(self):
         """The likelier drift: a field that stays but changes shape."""
-        retyped = {**PAYLOADS["cost"].model_dump(), "task_hours": "seventeen"}
+        retyped = {**_payload("cost").model_dump(), "task_hours": "seventeen"}
         with pytest.raises(ValidationError):
             contract.Cost.model_validate(retyped)
 
@@ -157,9 +163,7 @@ class TestTheViewEnvelopes:
 
     def _part(self, op: str) -> dict:
         """One answered part, as JSON -- which is what a browser validates."""
-        payload = PAYLOADS[op]
-        dump = getattr(payload, "model_dump", None)
-        return {"payload": dump() if callable(dump) else payload, "error": None}
+        return {"payload": _payload(op).model_dump(), "error": None}
 
     def test_the_now_view_validates(self):
         view = contract.NowView.model_validate(
@@ -214,7 +218,10 @@ class TestTheViewEnvelopes:
                         "error": None,
                     },
                 },
-                "run_tasks": [row.model_dump() for row in PAYLOADS["tasks"].rows],
+                "run_tasks": [
+                    row.model_dump()
+                    for row in example_of(TasksPayload, rows=[example_of(TaskRow)]).rows
+                ],
             }
         )
         assert view.parts.tasks.payload is not None

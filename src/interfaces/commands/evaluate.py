@@ -369,6 +369,11 @@ def render(payload: services.EvaluationPayload) -> None:
     print(f"  Run ID:        {payload.run_id}")
     print(f"  Estimator:     {payload.estimator}")
     print(f"  Infosets:      {payload.infosets:,}")
+    if not results:
+        # An evaluation that computed and recorded nothing has happened before;
+        # it must read as that, not as a renderer crash.
+        print("  no results recorded")
+        return
     # Branch on the METHOD, not on what happens to be in `results`. A resolver
     # gate reports a chip edge and carries no `exploitability_mbb` at all; a
     # renderer that reached for the key would die on it, which is exactly how

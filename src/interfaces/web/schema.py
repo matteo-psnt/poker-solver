@@ -1,8 +1,8 @@
 """The OpenAPI document the console generates its TypeScript from.
 
-Lives here rather than in the test that used to own it because two callers
-need it now: `test_openapi_export` and the pre-commit hook. A generator that
-exists only inside a test is a generator nothing can run.
+Two callers: the pre-commit hook WRITES through `write_if_stale`, and
+`test_openapi_export` only compares against `export_schema`. One writer, so a
+stale file is corrected at the commit that reviews it and nowhere else.
 
 `sort_keys` because FastAPI builds the document by walking routes and models,
 and that order is not stable across versions or a reorder of `create_app`.

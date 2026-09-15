@@ -10,11 +10,11 @@ Committed rather than produced on demand, for the same reason the fixture was:
 the console's build must not need a running server, or a Python environment, to
 know what an endpoint returns.
 
-Regenerate-and-fail rather than regenerate-silently. A schema change is a change
-to the contract the UI reads; writing it quietly would let a payload change
-reach the console without anyone seeing that the contract moved. The same
-writer runs as a pre-commit hook, so the suite is the second net here rather
-than the only one.
+The suite only CHECKS. The pre-commit hook is the writer, and it fails the
+commit it rewrote the file in so the diff is staged on purpose. A test that
+also wrote was a test that changed the working tree under `-n auto`, and in
+practice its failure was answered by running pytest again rather than by
+reading anything.
 """
 
 from __future__ import annotations
@@ -25,12 +25,14 @@ from src.interfaces.web import schema
 
 
 def test_the_exported_schema_is_current() -> None:
-    """Regenerate on mismatch, and fail -- so the diff is reviewed, not absorbed."""
-    assert not schema.write_if_stale(), (
-        f"{schema.SCHEMA.name} was stale and has been regenerated. Review the diff, then "
-        "run `npm --prefix console run gen:types` -- the console's TypeScript is "
-        "generated from this file, so a change here is a change to what the UI "
-        "believes every endpoint returns."
+    """Check only: the message names the writer, this never is one."""
+    on_disk = schema.SCHEMA.read_text() if schema.SCHEMA.exists() else ""
+    assert on_disk == schema.export_schema(), (
+        f"{schema.SCHEMA.name} is stale. Regenerate it with\n"
+        "    uv run python -m src.interfaces.web.schema\n"
+        "    npm --prefix console run gen:types\n"
+        "-- the console's TypeScript is generated from this file, so a change here "
+        "is a change to what the UI believes every endpoint returns."
     )
 
 

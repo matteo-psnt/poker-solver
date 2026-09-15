@@ -416,7 +416,8 @@ def _render_replay(payload: ChipzenSeatPayload) -> None:
     amount = decision.get("params", {}).get("amount")
     sized = f" to {amount}" if amount is not None else ""
     print(f"{payload.run}: {decision.get('action', '?')}{sized}")
-    if not payload.depth_matches:
+    # `None` is "not compared", which is not a mismatch and has no depths to print.
+    if payload.depth_matches is False:
         print(
             f"  table is {payload.their_depth:.1f} bb deep, blueprint trained at "
             f"{payload.our_depth:.1f} bb -- extrapolating."

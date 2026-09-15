@@ -19,10 +19,14 @@ from typing import Any
 from azure.core.exceptions import ClientAuthenticationError
 
 from src.interfaces.cli import headless
+from src.interfaces.cloud.tasks.batch import Job
 from src.interfaces.commands import status, tasks
 from src.interfaces.commands._base import Command
+from src.interfaces.commands.jobs import JobsPayload
+from src.interfaces.commands.pool_status import PoolPayload, PoolView
+from src.interfaces.commands.tasks import TasksPayload
 from src.shared.task_history import TaskRow
-from tests.interfaces.commands.test_command_renderers import PAYLOADS
+from tests.test_helpers import example_of
 
 
 def _command(name: str, run: Any) -> Command:
@@ -37,9 +41,9 @@ def _command(name: str, run: Any) -> Command:
 # testing a screen that cannot exist, which is how this file's one production
 # crash got through.
 PANEL_PAYLOADS: dict[str, status.PanelPayload] = {
-    "pool": PAYLOADS["pool-status"],
-    "jobs": PAYLOADS["jobs"],
-    "tasks": PAYLOADS["tasks"],
+    "pool": example_of(PoolPayload, pools=[example_of(PoolView, vm_size="standard_d16als_v6")]),
+    "jobs": example_of(JobsPayload, jobs=[example_of(Job, job="poker-20260802")]),
+    "tasks": example_of(TasksPayload),
 }
 
 
@@ -166,7 +170,19 @@ class TestRenderDelegates:
         So this drives `status.render` end to end and asserts something from
         each panel reached the screen.
         """
-        status.render(PAYLOADS["status"].model_copy(update={"watch": 0}))
+        screen = status.StatusPayload(
+            at="2026-08-03T00:24:48-07:00",
+            elapsed_seconds=22.1,
+            limit=10,
+            panels={
+                "pool": status.StatusPanel(payload=PANEL_PAYLOADS["pool"]),
+                "jobs": status.StatusPanel(payload=PANEL_PAYLOADS["jobs"]),
+                # The FAILED panel: the screen's value is that the other two
+                # still show, and that path only runs when something is wrong.
+                "tasks": status.StatusPanel(error="Azure rejected the credential."),
+            },
+        )
+        status.render(screen)
         out = capsys.readouterr().out
         assert "standard_d16als_v6" in out, "the pool panel"
         assert "poker-20260802" in out, "the jobs panel"

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,9 +54,9 @@ class Command:
     what this command answers. `contract.py` imports it instead of restating it,
     `response_model` puts it in the OpenAPI schema, and `types.gen.ts` is
     generated from that -- so the shape exists once, in the module that produces
-    it. Before this it existed three times (here as an untyped dict, in
-    `contract.py` as a pydantic model, and in a hand-written `PAYLOADS` fixture),
-    and renaming a REQUIRED field passed 1061 tests without a murmur.
+    it, and the renderer test builds its example from :meth:`payload_type`.
+    With the shape declared three times, renaming a REQUIRED field once passed
+    1061 tests without a murmur.
 
     ``render`` takes the same model, so a renderer reading a field the payload
     does not carry is a type error rather than the runtime ``KeyError`` that
@@ -77,6 +78,20 @@ class Command:
     run: Callable[[argparse.Namespace], Payload]
     render: Callable[[Any], None]
     help: str = ""
+
+    def payload_type(self) -> type[Payload]:
+        """The model ``run`` answers with, read off its return annotation.
+
+        The one declaration of the shape, so a test can build an example of it
+        rather than keeping a second, hand-written one that a new command can
+        forget. Evaluated against the module's own names: every command imports
+        ``argparse`` under ``TYPE_CHECKING``, so resolving the whole signature
+        would fail on the parameter this never reads.
+        """
+        annotation = self.run.__annotations__["return"]
+        if isinstance(annotation, str):
+            annotation = eval(annotation, vars(sys.modules[self.run.__module__]))
+        return annotation
 
     def declared(self) -> tuple[dict[str, Any], set[str]]:
         """This command's flag defaults, and which of them are required.

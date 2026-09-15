@@ -312,9 +312,9 @@ class TestThePayloadEncodesLikeTheCLI:
 
     Nothing reaches it today: every console-reachable payload is derived from
     JSONL on the share, and the numpy-adjacent numbers are coerced at their
-    source. That is provenance, not a guarantee, and `PAYLOADS` cannot pin it --
-    the fixture is hand-written JSON-native literals, so a probe over it passes
-    unconditionally. Hence a payload built to be hostile.
+    source. That is provenance, not a guarantee, and the renderer test's derived
+    example cannot pin it -- it builds JSON-native values, so a probe over it
+    passes unconditionally. Hence a payload built to be hostile.
     """
 
     def test_a_payload_json_cannot_natively_encode_still_answers(self, client, monkeypatch):
