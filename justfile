@@ -357,6 +357,95 @@ console-dev:
     npm --prefix console run dev
 
 # --------------------------------------------------------------------------- #
+# worktrees
+# --------------------------------------------------------------------------- #
+# Every change starts in a worktree (AGENTS.md), and a fresh one lacks four
+# things the tools quietly need: the dev environment, the gitignored skills, an
+# initialised Terraform root for EACH state the CLI reads, and the console's
+# node_modules for the pre-commit gate. The skill listed them as six by-hand
+# steps; across past sessions the console hook still died on exit 127 on 12
+# days and terraform on "required plugins" on 8, because a step was skipped.
+# One recipe cannot skip a step.
+
+# Create .claude/worktrees/<name> on branch wt-<name>, from local HEAD, set up.
+[doc("Create a set-up worktree from HEAD. Args: name")]
+wt name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    primary="$(git rev-parse --show-toplevel)"
+    # From the primary checkout only: a worktree's --git-dir is a file under
+    # the primary's .git/worktrees/, and nesting one worktree in another is a
+    # rebase nobody wants.
+    if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
+        echo "just wt: run this from the primary checkout, not a worktree" >&2; exit 1
+    fi
+    target="$primary/.claude/worktrees/{{name}}"
+    if [ -e "$target" ]; then
+        echo "just wt: $target already exists" >&2; exit 1
+    fi
+    # HEAD, not origin/main: local main runs far ahead of the remote, and the
+    # default base once dropped 129 commits without a word.
+    echo "==> git worktree add -b wt-{{name}} (from $(git rev-parse --short HEAD))"
+    git worktree add -b "wt-{{name}}" "$target" HEAD
+    cd "$target"
+    echo "==> uv sync --group dev"
+    uv sync --group dev --quiet
+    # One link PER SKILL: .claude/skills exists already (worktree/ is tracked),
+    # so linking the directory nests a skills/skills link that loads nothing.
+    # Every directory but this one, so the list cannot go stale.
+    echo "==> skill links"
+    for skill in "$primary"/.claude/skills/*/; do
+        skill="$(basename "$skill")"
+        [ "$skill" = "worktree" ] && continue
+        ln -sfn "$primary/.claude/skills/$skill" ".claude/skills/$skill"
+        echo "    $skill"
+    done
+    # ALL THREE roots: config.py reads infra/ and infra/store, and anything
+    # touching the blueprint box reads infra/serve. State is remote, so init
+    # only fetches providers and the backend pointer; INFRA_DIR is relative,
+    # which is why this is per-worktree.
+    # A shared plugin cache: azurerm is ~300 MB and three roots each fetch it,
+    # which was most of a cold `just wt`'s three and a half minutes.
+    export TF_PLUGIN_CACHE_DIR="${POKER_SOLVER_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/poker-solver}/terraform-plugins"
+    mkdir -p "$TF_PLUGIN_CACHE_DIR"
+    for root in infra infra/store infra/serve; do
+        echo "==> terraform -chdir=$root init"
+        terraform -chdir="$root" init -input=false >/dev/null
+    done
+    # The pre-commit console hook runs `npm run ci` and exits 127 without this.
+    # Gitignored as `console/node_modules` (no trailing slash) so the link is
+    # never staged.
+    echo "==> console/node_modules -> primary"
+    ln -sfn "$primary/console/node_modules" console/node_modules
+    echo ""
+    echo "  ready: $target  (branch wt-{{name}})"
+    echo "  establish the baseline before editing, so a later failure is yours:"
+    echo "    uv run pytest -m \"not slow\" && uv run pre-commit run --all-files"
+    echo "  fast gate: median 83 s, p90 156 s over 485 measured runs -- give it a 300 s timeout"
+
+# Remove .claude/worktrees/<name> and its branch, once main carries its diff.
+[doc("Remove a merged worktree and its branch. Args: name")]
+wt-rm name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    primary="$(git rev-parse --show-toplevel)"
+    if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
+        echo "just wt-rm: run this from the primary checkout, not a worktree" >&2; exit 1
+    fi
+    target="$primary/.claude/worktrees/{{name}}"
+    # A squash leaves the branch "unmerged" to `git branch -d` and to
+    # merge-base, so an empty diff against main is the only proof it landed.
+    if ! git diff --quiet main "wt-{{name}}" --; then
+        echo "just wt-rm: wt-{{name}} still differs from main -- merge it (squash) first:" >&2
+        git diff --stat main "wt-{{name}}" -- | tail -3 >&2
+        exit 1
+    fi
+    echo "==> git worktree remove $target"
+    git worktree remove "$target"
+    echo "==> git branch -D wt-{{name}}"
+    git branch -D "wt-{{name}}"
+
+# --------------------------------------------------------------------------- #
 # mutation testing
 # --------------------------------------------------------------------------- #
 

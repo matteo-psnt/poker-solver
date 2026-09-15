@@ -11,6 +11,9 @@ on Azure Batch; the laptop is for tests and dispatch.
   · read the record.
 - `uv run pytest -m "not slow"` — fast gate. `uv run pytest` — full suite.
   Both carry `-n auto` via `addopts`; add `-n0` when debugging ONE test.
+  Measured over 485 runs the fast gate is 83 s median, 156 s p90, 364 s max,
+  and the full suite 376 s p90: give Bash a 300 s timeout for the fast gate,
+  600 s for the full suite or pre-commit, and 10 min for a `terraform apply`.
 - `uv run pre-commit run --all-files` — full quality gate (ruff lint+format, ty,
   import-linter, deptry, vulture). **Green before any merge.**
 - `just` is Terraform lifecycle + `panic` + `credit-check` + a few aliases.
@@ -45,7 +48,7 @@ in `tests/` mirror `src/`.
 
 **Every change starts in a worktree.** Several sessions run against this repo
 at once and `main` is the only shared thing. Follow the `worktree` skill:
-branch from local `HEAD`, link skills, init both Terraform roots, run the fast
+`just wt <name>` branches from local `HEAD` and sets the tree up; run the fast
 gate before editing so a later failure is yours. Edit the primary checkout only
 when told to.
 

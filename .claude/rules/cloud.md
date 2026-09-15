@@ -93,7 +93,14 @@ paths:
   The approved forms are per-directory (`-chdir=infra`, `-chdir=infra/serve`,
   `-chdir=infra/store`), so a `cd` form matches nothing and is refused — that
   cost 15 blocked applies across past sessions, every one of them a change the
-  user had already agreed to. `apply` on `infra/store` is denied outright: it
+  user had already agreed to. Every part of a compound command must match an
+  allow rule, so `cd infra && terraform …` and `yes | just create` route to
+  the classifier and are refused — 52 approved-in-principle infra commands
+  went that way across 56 sessions. Run the bare command and give the Bash
+  tool its own timeout parameter (a `timeout N` prefix is stripped before
+  matching, so it is harmless but buys nothing). `git -c
+  core.hooksPath=/dev/null commit` is refused as well, and rightly: AGENTS.md
+  forbids bypassing the hooks. `apply` on `infra/store` is denied outright: it
   holds the durable share.
 - **Two shell things remain shell**: `just panic` (must work from a phone in
   Cloud Shell) and `main.tf`'s `start_task` (runs before any code snapshot

@@ -11,81 +11,63 @@ Parallel experiment lines. This is the source of truth for the procedure —
 
 ## Create
 
-`.claude/settings.json` sets `worktree.baseRef: "head"`, so `EnterWorktree`
-branches from local `HEAD` — local `main` runs far ahead of `origin/main`, and
-the default base once dropped up to 129 commits without a word. Either works:
+From the primary checkout:
 
-    EnterWorktree({name: "<name>"})          # branch worktree-<name>, from HEAD
-    git worktree add -b wt-<name> .claude/worktrees/<name> HEAD   # by hand
+    just wt <name>        # .claude/worktrees/<name>, branch wt-<name>, from HEAD
 
-Whichever you used, `git log --oneline main -1` inside the worktree must show
-main's tip. If it does not, `git reset --hard main` — before editing anything.
+One recipe, because the by-hand list it replaced was six steps and a skipped
+one costs a whole gate run: the console hook died on `openapi-typescript:
+command not found` on 12 session-days and Terraform on "required plugins" on 8.
+What it does, and why each step is there:
 
-## Then the links, or the tools quietly do the wrong thing
+- `git worktree add … HEAD` — local `main` runs far ahead of `origin/main`,
+  and the default base once dropped 129 commits without a word.
+- `uv sync --group dev`.
+- one symlink PER SKILL under `.claude/skills/` (everything but this one).
+  `.claude/skills` already exists because `worktree/` is tracked, so linking
+  the directory itself nests a `skills/skills` link that loads nothing.
+- `terraform init` on ALL THREE roots: `config.py` reads `infra/` and
+  `infra/store`, and anything touching the blueprint box reads `infra/serve`.
+  State is remote, so init only fetches providers; `INFRA_DIR` is relative,
+  which is why this is per-worktree and `.terraform` cannot be symlinked.
+- `console/node_modules -> primary` — the pre-commit console hook runs
+  `npm run ci` and exits 127 without it. `.gitignore` ignores the link.
 
-`.claude/skills/*` is gitignored except this skill, and half of
-each Terraform state is too, so a fresh worktree lacks them. From inside the
-worktree, with `P` = primary checkout:
+It refuses to run from inside a worktree, or over a name that exists.
 
-    uv sync --group dev
+The alternative is `EnterWorktree({name})` (`.claude/settings.json` sets
+`worktree.baseRef: "head"`, so it branches from local HEAD too), followed by
+the same setup by hand; prefer the recipe. Either way, `git log --oneline
+main -1` inside the worktree must show main's tip — if not, `git reset --hard
+main` before editing anything.
 
-    # 1. the untracked skills, ONE LINK EACH. `.claude/skills` already exists
-    #    (worktree/ is tracked), so linking the directory itself
-    #    nests a `skills/skills` link and loads nothing — every worktree made
-    #    before 09-03 was missing these.
-    for s in coding-standards testing tooling verify; do
-      ln -sfn "$P/.claude/skills/$s" ".claude/skills/$s"
-    done
-
-    # 2. ALL THREE Terraform roots the CLI reads. State is remote (a blob per
-    #    root), so this only fetches providers and the backend pointer and
-    #    NOTHING is symlinked — the old `terraform.tfstate` links are obsolete.
-    #    Initialising only infra/ leaves the identical error, because config.py
-    #    reads infra/store too, and infra/serve is needed by anything touching
-    #    the blueprint box (`just serve-deploy`, `serve-ssh`), which read its
-    #    `public_ip` output.
-    terraform -chdir=infra       init -input=false
-    terraform -chdir=infra/store init -input=false
-    terraform -chdir=infra/serve init -input=false
-
-Cloud commands (`pool-status`, `submit`, `score`) work from a worktree once
-those are in place. Symlinking `.terraform` ITSELF does not work — init must
-populate a real directory. `INFRA_DIR` is a relative path, which is why this
-is per-worktree rather than once globally.
-
-**`pre-commit run --all-files` needs `console/node_modules`** — its last hook
-runs `npm run gen:types && biome ci && tsc && vitest && knip`, and without the
-link it dies on `openapi-typescript: command not found`. So the merge gate needs
-this, not just `npm run gen:types`:
-
-    ln -sfn "$P/console/node_modules" console/node_modules
-
-`.gitignore` has `console/node_modules/` with a trailing slash, so it matches a
-directory and **not** this symlink — it shows up untracked. Delete the link once
-the gate is green, so it is never staged.
+`CLAUDE.md` is a symlink to `AGENTS.md` in every checkout, and Edit refuses to
+write through a symlink. Edit `AGENTS.md`.
 
 ## Running commands once you are isolated
 
 `EnterWorktree` isolates the session, and Bash then **refuses any command it
 cannot statically prove stays inside the worktree** — "too complex to verify".
-That refusal fired 111 times across past sessions, and it costs a whole turn
-each. What trips it, all of it ordinary shell:
+That refusal fired 101 times across 56 sessions, a whole turn each. What trips
+it, all of it ordinary shell:
 
 - `&&` / `;` chains, `for` loops, and `A=x B=y cmd` prefixes
 - heredocs — `python3 - <<'PY' … PY` and `git commit -F - <<'MSG'`
-- anything writing a path the checker cannot resolve to this worktree
+- any write to a path outside the worktree: the scratchpad, `/tmp`, the
+  memory directory, the primary checkout
 
 So in an isolated session:
 
-- **One plain command per Bash call.** Split the chain; do not try to smuggle
-  it past with a `cd`. Bash's cwd does not persist between calls anyway, so a
-  relative path resolves against the PRIMARY checkout, not this one.
-- **Edit files with Edit/Write, not `python3 - <<PY`.** The bash-first habit
-  is what generates most of these refusals. Pass absolute worktree paths.
+- **One plain command per Bash call.** Bash's cwd does not persist between
+  calls, so a relative path resolves against the PRIMARY checkout, not this one:
+  pass absolute worktree paths.
+- **Edit files with Edit/Write, not `python3 - <<PY`.** Memory files are
+  written with the Write tool too; scratch goes under the worktree's `scratch/`.
 - **Commit messages go in a file**, `git commit -F <path>`, not a heredoc.
 
-`CLAUDE.md` is a symlink to `AGENTS.md` in every checkout, and Edit refuses to
-write through a symlink. Edit `AGENTS.md`.
+A worktree made with `just wt` is not session-isolated: ordinary shell works,
+and absolute paths are still the habit that keeps a `cd` from landing in the
+primary checkout.
 
 ## Establish the baseline before editing
 
@@ -93,7 +75,8 @@ write through a symlink. Edit `AGENTS.md`.
 
 The only way to tell "my change broke a contract" from "this worktree was never
 clean" — it once caught a real ordering bug in `logs.py` that the primary
-checkout hides.
+checkout hides. The fast gate is 83 s median and 156 s p90 over 485 measured
+runs: give it a 300 s timeout, and pre-commit 600 s.
 
 ## Main moves under you
 
@@ -109,27 +92,26 @@ not filename.
 `receive.denyCurrentBranch` — it moves the ref without touching main's working
 tree, which then shows the whole changeset as uncommitted deletions.
 
-    # ExitWorktree({action: "keep"}), then from the primary checkout:
+    # ExitWorktree({action: "keep"}) if the session was isolated, then from
+    # the primary checkout:
     git merge --squash wt-<name>         # or worktree-<name>
     git commit                           # one commit, carrying the result
 
 A branch is dozens of agent commits and `main` carries one per change, so the
 merge is a SQUASH. The branch is then not an ancestor of `main`: `git branch -d`
-refuses it and `git merge-base --is-ancestor` reads "unmerged" — confirm with
-`git diff main wt-<name>` being empty instead, and delete with `-D`.
+refuses it and `git merge-base --is-ancestor` reads "unmerged" — an empty
+`git diff main wt-<name>` is the only proof it landed.
 
 Never `git add -A` — a hook blocks it, because parallel sessions share the
 primary checkout and it has swept their work into a commit three times.
 
 ## Clean up
 
-A worktree created with `git worktree add` is not session-owned, so
-`ExitWorktree({action: "remove"})` refuses it:
+From the primary checkout:
 
-    # ExitWorktree({action: "keep"}), then:
-    git worktree remove .claude/worktrees/<name>
-    git branch -D wt-<name>          # -D: a squash merge leaves it "unmerged"
-    # (an EnterWorktree one: ExitWorktree({action: "remove"}) does both)
+    just wt-rm <name>
 
-Confirm "fully merged" with an empty `git diff main wt-<name>` — after a squash
-neither `git merge-base --is-ancestor` nor `git cherry` can see it.
+It refuses while `git diff main wt-<name>` is non-empty (the branch still holds
+something main does not), then removes the worktree and `git branch -D`s the
+branch. A worktree made by `EnterWorktree` can instead go through
+`ExitWorktree({action: "remove"})`, which does both.
