@@ -40,6 +40,7 @@ class TestTruncation:
             "poker-20260901-big",
         ]
         assert payload.hidden_jobs == 4
+        assert payload.filtered_jobs == 0
 
     def test_the_newest_job_is_rendered_last(self):
         """A terminal scrolls, so the newest belongs at the bottom -- which is
@@ -63,9 +64,11 @@ class TestTheDefaultView:
         payload = select(jobs, show_all=False, limit=20)
         assert [job.job for job in payload.jobs] == ["poker-20260901-huge"]
         # `total_jobs` counts what was considered, so the hidden line reports the
-        # finished ones rather than zero.
+        # finished ones rather than zero -- and as FILTERED, not truncated: the
+        # flag that shows them is `--all`, and `--limit 0` would change nothing.
         assert payload.total_jobs == len(jobs)
-        assert payload.hidden_jobs == len(BATCH_ORDER)
+        assert payload.filtered_jobs == len(BATCH_ORDER)
+        assert payload.hidden_jobs == 0
 
     def test_an_active_job_with_nothing_in_flight_is_not_live(self):
         """A job container stays open all day after its tasks have finished."""

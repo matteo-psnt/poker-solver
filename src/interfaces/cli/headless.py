@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import re
 import sys
 import textwrap
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from src.adapters.postgres.connect import NoRecordError, unreachable_hint
 from src.interfaces.cloud.config import export_record_dsn
-from src.interfaces.commands import BY_NAME, COMMANDS, GROUPS
+from src.interfaces.commands import BY_NAME, COMMANDS, GROUPS, RETIRED
 from src.interfaces.errors import CommandError
 from src.shared import jsonio
 from src.shared.log import configure_logging, pin_level_for_children
@@ -45,6 +46,37 @@ def _named_command(argv: Sequence[str]) -> str | None:
     its own "invalid choice" listing every name, unchanged.
     """
     return next((token for token in argv if token in BY_NAME), None)
+
+
+def _retired_command(argv: Sequence[str]) -> str | None:
+    """The retired name ``argv`` asks for, if the first bare token is one."""
+    first = next((token for token in argv if not token.startswith("-")), None)
+    return first if first in RETIRED else None
+
+
+# A run id starts with `run-`; a task id ends in the dispatch stamp `-HHMMSS-pid`.
+_LOOKS_LIKE_AN_ID = re.compile(r"^run-|-\d{6}-\d+$")
+
+_ID_HINT = (
+    "ids are flags here: --run <run>, --task <task>, --job <job>; "
+    "see `poker-solver {command} --help`"
+)
+
+
+class _SubcommandParser(argparse.ArgumentParser):
+    """argparse's parser, with one line added to the two errors an id misfire makes.
+
+    `progress <id>` and `runinfo <id>` are refused as "unrecognized arguments"
+    and `progress --task <id>` as "required: --run"; ten such calls across the
+    sessions were each followed by a `--help`. The convention is one flag per
+    kind of id, so the hint names the three flags rather than guessing one.
+    """
+
+    def error(self, message: str) -> NoReturn:
+        misfire = message.startswith(("unrecognized arguments", "the following arguments"))
+        if misfire and any(_LOOKS_LIKE_AN_ID.search(token) for token in sys.argv[1:]):
+            message = f"{message}\n{_ID_HINT.format(command=self.prog.split()[-1])}"
+        super().error(message)
 
 
 # Wide enough for `abstraction-coupling`, the longest name, plus a gutter. Fixed
@@ -90,7 +122,7 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     equivalent to -- ``tests/interfaces/commands/test_registry.py`` compares the
     two parsers flag by flag.
     """
-    common = argparse.ArgumentParser(add_help=False)
+    common = _SubcommandParser(add_help=False)
     common.add_argument("--json", action="store_true", help="Emit the result as JSON on stdout.")
     common.add_argument(
         "--log-level",
@@ -111,7 +143,9 @@ def build_parser(argv: Sequence[str] | None = None) -> argparse.ArgumentParser:
     # `metavar` so `usage:` reads `<command>` instead of every name in one
     # 900-character token. The "invalid choice" message still lists them all,
     # which is what `_named_command` leans on.
-    sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
+    sub = parser.add_subparsers(
+        dest="command", required=True, metavar="<command>", parser_class=_SubcommandParser
+    )
     # Two different absences, and conflating them silently undid the whole
     # thing: NO argv means "build everything" (a caller introspecting the CLI),
     # while argv that names no subcommand -- `--help`, or nothing at all --
@@ -140,6 +174,10 @@ def main(argv: list[str] | None = None) -> int:
     # Resolved before the parser is built, not by it: which subcommand was asked
     # for is what decides how much of the tool has to be imported.
     argv = sys.argv[1:] if argv is None else argv
+    retired = _retired_command(argv)
+    if retired is not None and _named_command(argv) is None:
+        print(f"error: {retired} was retired: {RETIRED[retired]}", file=sys.stderr)
+        return 1
     args = build_parser(argv).parse_args(argv)
     command = args.command_impl
     if args.log_level:
@@ -172,8 +210,32 @@ def main(argv: list[str] | None = None) -> int:
         if hint is None:
             raise
         print(f"error: {hint}", file=sys.stderr)
+        _readmit()
         return 1
     return 0
+
+
+def _readmit() -> None:
+    """Run `record-admit` on the caller's behalf, and say when to retry.
+
+    The hint alone cost a turn every time -- eight across the sessions -- because
+    the next call was always the admit it named. A failure here (no Terraform
+    state in this checkout, no Azure login) is one line, not a second traceback
+    on top of the timeout being explained.
+    """
+    # Lazily: the whole registry is lazy so `--help` imports no handler.
+    from src.interfaces.commands.record_admit import AdmittedPayload  # noqa: PLC0415
+
+    try:
+        admitted = BY_NAME["record-admit"].load().invoke_as(AdmittedPayload)
+    except Exception as failure:  # noqa: BLE001 -- reported, not handled
+        print(f"record-admit could not run: {failure}", file=sys.stderr)
+        return
+    print(
+        f"record-admit: {admitted.server} now admits {admitted.address}. "
+        "Azure applies the rule within a minute or two; retry then.",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

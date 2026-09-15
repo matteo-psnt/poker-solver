@@ -46,6 +46,9 @@ class RunsPayload(BaseModel):
 
     op: Literal["runs"] = "runs"
     runs: list[services.RunSummary] = []
+    """How many matched before `--limit` cut the list. A truncated listing that
+    does not say so reads as the whole record."""
+    total_runs: int = 0
 
 
 def run(args: argparse.Namespace) -> RunsPayload:
@@ -53,9 +56,10 @@ def run(args: argparse.Namespace) -> RunsPayload:
     summaries = _from_database(connect.engine_from_environment())
     if args.loadable_only:
         summaries = [summary for summary in summaries if summary.loadable]
+    total = len(summaries)
     if args.limit > 0:
         summaries = summaries[: args.limit]
-    return RunsPayload(runs=summaries)
+    return RunsPayload(runs=summaries, total_runs=total)
 
 
 def _distances(commits: set[str | None]) -> dict[str | None, int | None]:
@@ -127,7 +131,10 @@ def render(payload: RunsPayload) -> None:
     if not rows:
         print("No published runs.")
         return
-    print(f"{len(rows)} published run(s), newest first")
+    if len(rows) < payload.total_runs:
+        print(f"showing {len(rows)} of {payload.total_runs} published run(s) (--limit 0 for all)")
+    else:
+        print(f"{len(rows)} published run(s), newest first")
     header = f"{'run':<34} {'config':<14} {'iterations':>13} {'status':<11} {'age':<16}"
     print(header)
     print("-" * len(header))

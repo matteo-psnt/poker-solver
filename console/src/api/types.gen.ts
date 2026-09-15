@@ -1107,7 +1107,15 @@ export interface components {
          * @description What `jobs` answers. The console reads this through `/api/jobs`.
          */
         JobsPayload: {
-            /** Hidden Jobs */
+            /**
+             * Filtered Jobs
+             * @default 0
+             */
+            filtered_jobs: number;
+            /**
+             * Hidden Jobs
+             * @default 0
+             */
             hidden_jobs: number;
             /**
              * Jobs
@@ -1857,6 +1865,11 @@ export interface components {
              * @default []
              */
             runs: components["schemas"]["RunSummary"][];
+            /**
+             * Total Runs
+             * @default 0
+             */
+            total_runs: number;
         };
         /**
          * RunsView

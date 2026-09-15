@@ -167,6 +167,17 @@ class TestABoundedReadFetchesABoundedNumberOfRows:
         queries.leg_rows(engine)
         assert "LIMIT" not in str(engine.statements[-1])
 
+    def test_one_task_is_a_predicate_not_a_window(self):
+        """`cancel` and `wait` ask about ONE task by name. A task older than the
+        newest n would come back empty from the window and read as "no such
+        task", so the name is a WHERE clause and outranks every other bound."""
+        engine = _Recorder()
+        queries.leg_rows(engine, recent_tasks=200, run_id="run-a", task_id="t-1")
+        statement = " ".join(str(engine.statements[-1]).split())
+        assert "WHERE task_id = :task_id" in statement
+        assert "LIMIT" not in statement
+        assert ":run_id" not in statement
+
     def test_the_bound_is_by_task_so_a_tasks_attempts_stay_together(self):
         """`join_documents` decides which attempt of a task is latest and can
         only do that seeing all of them -- and `attempt` is a sentinel (-1/0) on

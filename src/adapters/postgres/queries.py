@@ -169,6 +169,13 @@ _LEGS_FOR_RUN = sa.text("""
     FROM legs l JOIN owned o ON l.task_id = o.task_id
 """)
 
+# Every leg of ONE task: what `cancel` reads to learn the job, and what `wait`
+# polls. A predicate, not a window: a task older than the newest n would come
+# back empty from `_LEGS_FOR_RECENT_TASKS` and read as "no such task".
+_LEGS_FOR_TASK = sa.text("""
+    SELECT task_id, attempt, leg, body FROM legs WHERE task_id = :task_id
+""")
+
 # How many task-attempts the log holds, counted where the rows are rather than
 # by fetching them. The UNION is `join_documents`' own rule for what earns a
 # row: every (task, attempt) the node started, plus the tasks Batch saw that it
@@ -184,21 +191,24 @@ _ATTEMPT_COUNT = sa.text("""
 
 
 def leg_rows(
-    engine: Any, *, recent_tasks: int = 0, run_id: str = ""
+    engine: Any, *, recent_tasks: int = 0, run_id: str = "", task_id: str = ""
 ) -> list[tuple[str, int, str, dict[str, Any]]]:
-    """Leg documents as `(task_id, attempt, leg, body)`: one run's, the newest
-    tasks', or all of them.
+    """Leg documents as `(task_id, attempt, leg, body)`: one task's, one run's,
+    the newest tasks', or all of them.
 
     Unbounded by default, which `--limit 0` still wants.
 
-    Either bound is worth having. The whole log is 16,895 legs and 10.6 MB, and
+    Each bound is worth having. The whole log is 16,895 legs and 10.6 MB, and
     shipping it costs 1.65s of pure transfer -- Postgres itself reads every body
     in 0.02s. The newest 300 tasks are 1,269 legs; one run's are fewer still.
 
-    `run_id` wins when both are given: the caller asked about a run, and a run
-    older than the window would come back empty rather than narrowed.
+    The narrowest name wins when several are given: the caller asked about a
+    task or a run, and one older than the window would come back empty rather
+    than narrowed.
     """
-    if run_id:
+    if task_id:
+        query, params = _LEGS_FOR_TASK, {"task_id": task_id}
+    elif run_id:
         query, params = _LEGS_FOR_RUN, {"run_id": run_id}
     elif recent_tasks > 0:
         query, params = _LEGS_FOR_RECENT_TASKS, {"tasks": recent_tasks}

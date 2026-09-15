@@ -113,6 +113,9 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "cancel", "Terminate a running task; its partial progress is published first."
             ),
             CommandRef(
+                "wait", "Block until a task starts, finishes or logs, or a run reaches a rung."
+            ),
+            CommandRef(
                 "pool-status", "Pool node counts, and the real cause behind any allocation failure."
             ),
             CommandRef(
@@ -211,6 +214,32 @@ COMMANDS: tuple[CommandRef, ...] = tuple(ref for group in GROUPS for ref in grou
 
 BY_NAME: dict[str, CommandRef] = {ref.name: ref for ref in COMMANDS}
 
+# Names a caller still reaches for after the command went away. Measured across
+# 56 sessions: ~15 invocations of a retired name, each answered with argparse's
+# 34-name "invalid choice" and followed by a `--help` and a guess. The line says
+# where the question went; `tests/interfaces/commands/test_retired.py` pins that
+# every name here is dead and every name it points at is alive.
+RETIRED: dict[str, str] = {
+    "share-rm": "the share is gone; runs live in the container: `runs` lists them, "
+    "`forget-runs` removes them.",
+    "backfill-record": "the migration is complete; the record is Postgres and every "
+    "reader answers from it.",
+    "task-log": "`logs --task <id>`.",
+    "task-logs": "`logs --task <id>`.",
+    "job-log": "`logs --task <id>` (a log is addressed by task, not job).",
+    "timeline": "`runinfo --run <id>` for a run's history, `tasks --run <id>` for its attempts.",
+    "activity": "`tasks --run <id>`.",
+    "box": "`serve-box`.",
+    "pool": "`pool-status`.",
+    "console": "`serve`.",
+    "vector-sweep": "the vector trainer was retired; `train-pcs` is the trainer.",
+    "submit-vector": "the vector trainer was retired; `submit` dispatches `train-pcs`.",
+    "submit-migrate": "the checkpoint migration is complete; nothing is left to move.",
+    "migrate-checkpoints": "the checkpoint migration is complete; nothing is left to move.",
+    "report": "`arms` compares an experiment's arms.",
+    "fetch": "readers answer from the record; there is nothing to fetch first.",
+}
+
 
 def load(name: str) -> Command:
     """The one subcommand called ``name``. Raises ``KeyError`` if there is none."""
@@ -232,6 +261,7 @@ __all__ = (
     "BY_NAME",
     "COMMANDS",
     "GROUPS",
+    "RETIRED",
     "Command",
     "CommandGroup",
     "CommandRef",

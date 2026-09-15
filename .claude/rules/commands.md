@@ -50,6 +50,11 @@ either.
   scheduler retry converge instead of training twice. There is no separate
   `resume`, and a continuation takes no `--config`/`--set`: it trains the
   config on the run's record.
+- **An id is a flag that names its KIND: `--run`, `--task`, `--job`.** Never
+  positional, never aliased: `progress --task <id>` and `runinfo <id>` are
+  refused, and the refusal appends where the id goes. `cancel --task` alone
+  resolves its job from the record. A retired name (`RETIRED` in the
+  registry) is answered with its replacement, not the 34-name choice list.
 - **Nothing on the laptop reads a card abstraction.** Submitting must not call
   `build_card_abstraction` — it loads ~773 MB to answer a question about another
   machine. Config overrides go through `--set k=v` and nothing else.

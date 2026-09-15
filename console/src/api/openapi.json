@@ -1311,7 +1311,13 @@
       "JobsPayload": {
         "description": "What `jobs` answers. The console reads this through `/api/jobs`.",
         "properties": {
+          "filtered_jobs": {
+            "default": 0,
+            "title": "Filtered Jobs",
+            "type": "integer"
+          },
           "hidden_jobs": {
+            "default": 0,
             "title": "Hidden Jobs",
             "type": "integer"
           },
@@ -1335,8 +1341,7 @@
           }
         },
         "required": [
-          "total_jobs",
-          "hidden_jobs"
+          "total_jobs"
         ],
         "title": "JobsPayload",
         "type": "object"
@@ -3079,6 +3084,11 @@
             },
             "title": "Runs",
             "type": "array"
+          },
+          "total_runs": {
+            "default": 0,
+            "title": "Total Runs",
+            "type": "integer"
           }
         },
         "title": "RunsPayload",

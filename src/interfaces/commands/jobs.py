@@ -22,7 +22,12 @@ class JobsPayload(BaseModel):
     op: Literal["jobs"] = "jobs"
     jobs: list[Job] = []
     total_jobs: int
-    hidden_jobs: int
+    """Two different absences, counted apart. One number for both read "20 of
+    72 jobs" as "total 0" once, because nothing said which flag would show the
+    rest: `filtered_jobs` are finished ones the default view hides (`--all`),
+    `hidden_jobs` are the ones `--limit` cut (`--limit 0`)."""
+    filtered_jobs: int = 0
+    hidden_jobs: int = 0
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -80,10 +85,14 @@ def select(jobs: list[Job], *, show_all: bool, limit: int) -> JobsPayload:
     chronological.
     """
     jobs = sorted(jobs, key=lambda job: job.job)
-    shown = jobs if show_all else [job for job in jobs if is_live(job)]
-    if limit > 0:
-        shown = shown[-limit:]
-    return JobsPayload(jobs=shown, total_jobs=len(jobs), hidden_jobs=len(jobs) - len(shown))
+    eligible = jobs if show_all else [job for job in jobs if is_live(job)]
+    shown = eligible[-limit:] if limit > 0 else eligible
+    return JobsPayload(
+        jobs=shown,
+        total_jobs=len(jobs),
+        filtered_jobs=len(jobs) - len(eligible),
+        hidden_jobs=len(eligible) - len(shown),
+    )
 
 
 def run(args: argparse.Namespace) -> JobsPayload:
@@ -121,7 +130,10 @@ def render(payload: JobsPayload) -> None:
             because = f"  ({task.exit_meaning})" if task.exit_meaning else ""
             print(f"   {word:<10} {task.task}{exit_code}{because}")
     if payload.hidden_jobs:
-        print(f"\n  {payload.hidden_jobs} finished job(s) hidden — show with --all")
+        listed = len(payload.jobs) + payload.hidden_jobs
+        print(f"\n  showing {len(payload.jobs)} of {listed} job(s) — `--limit 0` for all")
+    if payload.filtered_jobs:
+        print(f"  {payload.filtered_jobs} finished job(s) hidden — show with --all")
 
 
 COMMAND = Command(

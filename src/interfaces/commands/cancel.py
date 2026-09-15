@@ -13,7 +13,9 @@ from pydantic import BaseModel
 
 from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.tasks import batch
+from src.interfaces.commands import tasks
 from src.interfaces.commands._base import Command
+from src.interfaces.errors import CommandError
 
 if TYPE_CHECKING:
     import argparse
@@ -21,8 +23,13 @@ if TYPE_CHECKING:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver cancel`."""
-    parser.add_argument("--job", required=True, help="Job id holding the task.")
     parser.add_argument("--task", required=True, help="Task id to terminate.")
+    parser.add_argument(
+        "--job",
+        default="",
+        help="Job id holding the task. Omit it and the record answers: a task's "
+        "start leg names its job. Needed only for a task recorded before that field.",
+    )
 
 
 class CancelledPayload(BaseModel):
@@ -40,11 +47,35 @@ class CancelledPayload(BaseModel):
     task_id: str
 
 
+def job_of(task_id: str) -> str:
+    """The job a task was queued under, from the record.
+
+    Batch addresses a task by (job, task), but the task id is unique on its own
+    and the record already holds the pair -- demanding `--job` cost eleven
+    failed calls across seven sessions. Read through `tasks` so there is one
+    join; reconcile is skipped because the answer is on the node's own leg.
+    Never Batch enumeration: 0.39 s per job over every job in the account.
+    """
+    payload = tasks.COMMAND.invoke_as(tasks.TasksPayload, task=task_id, skip_reconcile=True)
+    jobs = {row.job_id for row in payload.rows if row.job_id}
+    if not payload.rows:
+        raise CommandError(
+            f"cancel: the record has no task {task_id!r}; pass --job to address it directly."
+        )
+    if not jobs:
+        raise CommandError(
+            f"cancel: the record holds {task_id} but not its job (recorded before the "
+            "field existed); pass --job."
+        )
+    return max(jobs)
+
+
 def run(args: argparse.Namespace) -> CancelledPayload:
     """Terminate one task."""
+    job = args.job or job_of(args.task)
     config = CloudConfig.load()
-    batch.cancel_task(batch.client(config), args.job, args.task)
-    return CancelledPayload(job_id=args.job, task_id=args.task)
+    batch.cancel_task(batch.client(config), job, args.task)
+    return CancelledPayload(job_id=job, task_id=args.task)
 
 
 def render(payload: CancelledPayload) -> None:

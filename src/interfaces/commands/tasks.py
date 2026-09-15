@@ -98,6 +98,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "estimates from its own measured rate before it reaches any history.",
     )
     parser.add_argument(
+        "--task",
+        default="",
+        help="Only this task's attempts. A predicate on the query, so `cancel` can "
+        "learn a task's job and `wait` can poll one task without paging the log.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=0,
@@ -151,9 +157,10 @@ def _from_database(engine: Any, args: argparse.Namespace) -> TasksPayload:
     attempts -- and the count of what was left behind comes from `attempt_count`
     rather than from the rows, which are no longer all of them.
     """
-    total = queries.attempt_count(engine) if args.limit > 0 and not args.run else None
+    narrowed = bool(args.run or args.task)
+    total = queries.attempt_count(engine) if args.limit > 0 and not narrowed else None
     documents = task_log.documents_from_rows(
-        queries.leg_rows(engine, recent_tasks=args.limit, run_id=args.run)
+        queries.leg_rows(engine, recent_tasks=args.limit, run_id=args.run, task_id=args.task)
     )
     rows = task_history.join_documents(documents)
     if args.run:

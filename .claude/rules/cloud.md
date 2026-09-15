@@ -45,6 +45,14 @@ paths:
   A profile that never arrives explains itself only in the node log
   (`logs --task <id> | grep profile`). numba JIT frames are bare addresses;
   numpy's resolve.
+- **Waiting on a job is one command, not a poll loop.** `poker-solver wait
+  --task <id> --until started|finished|log` and `wait --run <id> --rung N`
+  block up to 540 s (one Bash call) and exit 1 with how far the target got.
+  For longer waits use the harness's Monitor tool with an until-loop over it:
+  `Monitor({command: "uv run poker-solver wait --task <id> --timeout 540",
+  until: "reached"})` — never `sleep N && tail`, which Bash refuses. Measured
+  across 56 sessions: 1,532 poll calls to `jobs`/`logs`/`tasks` and 35
+  refused sleep loops, each a turn spent asking what `wait` answers once.
 - **Never point `runs_dir` at the share.** Active runs live on the node's
   `/mnt/work` data disk and are *published* from there. The wrapper sets
   `POKER_SOLVER_CACHE=/mnt/work/cache` so the river's 2.6M boards are not
