@@ -433,11 +433,20 @@ wt-rm name:
         echo "just wt-rm: run this from the primary checkout, not a worktree" >&2; exit 1
     fi
     target="$primary/.claude/worktrees/{{name}}"
+    # Uncommitted work is not on the branch, so the merged check below cannot
+    # see it; refuse here, in words, rather than let `worktree remove` fatal.
+    if [ -n "$(git -C "$target" status --porcelain)" ]; then
+        echo "just wt-rm: $target has uncommitted changes -- commit or discard them first" >&2
+        exit 1
+    fi
     # A squash leaves the branch "unmerged" to `git branch -d` and to
-    # merge-base, so an empty diff against main is the only proof it landed.
-    if ! git diff --quiet main "wt-{{name}}" --; then
-        echo "just wt-rm: wt-{{name}} still differs from main -- merge it (squash) first:" >&2
-        git diff --stat main "wt-{{name}}" -- | tail -3 >&2
+    # merge-base, and `git diff main` goes stale the moment main moves again.
+    # The proof that survives both: merging the branch into main would change
+    # nothing, i.e. the merged tree IS main's tree.
+    if [ "$(git merge-tree --write-tree main "wt-{{name}}" 2>/dev/null | head -1)" \
+         != "$(git rev-parse 'main^{tree}')" ]; then
+        echo "just wt-rm: wt-{{name}} carries changes main does not -- merge it (squash) first:" >&2
+        git diff --stat "$(git merge-base main "wt-{{name}}")" "wt-{{name}}" -- | tail -3 >&2
         exit 1
     fi
     echo "==> git worktree remove $target"
