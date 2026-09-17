@@ -24,6 +24,11 @@ if TYPE_CHECKING:
 # twice on the way to failing.
 EVAL_METHODS = ("lbr", "exact_br", "resolver_match")
 
+# Above this the SB is refusing to play rather than playing badly, and no
+# exploitability reading about it means anything. `.claude/rules/
+# solver-and-evaluation.md` carries the same line for a human reader.
+SB_FOLD_REFUSES = 0.50
+
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags for `poker-solver evaluate`."""
@@ -413,6 +418,18 @@ def render(payload: services.EvaluationPayload) -> None:
         print(
             f"  vs folding:     {folding:.0f} mbb/g is fold-every-hand — "
             f"this {verdict} it by {abs(margin):.0f}"
+        )
+    # SHAPE beside the score. The gate ranked arms by exploitability alone and
+    # r(SB fold, exploitability) = -0.855 across every arm ever profiled: the
+    # best-scoring band folded 65-80% of the button where real heads-up folds
+    # 10-20%, and the arm that folds MORE wins on a number while losing the
+    # chip match 3.23σ. A scalar cannot separate a strategy from an abdication.
+    fold = results.get("sb_first_in_fold")
+    if fold is not None:
+        verdict = "NOT A CANDIDATE" if fold > SB_FOLD_REFUSES else "ok"
+        print(
+            f"  SB first in:    folds {fold:.1%} of the button "
+            f"(real heads-up folds 10-20%; >{SB_FOLD_REFUSES:.0%} {verdict})"
         )
     for seat in results.get("seat_values_mbb") or []:
         if "self_play_mbb" not in seat:

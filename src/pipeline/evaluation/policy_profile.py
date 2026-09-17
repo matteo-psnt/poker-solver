@@ -45,6 +45,27 @@ def profile_policy(
     }
 
 
+def sb_first_in_fold(
+    storage: StaticArrayStorage,
+    rules: GameRules,
+    action_model: ActionModel,
+    starting_stack: int,
+) -> float:
+    """Combo-weighted probability the SB folds its first decision of the hand.
+
+    A SHAPE measure, priced to be computed on every score rather than only under
+    `--policy-profile`: one node's matrix. A scalar exploitability cannot tell a
+    strategy from an abdication -- measured over the ten profiled arms,
+    r(this, exploitability) = -0.855, and the best-scoring arms folded 65-80%
+    of the button where real heads-up folds 10-20%.
+    """
+    root = rules.create_initial_state(
+        starting_stack=starting_stack, hole_cards=_DUMMY_HOLES, button=0
+    )
+    table = _node_table(storage, rules, action_model, "SB first in", root)
+    return float(table["combo_weighted_mix"].get("f", 0.0))
+
+
 def _street_profiles(storage: StaticArrayStorage) -> dict[str, dict[str, Any]]:
     tree = storage.tree
     rows_total: dict[Street, int] = dict.fromkeys(Street, 0)
@@ -217,4 +238,4 @@ def _combos_in_class(name: str) -> int:
     return 4 if name.endswith("s") else 12
 
 
-__all__ = ("profile_policy",)
+__all__ = ("profile_policy", "sb_first_in_fold")

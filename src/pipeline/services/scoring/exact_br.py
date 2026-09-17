@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig, compute_public_tree_br
-from src.pipeline.evaluation.policy_profile import profile_policy
+from src.pipeline.evaluation.policy_profile import profile_policy, sb_first_in_fold
 from src.pipeline.services.runs import checkpoint_iteration_of
 from src.pipeline.services.scoring._shared import EvaluationOutput, prepare_blueprint
 from src.shared.ports.record import RecordSource
@@ -81,6 +81,12 @@ def evaluate_run_exact_br(
     results: dict[str, Any] = {
         "exploitability_mbb": result.exploitability_mbb,
         "fold_everything_mbb": result.fold_everything_mbb,
+        # SHAPE, not score, and computed on every run because it is one node's
+        # matrix: measured across the ten profiled arms r(this, exploitability)
+        # = -0.855, so the gate rewarded folding and no scalar could show it.
+        "sb_first_in_fold": sb_first_in_fold(
+            storage, solver.rules, solver.action_model, metadata.config.game.starting_stack
+        ),
         "std_error_mbb": 0.0,
         "num_hands": 0,
         "seat_values_mbb": [

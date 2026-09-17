@@ -7,7 +7,13 @@ import math
 import numpy as np
 import pytest
 
-from src.pipeline.evaluation.policy_profile import profile_policy
+from src.core.game.actions import ActionType
+from src.engine.solver.infoset.index import preflop_hand_string_at
+from src.pipeline.evaluation.policy_profile import (
+    _DUMMY_HOLES,
+    profile_policy,
+    sb_first_in_fold,
+)
 from tests.test_helpers import build_trained_test_solver
 
 STACK = 400
@@ -104,3 +110,69 @@ def test_spread_separates_a_strategy_that_ignores_its_cards_from_one_that_does_n
     assert spread_of(differentiated) > 0.1
     # The blind spot this metric exists to cover: identical entropy, opposite meaning.
     assert entropy_of(identical) == pytest.approx(entropy_of(differentiated), abs=1e-12)
+
+
+def _root_matrix(solver, stack):
+    """The SB's first-decision rows, as a writable view, plus its fold column."""
+    root = solver.rules.create_initial_state(
+        starting_stack=stack, hole_cards=_DUMMY_HOLES, button=0
+    )
+    node_id = solver.storage.tree.node_id(root)
+    legal = solver.rules.get_legal_actions(root, solver.action_model)
+    fold_index = next(i for i, action in enumerate(legal) if action.type == ActionType.FOLD)
+    matrix = solver.storage.tree.node_action_matrix(solver.storage.strategy_sum, node_id)
+    return matrix, fold_index, len(legal)
+
+
+def test_sb_fold_separates_an_abdication_from_a_strategy(trained_solver):
+    """The failure this measure exists for, and exploitability cannot see it.
+
+    Measured 09-17: r(SB fold, exploitability) = -0.855 over every profiled arm.
+    The arm folding 91.8% of the button scored 3.45x BETTER than the one that
+    plays, then lost the chip match to it by 3.23 sigma.
+    """
+    matrix, fold_index, width = _root_matrix(trained_solver, STACK)
+    keep = matrix.copy()
+    try:
+        matrix[:] = 0.0
+        matrix[:, fold_index] = 1.0
+        folds = sb_first_in_fold(
+            trained_solver.storage, trained_solver.rules, trained_solver.action_model, STACK
+        )
+
+        matrix[:] = 0.0
+        matrix[:, (fold_index + 1) % width] = 1.0
+        plays = sb_first_in_fold(
+            trained_solver.storage, trained_solver.rules, trained_solver.action_model, STACK
+        )
+    finally:
+        matrix[:] = keep
+
+    assert folds == pytest.approx(1.0)
+    assert plays == pytest.approx(0.0)
+
+
+def test_sb_fold_is_combo_weighted_not_class_weighted(trained_solver):
+    """A pair is 6 combos and an offsuit 12, so the 169 classes cannot count equally.
+
+    Folding ONLY the 13 pairs is 78 of 1,326 combos = 5.88%, where counting
+    classes would read 13/169 = 7.69%.
+    """
+    matrix, fold_index, width = _root_matrix(trained_solver, STACK)
+    keep = matrix.copy()
+    try:
+        matrix[:] = 0.0
+        matrix[:, (fold_index + 1) % width] = 1.0
+        for index in range(matrix.shape[0]):
+            name = preflop_hand_string_at(index)
+            if len(name) == 2:  # a pair
+                matrix[index] = 0.0
+                matrix[index, fold_index] = 1.0
+        measured = sb_first_in_fold(
+            trained_solver.storage, trained_solver.rules, trained_solver.action_model, STACK
+        )
+    finally:
+        matrix[:] = keep
+
+    assert measured == pytest.approx(78 / 1326, abs=1e-9)
+    assert measured != pytest.approx(13 / 169, abs=1e-4)
