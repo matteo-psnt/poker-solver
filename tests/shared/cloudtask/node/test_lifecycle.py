@@ -132,10 +132,8 @@ class TestMain:
         evaluate task had fetched cost ~30 minutes per task.
 
         An eval's SCORE goes to Postgres, not to a file the exit publish
-        carries -- `record_evaluation` writes the sink, and the one remaining
-        `evals/*.json` writer (`record_blueprint_match`, whose pairwise payload
-        has no column in a single-`run_id` table) has no command surface, so no
-        node task produces one."""
+        carries: `record_evaluation` writes the sink and nothing writes
+        `evals/*.json` at all any more, so no node task produces one."""
         monkeypatch.setenv("RUN_OP", str(TaskName.EVALUATE))
         monkeypatch.setenv("RUN_ID", "run-scored")
         monkeypatch.setenv("POKER_SOLVER_CHECKPOINT_SAS", SAS)

@@ -177,6 +177,8 @@ class TestDispatchResolvesTheFragmentToo:
                 run="15261",
                 method="exact_br",
                 at="",
+                vs=None,
+                vs_at="",
                 timeout=0,
                 pool="train",
                 flags=[],

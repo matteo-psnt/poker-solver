@@ -6,16 +6,15 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.blueprint.construction import build_static_evaluation_solver
-from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.estimators.resolver_match import play_resolver_match
 from src.pipeline.services.runs import checkpoint_iteration_of, load_run_metadata
 from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
+    build_blueprint_for,
     effective_abstraction_hash,
     load_blueprint,
 )
-from src.pipeline.training.run_tracker import RunMetadata
 from src.shared.ports.record import RecordSource
 
 logger = logging.getLogger(__name__)
@@ -163,12 +162,18 @@ def evaluate_blueprint_match(
     *,
     num_deals: int = 2000,
     seed: int = 1,
+    at_a: int | None = None,
+    at_b: int | None = None,
     record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head match between two runs' blueprints on duplicate deals.
 
     Positive ``a_mbb_per_hand`` means run A's blueprint wins chips off run B's.
     Each blueprint is pinned to the card abstraction its run trained against.
+
+    Both rungs are addressable because two arms are only comparable at matched
+    TRAINING BUDGET: without ``at_b`` an arm that happened to be continued
+    further plays its whole extra ladder, which is a different arm.
 
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
@@ -182,16 +187,24 @@ def evaluate_blueprint_match(
             f"{metadata_b.config.game}); a chip match would be meaningless."
         )
 
-    solver_a, storage_a, _ = build_static_evaluation_solver(
-        metadata_a.config,
-        checkpoint_dir=run_dir_a,
-        abstraction_hash=metadata_a.card_abstraction_hash,
+    # `play_only`: a match never reads regrets, and two blueprints are resident
+    # at once here where every other estimator holds one.
+    solver_a, storage_a, _ = build_blueprint_for(
+        run_dir_a,
+        metadata_a,
+        effective_abstraction_hash(run_dir_a, metadata_a, None),
+        at_a,
+        play_only=True,
     )
-    solver_b, storage_b, _ = build_static_evaluation_solver(
-        metadata_b.config,
-        checkpoint_dir=run_dir_b,
-        abstraction_hash=metadata_b.card_abstraction_hash,
+    solver_b, storage_b, _ = build_blueprint_for(
+        run_dir_b,
+        metadata_b,
+        effective_abstraction_hash(run_dir_b, metadata_b, None),
+        at_b,
+        play_only=True,
     )
+    rung_a = at_a if at_a is not None else checkpoint_iteration_of(run_dir_a)
+    rung_b = at_b if at_b is not None else checkpoint_iteration_of(run_dir_b)
     result = play_blueprint_match(solver_a, solver_b, num_deals=num_deals, seed=seed)
     results = {
         "run_a": metadata_a.run_id,
@@ -205,66 +218,19 @@ def evaluate_blueprint_match(
         "infosets_a": storage_a.num_infosets(),
         "infosets_b": storage_b.num_infosets(),
         "seed": seed,
+        # Everything about B. The row is filed under A, so the record's own
+        # columns describe one half of a pairwise measurement; a chip edge is
+        # uninterpretable later without which rung, which abstraction and which
+        # betting tree the other half brought.
+        "rung_b": rung_b,
+        "card_abstraction_hash_b": metadata_b.card_abstraction_hash,
+        "action_config_hash_b": metadata_b.action_config_hash,
+        "config_name_b": metadata_b.config_name,
+        "git_commit_b": metadata_b.git_commit,
         "pair_samples_mbb": result.pair_samples_mbb,
     }
     return EvaluationOutput(
         infosets=storage_a.num_infosets(),
         results=results,
-        checkpoint_iteration=checkpoint_iteration_of(run_dir_a),
+        checkpoint_iteration=rung_a,
     )
-
-
-def record_blueprint_match(
-    run_dir_a: Path,
-    run_dir_b: Path,
-    *,
-    num_deals: int = 2000,
-    seed: int = 1,
-    record_source: RecordSource | None = None,
-) -> dict[str, Any]:
-    """Run a head-to-head match and persist a durable, self-describing payload.
-
-    A blueprint match is inherently PAIRWISE, so it does not fit the single-run eval
-    ledger (``evaluate_and_record``). The full result is written non-clobbering
-    under run A's ``evals/`` with BOTH runs' provenance embedded -- the
-    card-abstraction hashes especially, since a chip edge is uninterpretable later
-    without recording which two abstractions were compared.
-
-    The payload IS the durable record; there is no ledger row to keep in step with
-    it. Writing is best-effort and never fails the match.
-    """
-    metadata_a = load_run_metadata(run_dir_a, record_source)
-    metadata_b = load_run_metadata(run_dir_b, record_source)
-    out = evaluate_blueprint_match(
-        run_dir_a, run_dir_b, num_deals=num_deals, seed=seed, record_source=record_source
-    )
-
-    def _provenance(meta: RunMetadata) -> dict[str, Any]:
-        return {
-            "run_id": meta.run_id,
-            "git_commit": meta.git_commit,
-            "git_dirty": meta.git_dirty,
-            "config_name": meta.config_name,
-            "card_abstraction_hash": meta.card_abstraction_hash,
-            "action_config_hash": meta.action_config_hash,
-        }
-
-    payload: dict[str, Any] = {
-        "op": "blueprint_match",
-        "run_a": metadata_a.run_id,
-        "run_b": metadata_b.run_id,
-        "estimator": BLUEPRINT_MATCH_ESTIMATOR_LABEL,
-        "provenance_a": _provenance(metadata_a),
-        "provenance_b": _provenance(metadata_b),
-        "checkpoint_iteration_a": checkpoint_iteration_of(run_dir_a),
-        "checkpoint_iteration_b": checkpoint_iteration_of(run_dir_b),
-        "infosets": out.infosets,
-        "results": out.results,
-    }
-    knobs = {"run_b": metadata_b.run_id, "num_deals": num_deals, "base_seed": seed}
-    try:
-        result_path = eval_ledger.write_eval(run_dir_a, payload, eval_ledger.eval_slug(knobs))
-        payload["result_path"] = str(result_path)
-    except OSError as exc:  # recording is a research convenience; never fail the match
-        logger.warning("Blueprint-match payload not written: %s", exc)
-    return payload

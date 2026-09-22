@@ -19,7 +19,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", default=None, help="Filter to a single run id.")
     parser.add_argument("--experiment", default=None, help="Filter to one experiment id.")
     parser.add_argument(
-        "--method", default=None, choices=["lbr", "exact_br"], help="Filter by method."
+        "--method",
+        default=None,
+        choices=["lbr", "exact_br", "resolver_match", "blueprint_match"],
+        help="Filter by method. The two match estimators report a signed chip EDGE in "
+        "mbb/hand, not an exploitability in mbb/g -- they are different units and "
+        "only one of them can be won by folding.",
     )
     parser.add_argument(
         "--since", default=None, metavar="ISO8601", help="Only rows at or after this timestamp."
@@ -91,6 +96,22 @@ def _fmt_commit(commit: str | None, dirty: bool | None) -> str:
     return short
 
 
+def _score(results: dict) -> str:
+    """The row's number: an exploitability, or a signed chip edge.
+
+    A match carries no `exploitability_mbb` -- it is not a bound -- so a
+    renderer that reached only for that key printed an em dash where the
+    head-to-head result was.
+    """
+    mbb, se = results.get("exploitability_mbb"), results.get("std_error_mbb")
+    if isinstance(mbb, (int, float)) and se is not None:
+        return f"{mbb:.1f}±{se:.1f}"
+    edge, edge_se = results.get("edge_mbb_per_hand"), results.get("edge_se_mbb")
+    if isinstance(edge, (int, float)) and edge_se is not None:
+        return f"{edge:+.1f}±{edge_se:.0f}"
+    return "—"
+
+
 def render(payload: LedgerPayload) -> None:
     rows = payload.rows
     if not rows:
@@ -103,14 +124,13 @@ def render(payload: LedgerPayload) -> None:
         else f"{len(rows)} of {matched} row(s) (--limit 0 for all)"
     )
     print(f"Recorded evaluations: {shown}")
-    header = f"{'run_id':<44} {'at':>12} {'commit':<9} {'mbb/g':>12}  tier"
+    header = f"{'run_id':<44} {'at':>12} {'commit':<9} {'score':>12}  tier"
     print(header)
+    print("  score: exploitability in mbb/g, or a SIGNED chip edge in mbb/hand (+ = this run)")
     print("-" * len(header))
     for r in rows:
         res = r.results
-        mbb = res.get("exploitability_mbb")
-        se = res.get("std_error_mbb")
-        score = f"{mbb:.1f}±{se:.1f}" if isinstance(mbb, (int, float)) and se is not None else "—"
+        score = _score(res)
         at = getattr(r, "checkpoint_iteration", None)
         # The TIER, not three of its knobs: an exact_br row carries no
         # scorer/opponent/seed, so 4/2/2-annulled and 4/16/16-conditional rows

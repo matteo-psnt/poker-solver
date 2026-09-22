@@ -49,6 +49,11 @@ CONDITIONAL_TIER_KNOBS = (
     "mix_run",
     "mix_at",
     "mix_weight",
+    # blueprint_match: WHO was played, and at which rung. A chip edge is a
+    # statement about one pairing, and head-to-head results are intransitive,
+    # so two edges over different opponents are not two readings of one thing.
+    "run_b",
+    "rung_b",
     # Resolver knobs. These decide what the resolver PLAYS, so two rows across
     # any of them measure different strategies -- `policy_blend_alpha` most of
     # all (alpha=0 scored +2140 where the shipped alpha scored -781.6). Both
@@ -229,6 +234,23 @@ def build_resolver_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         # How much of the resolver's answer is actually PLAYED. The largest
         # single lever on this number, and it was absent from the tier.
         "resolver_blend_alpha": results.get("resolver_blend_alpha"),
+    }
+
+
+def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
+    """Canonical blueprint-match knob tier, read back off the RESULTS.
+
+    The OPPONENT is the instrument here: a chip edge over one arm says nothing
+    about the edge over another, so `run_b` and the rung of it that played are
+    tier knobs, not annotations. Head-to-head results are also intransitive,
+    which is exactly why pairing two rows measured against different opponents
+    has to be refused rather than averaged.
+    """
+    return {
+        "run_b": results["run_b"],
+        "rung_b": results.get("rung_b"),
+        "num_deals": results["num_deals"],
+        "base_seed": results["seed"],
     }
 
 

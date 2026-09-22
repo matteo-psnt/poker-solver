@@ -3194,6 +3194,28 @@
               }
             ],
             "title": "Timeout"
+          },
+          "vs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs"
+          },
+          "vs_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vs At"
           }
         },
         "required": [

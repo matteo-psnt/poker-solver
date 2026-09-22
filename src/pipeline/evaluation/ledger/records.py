@@ -220,32 +220,14 @@ def ledger_row(document: dict[str, Any]) -> dict[str, Any]:
         "std_error_mbb": results.get("std_error_mbb"),
         "num_hands": results.get("num_hands"),
         "n": len(samples),
+        # The two estimators that measure a CHIP EDGE rather than a distance
+        # from equilibrium. Without these the index row for a match or a
+        # resolver gate carried no number at all, and `ledger` rendered the
+        # result of the gate the rules make gate #1 as an em dash.
+        "edge_mbb_per_hand": results.get("a_mbb_per_hand", results.get("resolver_mbb_per_hand")),
+        "edge_se_mbb": results.get("se_mbb"),
     }
     return row
-
-
-def write_eval(run_dir: Path, document: dict[str, Any], slug: str) -> Path:
-    """Write one evaluation to ``evals/<slug>.json``. Never overwrites.
-
-    THE LAST FILE WRITER, and it has exactly one caller: `record_blueprint_match`.
-    A blueprint match is PAIRWISE and `evals` has a single `run_id` foreign key,
-    so its payload -- which carries BOTH runs' abstraction hashes, the only thing
-    that makes a cross-depth chip edge interpretable -- has nowhere to go in that
-    table. Deleting this with the rest of the JSON would not migrate that data,
-    it would discard it.
-
-    Wiring matches to a sink needs a schema that admits two runs; until then this
-    stays, and `record_evaluation` no longer calls it.
-
-    The slug is timestamp + knob hash + random suffix, so re-evaluating a run
-    under the same settings cannot clobber a prior result and concurrent writers
-    on several boxes cannot collide.
-    """
-    evals_dir = run_dir / "evals"
-    evals_dir.mkdir(parents=True, exist_ok=True)
-    path = evals_dir / f"{slug}.json"
-    record_store.write_snapshot(path, document, record_store.REGISTRY["evals/*.json"])
-    return path
 
 
 def record_instant(record: dict[str, Any]) -> datetime:

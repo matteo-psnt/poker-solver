@@ -14,6 +14,7 @@ from datetime import UTC
 from pathlib import Path
 
 from src.pipeline.evaluation import ledger
+from tests.test_helpers import seed_eval_document
 
 
 def _provenance(run_id="run-a"):
@@ -46,10 +47,10 @@ def _record_one(run_dir: Path, index: int):
             "pair_samples_mbb": [1.0, 2.0],
         },
     }
-    # BUILD, then WRITE. `record_evaluation` no longer writes anything, but
-    # every rule below -- unique naming, rebuild-by-glob, payload resolution --
-    # is about the FILE LAYOUT, which still governs the pre-flip corpus and the
-    # blueprint-match payloads `write_eval` goes on producing.
+    # BUILD, then lay the document down as the pre-sink corpus. Nothing writes
+    # this layout any more, but every rule below -- unique naming,
+    # rebuild-by-glob, payload resolution -- is about the FILE LAYOUT, which is
+    # what `rebuild_ledger` still reads for the 2,238 historical documents.
     eval_id, document = ledger.record_evaluation(
         run_dir=run_dir,
         payload=payload,
@@ -58,7 +59,7 @@ def _record_one(run_dir: Path, index: int):
         estimator="lbr",
         knobs=knobs,
     )
-    return ledger.write_eval(run_dir, document, eval_id), document
+    return seed_eval_document(run_dir, document, eval_id), document
 
 
 class TestUniqueNaming:

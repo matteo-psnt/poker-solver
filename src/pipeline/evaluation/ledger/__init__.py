@@ -21,11 +21,11 @@ from src.pipeline.evaluation.ledger.records import (
     payload_pointer,
     record_evaluation,
     record_instant,
-    write_eval,
 )
 from src.pipeline.evaluation.ledger.tiers import (
     CONDITIONAL_TIER_KNOBS,
     TIER_KNOBS,
+    build_blueprint_match_knobs,
     build_exact_br_knobs_from_params,
     build_lbr_knobs,
     build_lbr_knobs_from_params,
@@ -40,6 +40,7 @@ __all__ = (
     "LEDGER_SCHEMA_VERSION",
     "TIER_KNOBS",
     "RunProvenance",
+    "build_blueprint_match_knobs",
     "build_exact_br_knobs_from_params",
     "build_lbr_knobs",
     "build_lbr_knobs_from_params",
@@ -59,5 +60,4 @@ __all__ = (
     "tier_key",
     "tier_label",
     "tier_mismatches",
-    "write_eval",
 )

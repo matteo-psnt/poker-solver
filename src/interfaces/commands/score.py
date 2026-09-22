@@ -19,7 +19,7 @@ from typing import Literal
 from pydantic import Field
 
 from src.interfaces.cloud.tasks import dispatch, spec
-from src.interfaces.commands._base import Command
+from src.interfaces.commands._base import Command, CommandError
 from src.interfaces.commands.evaluate import EVAL_METHODS
 from src.shared.cloudtask.kinds import TaskName
 
@@ -41,6 +41,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Comma-separated ladder rungs to score (empty = the latest checkpoint). "
         "Each rung becomes its own task.",
+    )
+    parser.add_argument(
+        "--vs",
+        default=None,
+        help="[blueprint_match] The OTHER arm, as a published run id or a fragment of "
+        "one. Resolved and verified HERE, like --run: the node has no fragment matcher "
+        "and finds out only after a snapshot upload and three retries.",
+    )
+    parser.add_argument(
+        "--vs-at",
+        default="",
+        help="[blueprint_match] Rung of --vs to play (empty = its latest checkpoint). "
+        "One rung, not a list: the ladder --at fans over is run A's.",
     )
     parser.add_argument(
         "--timeout",
@@ -82,6 +95,28 @@ def _rungs(raw: str) -> list[str]:
     return parsed or [""]
 
 
+def _opponent_flags(method: str, vs: str | None, vs_at: str) -> tuple[str, ...]:
+    """`--vs`/`--vs-at` as the flags the node's `evaluate` takes.
+
+    Resolved and verified on THIS side for the same reason `--run` is: a
+    fragment or a pruned rung fails on the node after a snapshot upload, a
+    ~3-minute pool spin-up and three task retries.
+    """
+    from src.interfaces.cloud.store.workspace import (  # noqa: PLC0415 -- Azure SDK off `--help`
+        resolve_published_run,
+        verify_published_rungs,
+    )
+
+    if method == "blueprint_match" and not vs:
+        raise CommandError("`--method blueprint_match` needs an opponent: pass `--vs <run>`.")
+    if not vs:
+        return ()
+    vs_id = resolve_published_run(vs)
+    rung = _rungs(vs_at)[0]
+    verify_published_rungs(vs_id, [rung])
+    return ("--vs-run", vs_id) + (("--vs-at", rung) if rung else ())
+
+
 def _passthrough(flags: list[str]) -> tuple[str, ...]:
     """Drop the `--` separator argparse leaves at the head of REMAINDER.
 
@@ -119,6 +154,7 @@ def run(args: argparse.Namespace) -> ScorePayload:
     # Same rule, one step further: a rung the manifest advertises may have been
     # pruned off the share, and the node only finds out after `uv sync`.
     verify_published_rungs(run_id, rungs)
+    opponent = _opponent_flags(args.method, args.vs, args.vs_at)
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
             spec.TaskSpec(
@@ -127,7 +163,7 @@ def run(args: argparse.Namespace) -> ScorePayload:
                 run_id=run_id,
                 eval_method=args.method,
                 eval_at=rung,
-                eval_flags=_passthrough(args.flags),
+                eval_flags=opponent + _passthrough(args.flags),
                 timeout=args.timeout,
             )
             for rung in rungs

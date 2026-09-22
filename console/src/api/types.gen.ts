@@ -1907,6 +1907,10 @@ export interface components {
             run: string;
             /** Timeout */
             timeout?: string | null;
+            /** Vs */
+            vs?: string | null;
+            /** Vs At */
+            vs_at?: string | null;
         };
         /**
          * ScorePayload

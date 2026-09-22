@@ -43,7 +43,6 @@ from src.pipeline.services.scoring import (
     EvaluationOutput,
     EvaluationPayload,
     evaluate_and_record,
-    record_blueprint_match,
 )
 from src.pipeline.services.static_training import StaticTrainingOutput, train_static
 from src.pipeline.training.run_tracker import ExperimentTag
@@ -68,7 +67,6 @@ __all__ = [
     "list_runs",
     "load_run_metadata",
     "precompute_abstraction",
-    "record_blueprint_match",
     "run_digest",
     "train_pcs",
     "train_static",

@@ -172,6 +172,22 @@ def seed_ledger(path: Any, *rows: dict[str, Any]) -> None:
         record_store.append_log(path, row, record_store.REGISTRY["eval_ledger.jsonl"])
 
 
+def seed_eval_document(run_dir: Any, document: dict[str, Any], slug: str) -> Any:
+    """Write one ``evals/<slug>.json`` the way the pre-sink corpus was written.
+
+    Nothing writes that layout any more -- `record_evaluation` hands the sink a
+    document and the last file writer is gone -- but `rebuild_ledger` still
+    READS it, and 2,238 historical documents are what it reads. A reader whose
+    only corpus came from a writer that no longer exists needs the corpus laid
+    down here instead.
+    """
+    evals_dir = Path(run_dir) / "evals"
+    evals_dir.mkdir(parents=True, exist_ok=True)
+    path = evals_dir / f"{slug}.json"
+    record_store.write_snapshot(path, document, record_store.REGISTRY["evals/*.json"])
+    return path
+
+
 def example_of[M: BaseModel](model: type[M], **overrides: Any) -> M:
     """An instance of a payload model, built from its own field declarations.
 

@@ -120,7 +120,7 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
     rungs = _fetch_rungs(plan, paths, log)
     if rungs is None:
         return 1, None
-    if not _fetch_mix_run(plan, paths, log):
+    if not _fetch_partner_runs(plan, paths, log):
         return 1, None
     # Same boot-order trap as training: evaluation resolves the abstraction the
     # checkpoint is PINNED to, so a node that predates that abstraction cannot
@@ -209,34 +209,37 @@ def _fetch_rungs(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> list[str]
     return fetched
 
 
-def _fetch_mix_run(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
-    """Pull down the OTHER run a `--mix-run` evaluation blends in.
+def _fetch_partner_runs(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bool:
+    """Pull down the OTHER run an evaluation reads: a mixture, or an opponent.
 
-    Rung fetching is per-run and this one is a different run entirely, so
-    without it the mixture dies in the loader the same way a windowed average
-    did before its support rungs were fetched.
+    Rung fetching is per-run and these are different runs entirely, so without
+    it the eval dies in the loader the same way a windowed average did before
+    its support rungs were fetched.
     """
     options = dict(itertools.pairwise(plan.eval_flags))
-    other = options.get("--mix-run")
-    if not other:
-        return True
-    if not archive.is_published(other, plan.checkpoint_sas):
-        log(f"FATAL --mix-run names no published run: {other}")
-        return False
-    wanted = [options["--mix-at"]] if "--mix-at" in options else []
-    destination = paths.runs / other
-    if wanted:
-        fetched = archive.fetch_for_evaluation(other, destination, wanted, plan.checkpoint_sas, log)
-    else:
-        fetched = (
-            ["current"]
-            if archive.fetch_current_rung(other, destination, plan.checkpoint_sas, log)
-            else []
-        )
-    if not fetched:
-        log(f"FATAL could not fetch the mixture partner {other}")
-        return False
-    log(f"mixing in {other} at rung {wanted[0] if wanted else 'current'}")
+    for flag, at_flag in (("--mix-run", "--mix-at"), ("--vs-run", "--vs-at")):
+        other = options.get(flag)
+        if not other:
+            continue
+        if not archive.is_published(other, plan.checkpoint_sas):
+            log(f"FATAL {flag} names no published run: {other}")
+            return False
+        wanted = [options[at_flag]] if at_flag in options else []
+        destination = paths.runs / other
+        if wanted:
+            fetched = archive.fetch_for_evaluation(
+                other, destination, wanted, plan.checkpoint_sas, log
+            )
+        else:
+            fetched = (
+                ["current"]
+                if archive.fetch_current_rung(other, destination, plan.checkpoint_sas, log)
+                else []
+            )
+        if not fetched:
+            log(f"FATAL could not fetch {flag} partner {other}")
+            return False
+        log(f"{flag} {other} at rung {wanted[0] if wanted else 'current'}")
     return True
 
 

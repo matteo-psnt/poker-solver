@@ -36,7 +36,6 @@ from src.pipeline.services.scoring.matches import (
     RESOLVER_GATE_ESTIMATOR_LABEL,
     evaluate_blueprint_match,
     evaluate_run_resolver_gate,
-    record_blueprint_match,
 )
 from src.shared import records
 
@@ -90,6 +89,11 @@ def evaluate_and_record(
     resolver_blend_alpha: float | None = None,
     resolver_leaf_rollouts: int | None = None,
     resolver_allin_runouts: int = 1,
+    # blueprint_match: the OTHER arm, and which rung of it plays.
+    vs_run_dir: Path | None = None,
+    vs_at: int | None = None,
+    match_deals: int = 2000,
+    match_seed: int = 1,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
@@ -166,6 +170,24 @@ def evaluate_and_record(
         )
         estimator = RESOLVER_GATE_ESTIMATOR_LABEL
         knobs = eval_ledger.build_resolver_match_knobs(out.results)
+    elif method == "blueprint_match":
+        # The only PAIRWISE estimator, and the only gate folding cannot win.
+        # It records like every other one: the row is filed under A and carries
+        # B's identity in `results`, so a chip edge lands in the same place the
+        # exploitability of the same checkpoint does.
+        if vs_run_dir is None:
+            raise ValueError("blueprint_match needs an opponent: pass --vs-run.")
+        out = evaluate_blueprint_match(
+            run_dir,
+            vs_run_dir,
+            num_deals=match_deals,
+            seed=match_seed,
+            at_a=at_iteration,
+            at_b=vs_at,
+            record_source=record_source,
+        )
+        estimator = BLUEPRINT_MATCH_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_blueprint_match_knobs(out.results)
     else:  # "lbr" (default, trustworthy)
         config = lbr or LBRConfig()
         out = evaluate_run_lbr(
@@ -240,5 +262,4 @@ __all__ = (
     "evaluate_run_exact_br",
     "evaluate_run_lbr",
     "evaluate_run_resolver_gate",
-    "record_blueprint_match",
 )

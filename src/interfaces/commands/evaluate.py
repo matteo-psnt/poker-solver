@@ -22,12 +22,17 @@ if TYPE_CHECKING:
 # repeating it: a value the submitter accepts but `evaluate` rejects is not
 # caught until the node has already been allocated, and the task then retries
 # twice on the way to failing.
-EVAL_METHODS = ("lbr", "exact_br", "resolver_match")
+EVAL_METHODS = ("lbr", "exact_br", "resolver_match", "blueprint_match")
 
 # Above this the SB is refusing to play rather than playing badly, and no
 # exploitability reading about it means anything. `.claude/rules/
 # solver-and-evaluation.md` carries the same line for a human reader.
 SB_FOLD_REFUSES = 0.50
+
+# `--deals` serves two estimators whose variance is nothing alike, so neither
+# default can be argparse's.
+RESOLVER_GATE_DEALS = 1000
+MATCH_DEALS = 2000
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -51,14 +56,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="lbr = Local Best Response (trustworthy, default); exact_br = deterministic "
         "exact BR on a sampled public tree (zero eval variance; compare within a "
         "matched board tier); resolver_match = duplicate-deal chip edge of "
-        "blueprint+resolver over the bare blueprint (NOT an exploitability bound).",
+        "blueprint+resolver over the bare blueprint (NOT an exploitability bound); "
+        "blueprint_match = duplicate-deal chip edge over ANOTHER run (--vs-run), the "
+        "one gate folding cannot win.",
     )
     # resolver_match options (--method resolver_match).
     parser.add_argument(
         "--deals",
         type=int,
-        default=1000,
-        help="[resolver_match] Duplicate deals (each played twice, seats swapped).",
+        default=None,
+        help="[resolver_match, blueprint_match] Duplicate deals (each played twice, "
+        "seats swapped). Defaults differ because the estimators do: 1,000 for the "
+        "resolver gate, whose two sides differ only where the resolver fires, and "
+        "2,000 for a match of two different blueprints, which disagree far more often.",
     )
     parser.add_argument(
         "--leaf-continuation",
@@ -113,6 +123,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "instead of the single dealt one. SAME expectation, less variance -- and "
         "exact (enumerated, zero variance) when few enough cards remain. 1 = the "
         "shipped single-board behaviour.",
+    )
+    # blueprint_match options (--method blueprint_match).
+    parser.add_argument(
+        "--vs-run",
+        default=None,
+        help="[blueprint_match] The OTHER arm, as a published run id. The chip edge "
+        "is reported for --run over this one.",
+    )
+    parser.add_argument(
+        "--vs-at",
+        type=int,
+        default=None,
+        help="[blueprint_match] Rung of --vs-run to play (default: its published "
+        "checkpoint). Two arms are only comparable at a matched training budget, so "
+        "pass this whenever one of them was continued further than the other.",
     )
     # LBR options (--method lbr).
     parser.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
@@ -350,7 +375,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
             mix_weight=args.mix_weight,
         ),
         resolver_iterations=args.resolver_iterations,
-        resolver_gate_deals=args.deals,
+        resolver_gate_deals=args.deals if args.deals is not None else RESOLVER_GATE_DEALS,
         resolver_gate_workers=args.workers,
         # `--seed` means "random" for lbr and "these deals" for the gate, so the
         # gate keeps its deterministic default rather than inheriting None.
@@ -361,6 +386,10 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         leaf_continuation_fraction=args.leaf_continuation,
         resolver_max_iterations=args.resolver_max_iterations,
         resolver_allin_runouts=args.resolver_allin_runouts,
+        vs_run_dir=resolve_run_dir(args.vs_run, args.runs_dir) if args.vs_run else None,
+        vs_at=args.vs_at,
+        match_deals=args.deals if args.deals is not None else MATCH_DEALS,
+        match_seed=args.seed if args.seed is not None else 1,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
@@ -383,6 +412,20 @@ def render(payload: services.EvaluationPayload) -> None:
     # gate reports a chip edge and carries no `exploitability_mbb` at all; a
     # renderer that reached for the key would die on it, which is exactly how
     # `checkpoint-profile` once died borrowing this function.
+    if payload.method == "blueprint_match":
+        edge, se = results["a_mbb_per_hand"], results["se_mbb"]
+        sigma = abs(edge) / se if se else 0.0
+        winner = payload.run_id if edge > 0 else results["run_b"]
+        rung_b = results.get("rung_b")
+        print(f"  vs:            {results['run_b']} @ {rung_b if rung_b else 'latest'}")
+        print(f"  Edge (A over B): {edge:+.2f} mbb/hand (± {se:.2f})  {sigma:.1f}σ")
+        print(
+            f"  Deals:         {results['num_deals']:,} duplicate ({results['num_hands']:,} hands)"
+        )
+        # Two mediocre strategies can be far apart head-to-head and level on
+        # exploitability, which is the whole reason this estimator exists.
+        print(f"  Reading:       {'inconclusive' if sigma < 2 else f'{winner} wins'}")
+        return
     if payload.method == "resolver_match":
         # `confidence_95_mbb` is an INTERVAL (lower, upper), not a half-width --
         # printing it as a scalar is a TypeError, which is how this line first

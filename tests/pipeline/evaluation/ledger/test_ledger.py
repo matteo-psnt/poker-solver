@@ -12,7 +12,7 @@ from src.pipeline.evaluation.ledger import records as eval_records
 from src.pipeline.evaluation.ledger import records as ledger_records
 from src.shared import gitinfo
 from src.shared.cloudtask import task_log
-from tests.test_helpers import seed_ledger
+from tests.test_helpers import seed_eval_document, seed_ledger
 
 
 def _fake_provenance(run_id="run-x"):
@@ -82,20 +82,6 @@ class TestKnobs:
 
 
 class TestWriteAndAppend:
-    def test_write_eval_never_clobbers(self, tmp_path):
-        knobs = {"scorer": "myopic", "base_seed": 7}
-        p1 = ledger.write_eval(tmp_path, {"op": "evaluate", "n": 1}, ledger.eval_slug(knobs))
-        p2 = ledger.write_eval(tmp_path, {"op": "evaluate", "n": 2}, ledger.eval_slug(knobs))
-        assert p1 != p2
-        assert p1.exists()
-        assert p2.exists()
-
-    def test_one_file_per_eval(self, tmp_path):
-        """Was three shapes: a payload, a record summarising it, and a ledger row."""
-        knobs = {"scorer": "myopic", "base_seed": 7}
-        ledger.write_eval(tmp_path, {"op": "evaluate"}, ledger.eval_slug(knobs))
-        assert len(list((tmp_path / "evals").glob("*.json"))) == 1
-
     def test_the_ledger_row_is_derived_from_the_document(self, tmp_path):
         """Derivability is what makes `ledger --rebuild` able to regenerate."""
         document = {
@@ -137,7 +123,7 @@ class TestWriteAndAppend:
     def test_the_document_carries_provenance_and_full_results(self, tmp_path):
         results = _results()
         knobs = ledger.build_lbr_knobs(_lbr_config(), results)
-        payload_path = ledger.write_eval(tmp_path, {"results": results}, ledger.eval_slug(knobs))
+        payload_path = seed_eval_document(tmp_path, {"results": results}, ledger.eval_slug(knobs))
         record = ledger.build_record(
             provenance=_fake_provenance("run-x"),
             method="lbr",
@@ -364,7 +350,7 @@ class TestRebuildSkipsLegacyShapes:
             "result_path": f"{run_id}/evals/{slug}.json",
             **overrides,
         }
-        ledger.write_eval(run_dir, document, slug)
+        seed_eval_document(run_dir, document, slug)
         return run_dir / "evals"
 
     def test_a_document_beside_its_legacy_halves_is_indexed_once(self, tmp_path):

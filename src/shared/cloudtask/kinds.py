@@ -539,10 +539,9 @@ class EvaluateTask(TaskKind):
     metadata, and the rungs this task fetched are already in the container,
     which makes the rung pass a HEAD each rather than an upload.
 
-    ``evals/*.json`` is no longer written by a node: `record_evaluation` writes
-    the sink, and the one remaining file writer (`record_blueprint_match`, whose
-    pairwise payload has no column in a single-``run_id`` table) has no command
-    surface for a task to reach."""
+    ``evals/*.json`` is not written at all any more: `record_evaluation` writes
+    the sink, and a head-to-head match -- the last pairwise payload -- files its
+    row under run A and carries B's identity in ``results``."""
     publishes_run = True
     unit = "board branches"
     progress_file = "evaluate-progress.json"

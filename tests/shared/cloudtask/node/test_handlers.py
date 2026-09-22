@@ -171,6 +171,30 @@ class TestEvaluateFetch:
         assert handlers._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-b" / "static-800.ckpt.zst").exists()
 
+    def test_a_match_fetches_its_opponent_at_the_rung_asked_for(
+        self, paths, log, monkeypatch, container
+    ):
+        """A head-to-head is the only PAIRWISE estimator, so the node has to pull
+        down a second run the way a mixture does -- and at the rung named, since
+        two arms are only comparable at a matched training budget."""
+        self._published(container)
+        self._published(container, run="run-b", rung="static-800")
+        container["run-b/STATIC_CHECKPOINT.json"] = (
+            b'{"zarr": "static-800.zarr", "iteration": 800, "retained": []}'
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("2000",),
+            eval_method="blueprint_match",
+            eval_flags=("--vs-run", "run-b", "--vs-at", "800"),
+            checkpoint_sas=SAS,
+        )
+
+        assert handlers._evaluate(task, paths, log) == (0, None)
+        assert (paths.runs / "run-b" / "static-800.ckpt.zst").exists()
+
     def test_a_mixture_naming_no_such_run_is_fatal(self, paths, log, monkeypatch, container):
         self._published(container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
