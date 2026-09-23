@@ -54,6 +54,12 @@ CONDITIONAL_TIER_KNOBS = (
     # so two edges over different opponents are not two readings of one thing.
     "run_b",
     "rung_b",
+    # How many deals the estimate rests on. Both match builders have always put
+    # this in `knobs` and `tier_key` never read it, so a 2,000-deal probe and a
+    # 20,000-deal run of the SAME pairing hashed to one tier -- measured 09-21,
+    # digest 182b114e for both -- and every reader here pools UNWEIGHTED, which
+    # averages a +-153 mbb row into +-49 ones as though they were equals.
+    "num_deals",
     # Resolver knobs. These decide what the resolver PLAYS, so two rows across
     # any of them measure different strategies -- `policy_blend_alpha` most of
     # all (alpha=0 scored +2140 where the shipped alpha scored -781.6). Both

@@ -10,7 +10,7 @@ convention, so they cannot share an unlabelled column.
 from __future__ import annotations
 
 from src.interfaces.commands.ledger import _score
-from src.pipeline.evaluation.ledger import records
+from src.pipeline.evaluation.ledger import records, tiers
 
 
 class TestTheRowShowsItsNumber:
@@ -44,3 +44,33 @@ class TestTheIndexKeepsTheEdge:
         row = records.ledger_row({"results": {"pair_samples_mbb": [1.0, 2.0, 3.0]}})
         assert "pair_samples_mbb" not in row["results"]
         assert row["results"]["n"] == 3
+
+
+class TestDealCountSplitsTheTier:
+    """MEASURED 09-21: a 2,000-deal probe and a 20,000-deal run of the same
+    pairing hashed to one tier (`182b114e` for both). Both match builders had
+    always declared `num_deals` in `knobs`; `tier_key` reads only
+    `CONDITIONAL_TIER_KNOBS` and it was not in there. Every reader pools
+    unweighted, so that averaged a +-153 mbb row into +-49 mbb ones."""
+
+    def _digest(self, num_deals: int) -> str:
+        return tiers.tier_digest(
+            {
+                "method": "blueprint_match",
+                "knobs": {
+                    "run_b": "run-b",
+                    "rung_b": 4000,
+                    "num_deals": num_deals,
+                    "base_seed": 7,
+                },
+                "results": {},
+                "card_abstraction_hash": "h",
+                "action_config_hash": "a",
+            }
+        )
+
+    def test_a_probe_does_not_pair_with_the_real_run(self):
+        assert self._digest(2000) != self._digest(20000)
+
+    def test_the_same_deal_count_still_pairs(self):
+        assert self._digest(20000) == self._digest(20000)

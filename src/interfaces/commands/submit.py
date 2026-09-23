@@ -59,16 +59,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--pool",
         choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it: train (D16), big (D32), huge (D64) or mem (E64, "
-        "512 GB -- the only one that fits a 200 bb PCS run's workers). SCALAR is "
-        "settled and BIGGER WINS: ~60k it/s at D16/15w, ~115k at D32/31w, ~152k at "
-        "D64/63w, a ratio that RISES with run length, at 0.88 efficiency per billed "
-        "vCPU -- so under 'wall-clock is the scarce thing' take the big box for a "
-        "long run. PCS is NOT settled: its RAM clamp leaves every D box at ~25-28%% "
-        "of its cores, which predicts a wash per dollar, while task-level history "
-        "says train is severalfold cheaper. Those disagree and the history is "
-        "confounded by task length, so until a same-wave A/B settles it prefer "
-        "train for PCS and spread N arms over N nodes rather than stacking one.",
+        help="Which pool runs it: train (D16als, 32 GB), big (D32als, 64 GB), huge "
+        "(D64als, 128 GB) or mem (E64ds, 512 GB). SCALAR is settled and BIGGER WINS: "
+        "~60k it/s at D16/15w, ~115k at D32/31w, ~152k at D64/63w, a ratio that RISES "
+        "with run length, at 0.88 efficiency per billed vCPU. PCS IS CLAMPED BY RAM, "
+        "NOT CORES, so DIVIDE the box's memory by the run's per-worker footprint "
+        "before choosing -- the node prints it as `N workers (M requested, N RAM-safe "
+        "at X GB each)` and that line is the only thing that settles it. MEASURED "
+        "09-22, 100 bb with runouts_per_flop=4 and runout_mode=turn: 16.99 GB per "
+        "worker, so train gives 1 worker of 15 (6%%!) and huge gives 7 of 63. A "
+        "lighter recipe (runouts_per_flop=1, runout_mode=flop) fits train fine. "
+        "Treatment and control MUST share a box: worker count changes the SHARDING, "
+        "and sharding has dropped updates before, so an A/B run at different worker "
+        "counts confounds the knob with the box. Spread N arms over N nodes rather "
+        "than stacking one, and check the pool's node CAP first (`pool-status`) -- "
+        "mem holds 512 GB but only ONE node, so a 4-arm fan-out there serialises.",
     )
     parser.add_argument(
         "--workers",

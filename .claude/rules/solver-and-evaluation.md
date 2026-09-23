@@ -26,9 +26,16 @@ unreadable by design.
   other way.
 - **A change ships only if it passes all three.** They fail in different
   directions, so no one of them is enough:
-  1. **Exploitation** — `poker-solver match --run A --vs B`, duplicate deals
-     (seats swapped off one deck, so ~2k deals do what ~46k unpaired would).
-     Folding cannot win a chip match.
+  1. **Exploitation** — `score --method blueprint_match --run A --at N --vs B
+     --vs-at N`, on the POOL, one task per rung (`match` is the local door for
+     two runs already on the box). Duplicate deals, seats swapped off one deck.
+     Folding cannot win a chip match. **Pass `--deals 20000`**: the 2,000
+     default carries SE ~150 mbb and read "inconclusive" on an effect 20,000
+     resolved at ~49, and a match is only ~40 s of node time. **Always run the
+     same-recipe NULL** — two runs of ONE recipe came out +53.3 ± 22.9 mbb/hand
+     apart (2.33σ), so a single pairing cannot separate a recipe from the arm
+     lottery; replicate at the ARM level (≥2 training seeds a side), not by
+     adding deals.
   2. **Progress** — the same match against a FROZEN reference arm. One-on-one
      results can be intransitive, which is harmless against a fixed yardstick
      and fatal when ranking a field.
@@ -43,14 +50,19 @@ unreadable by design.
   deterministic, so no p-value is needed.
 - **Scores live in the record (Postgres), not in per-run files.** `evaluate`
   writes a row through the record sink; `ledger`, `curve` and `arms` read it.
-  `<run_dir>/evals/*.json` is written only by resolver-match scoring now, so
-  code that reads that directory to decide something sees almost nothing —
-  `prune-checkpoints` protects scored rungs from it and cannot see a DB-scored
-  rung. **Score before pruning**, and fix that reader before trusting it.
-- **`--config production` IS the best measured PCS/CFR-BR setup** — a
-  river-legal best response over four runouts sharing a flop and a turn
-  (`river-r4`, 748.6 mbb thresholded on the gate — which IS the fold-everything
-  floor, so read it as the best of a bad field, not as good). Most of that is
+  **NOTHING writes `<run_dir>/evals/*.json` any more** — the last writer went
+  with the head-to-head gate's move to the record, and `rebuild_ledger` only
+  READS the pre-sink corpus. So `prune-checkpoints`'s `_scored_iterations`
+  answers for legacy runs alone; it reads the record for the rest.
+  **Score before pruning.**
+- **`--config production` is the best measured setup ON EXPLOITABILITY, and
+  it LOSES ON CHIPS** — a river-legal best response over four runouts sharing a
+  flop and a turn (`river-r4`, 748.6 mbb thresholded, which IS the
+  fold-everything floor). Measured 09-21 at matched 100 bb rung 4,000 over
+  20,000 duplicate deals, plain PCS (`cfr_br: off`) beat both CFR-BR arms in
+  11 of 12 arm-seed matches (sign test p = 0.0063) while scoring 1.8-2.0x
+  WORSE on the bound. Those arms moved three knobs, so `production_nobr.yaml`
+  (cfr_br alone) is the arm that would justify changing it. Most of that is
   plain K-fold averaging: `runouts_per_flop=4` alone reaches 820.7, and R=8
   is WORSE than R=4. A treatment arm is a YAML that `extends: production.yaml`
   and moves ONE thing (`production_linplus.yaml` is the pattern); it is deleted
