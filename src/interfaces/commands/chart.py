@@ -22,10 +22,12 @@ the deployed strategy exactly when the resolver is off, which is
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from src.adapters.postgres import connect
 from src.interfaces.commands._base import Command, resolve_run_dir
 
 if TYPE_CHECKING:
@@ -46,6 +48,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Where runs live on this box; the node's own runs directory by default.",
     )
     parser.add_argument("--at", type=int, default=None, help="Chart this iteration's checkpoint.")
+    parser.add_argument(
+        "--abstractions-dir",
+        default=None,
+        help="Where the card abstractions live. The resolver defaults to a RELATIVE "
+        "`data/combo_abstraction`, which is the node's layout and exists nowhere else, "
+        "so a chart read anywhere but a node has to say where the buckets are.",
+    )
     parser.add_argument(
         "--path",
         default="",
@@ -76,12 +85,17 @@ def run(args: argparse.Namespace) -> ChartPayload:
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
     run_dir = resolve_run_dir(args.run, args.runs_dir)
-    metadata = RunTracker.load(run_dir).metadata
+    # THROUGH THE RECORD, like every other reader. A run directory holds its
+    # checkpoints and nothing that says what they are, so a chart of a staged
+    # run died on "No run record" -- the one thing standing between a published
+    # run and the only artifact that answers "did this train into poker?".
+    metadata = RunTracker.load(run_dir, connect.record_source_from_environment()).metadata
     blueprint, _storage, _policy = build_blueprint_for(
         run_dir,
         metadata,
         abstraction_hash=metadata.card_abstraction_hash,
         at_iteration=args.at,
+        abstractions_dir=Path(args.abstractions_dir) if args.abstractions_dir else None,
     )
     chart = preflop_chart(blueprint, args.path)
     return ChartPayload(

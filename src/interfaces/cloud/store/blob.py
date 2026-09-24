@@ -140,6 +140,10 @@ SNAPSHOT_EXCLUDES = frozenset(
         "node_modules",
         ".pytest_cache",
         ".ruff_cache",
+        # Local-only by design, and a dispatch tars the WORKING TREE: 3 GB of
+        # staged checkpoints left here made every `score` hang for minutes with
+        # no output before the upload even started (09-24).
+        "scratch",
         ".mypy_cache",
         ".terraform",
         ".claude",
