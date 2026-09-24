@@ -195,6 +195,32 @@ class TestEvaluateFetch:
         assert handlers._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-b" / "static-800.ckpt.zst").exists()
 
+    def test_settling_fetches_the_rung_it_measures_drift_from(
+        self, paths, log, monkeypatch, container
+    ):
+        """`--settle-from` is READ, never scored. Without it in the support set
+        the estimator dies in the loader, exactly as a windowed average did
+        before its own support rungs were fetched."""
+        self._published(container, rung="static-2000")
+        self._published(container, rung="static-2400")
+        container["run-a/STATIC_CHECKPOINT.json"] = (
+            b'{"zarr": "static-2400.ckpt.zst", "iteration": 2400, "retained": ['
+            b'{"iteration": 2000, "zarr": "static-2000.ckpt.zst"},'
+            b'{"iteration": 2400, "zarr": "static-2400.ckpt.zst"}]}'
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("2400",),
+            eval_method="settle",
+            eval_flags=("--settle-from", "2000"),
+            checkpoint_sas=SAS,
+        )
+
+        assert handlers._evaluate(task, paths, log) == (0, None)
+        assert (paths.runs / "run-a" / "static-2000.ckpt.zst").exists()
+
     def test_a_mixture_naming_no_such_run_is_fatal(self, paths, log, monkeypatch, container):
         self._published(container)
         monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)

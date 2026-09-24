@@ -37,6 +37,10 @@ from src.pipeline.services.scoring.matches import (
     evaluate_blueprint_match,
     evaluate_run_resolver_gate,
 )
+from src.pipeline.services.scoring.settling import (
+    SETTLING_ESTIMATOR_LABEL,
+    evaluate_run_settling,
+)
 from src.shared import records
 
 # At runtime, not under TYPE_CHECKING: this module has no postponed
@@ -89,6 +93,8 @@ def evaluate_and_record(
     resolver_blend_alpha: float | None = None,
     resolver_leaf_rollouts: int | None = None,
     resolver_allin_runouts: int = 1,
+    # settle: the EARLIER rung this one is compared against.
+    settle_from: int | None = None,
     # blueprint_match: the OTHER arm, and which rung of it plays.
     vs_run_dir: Path | None = None,
     vs_at: int | None = None,
@@ -170,6 +176,21 @@ def evaluate_and_record(
         )
         estimator = RESOLVER_GATE_ESTIMATOR_LABEL
         knobs = eval_ledger.build_resolver_match_knobs(out.results)
+    elif method == "settle":
+        # Neither a bound nor a chip edge: how much the average strategy still
+        # moves. Cheap enough to read at every retained rung, and meaningless
+        # without the exploitability of the same rungs beside it.
+        if settle_from is None:
+            raise ValueError("settle needs an earlier rung: pass --settle-from.")
+        out = evaluate_run_settling(
+            run_dir,
+            from_iteration=settle_from,
+            at_iteration=at_iteration,
+            abstraction_hash=abstraction_hash,
+            record_source=record_source,
+        )
+        estimator = SETTLING_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_settling_knobs(out.results)
     elif method == "blueprint_match":
         # The only PAIRWISE estimator, and the only gate folding cannot win.
         # It records like every other one: the row is filed under A and carries
@@ -255,6 +276,7 @@ __all__ = (
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
     "RESOLVER_GATE_ESTIMATOR_LABEL",
+    "SETTLING_ESTIMATOR_LABEL",
     "EvaluationOutput",
     "build_blueprint_for",
     "evaluate_and_record",
@@ -262,4 +284,5 @@ __all__ = (
     "evaluate_run_exact_br",
     "evaluate_run_lbr",
     "evaluate_run_resolver_gate",
+    "evaluate_run_settling",
 )

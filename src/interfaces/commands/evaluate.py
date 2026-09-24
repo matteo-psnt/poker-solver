@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 # repeating it: a value the submitter accepts but `evaluate` rejects is not
 # caught until the node has already been allocated, and the task then retries
 # twice on the way to failing.
-EVAL_METHODS = ("lbr", "exact_br", "resolver_match", "blueprint_match")
+EVAL_METHODS = ("lbr", "exact_br", "resolver_match", "blueprint_match", "settle")
 
 # Above this the SB is refusing to play rather than playing badly, and no
 # exploitability reading about it means anything. `.claude/rules/
@@ -58,7 +58,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "matched board tier); resolver_match = duplicate-deal chip edge of "
         "blueprint+resolver over the bare blueprint (NOT an exploitability bound); "
         "blueprint_match = duplicate-deal chip edge over ANOTHER run (--vs-run), the "
-        "one gate folding cannot win.",
+        "one gate folding cannot win; settle = per-street drift of the average "
+        "strategy since --settle-from, which says whether training has stopped "
+        "changing anything (NOT whether what it settled on is good).",
     )
     # resolver_match options (--method resolver_match).
     parser.add_argument(
@@ -123,6 +125,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "instead of the single dealt one. SAME expectation, less variance -- and "
         "exact (enumerated, zero variance) when few enough cards remain. 1 = the "
         "shipped single-board behaviour.",
+    )
+    # settle options (--method settle).
+    parser.add_argument(
+        "--settle-from",
+        type=int,
+        default=None,
+        help="[settle] The EARLIER rung to measure drift from. The GAP is the "
+        "instrument: an average moves less the wider the base it covers, so a "
+        "settling curve is only a curve at a FIXED gap (e.g. always 400).",
     )
     # blueprint_match options (--method blueprint_match).
     parser.add_argument(
@@ -386,6 +397,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         leaf_continuation_fraction=args.leaf_continuation,
         resolver_max_iterations=args.resolver_max_iterations,
         resolver_allin_runouts=args.resolver_allin_runouts,
+        settle_from=args.settle_from,
         vs_run_dir=resolve_run_dir(args.vs_run, args.runs_dir) if args.vs_run else None,
         vs_at=args.vs_at,
         match_deals=args.deals if args.deals is not None else MATCH_DEALS,
@@ -412,6 +424,28 @@ def render(payload: services.EvaluationPayload) -> None:
     # gate reports a chip edge and carries no `exploitability_mbb` at all; a
     # renderer that reached for the key would die on it, which is exactly how
     # `checkpoint-profile` once died borrowing this function.
+    if payload.method == "settle":
+        by_street = results.get("by_street") or {}
+        gap = results.get("rung_gap")
+        print(f"  Drift since:   rung {results.get('from_iteration')} (gap {gap})")
+        print(
+            f"  {'street':<9}{'rows':>12}{'median TV':>12}{'reach-wtd':>12}{'pure':>9}{'thin+pure':>11}"
+        )
+        for street in ("preflop", "flop", "turn", "river"):
+            row = by_street.get(street)
+            if not row:
+                continue
+            print(
+                f"  {street:<9}{row['rows']:>12,}{row['median_tv']:>12.5f}"
+                f"{row['reach_weighted_tv']:>12.5f}{row['pure_fraction']:>8.1%}"
+                f"{row['thin_pure_fraction']:>11.1%}"
+            )
+        # The trap this estimator exists to avoid: drift falls as rows go PURE,
+        # and a frozen row is not a settled one.
+        print("  reach-wtd is the TV below which half the TRAFFIC sits; a PURE row's")
+        print("  drift is exactly 0, so read `pure` beside the drift, and read both")
+        print("  beside the exploitability of the same rungs.")
+        return
     if payload.method == "blueprint_match":
         edge, se = results["a_mbb_per_hand"], results["se_mbb"]
         sigma = abs(edge) / se if se else 0.0

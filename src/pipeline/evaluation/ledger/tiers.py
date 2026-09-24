@@ -54,6 +54,9 @@ CONDITIONAL_TIER_KNOBS = (
     # so two edges over different opponents are not two readings of one thing.
     "run_b",
     "rung_b",
+    # settling: the rung gap the drift was measured over IS the instrument.
+    "from_iteration",
+    "rung_gap",
     # How many deals the estimate rests on. Both match builders have always put
     # this in `knobs` and `tier_key` never read it, so a 2,000-deal probe and a
     # 20,000-deal run of the SAME pairing hashed to one tier -- measured 09-21,
@@ -257,6 +260,20 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         "rung_b": results.get("rung_b"),
         "num_deals": results["num_deals"],
         "base_seed": results["seed"],
+    }
+
+
+def build_settling_knobs(results: dict[str, Any]) -> dict[str, Any]:
+    """Canonical settling knob tier.
+
+    The RUNG GAP is the instrument. Drift measured over 400 rungs and drift over
+    2,000 are not two readings of one quantity -- the average strategy mechanically
+    moves less the wider the base it is averaged over -- so a curve is only a curve
+    at a fixed gap.
+    """
+    return {
+        "from_iteration": results.get("from_iteration"),
+        "rung_gap": results.get("rung_gap"),
     }
 
 

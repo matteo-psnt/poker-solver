@@ -247,7 +247,8 @@ def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str])
     """Rungs the eval READS but does not score, from its own flags.
 
     `--avg-window-from` subtracts one earlier rung; `--avg-gamma` recombines
-    every retained rung below the one being scored. Selective fetching means a
+    every retained rung below the one being scored; `--settle-from` names the
+    earlier rung a drift measurement compares against. Selective fetching means a
     rung nobody asked to SCORE is simply absent on the node, which surfaces as
     a zarr path error inside the loader -- so the flags have to be read here,
     where the fetch happens.
@@ -258,6 +259,11 @@ def _support_rungs(flags: tuple[str, ...], destination: Path, scored: list[str])
     wanted: set[int] = set()
     if floor:
         wanted.add(floor)
+    # `--settle-from` names the rung the drift is measured AGAINST. It is read,
+    # never scored, so without this the settling estimator dies in the loader
+    # exactly as a windowed average did before its support rungs were fetched.
+    if "--settle-from" in options:
+        wanted.add(int(options["--settle-from"]))
     if "--avg-gamma" in options:
         # Only the bands the reweighting actually spans. Without the floor a
         # 1.2B run would drag its whole 24-rung ladder onto the node to

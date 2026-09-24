@@ -74,3 +74,31 @@ class TestDealCountSplitsTheTier:
 
     def test_the_same_deal_count_still_pairs(self):
         assert self._digest(20000) == self._digest(20000)
+
+
+class TestTheRungGapIsTheInstrument:
+    """An average strategy moves less the wider the base it covers, so drift over
+    400 rungs and drift over 2,000 are not two readings of one quantity. A
+    settling curve is only a curve at a FIXED gap."""
+
+    def _digest(self, from_iteration: int, gap: int) -> str:
+        return tiers.tier_digest(
+            {
+                "method": "settle",
+                "knobs": {"from_iteration": from_iteration, "rung_gap": gap},
+                "results": {},
+                "card_abstraction_hash": "h",
+                "action_config_hash": "a",
+            }
+        )
+
+    def test_a_different_gap_does_not_pair(self):
+        assert self._digest(3600, 400) != self._digest(2000, 2000)
+
+    def test_the_same_gap_at_a_later_rung_does_pair(self):
+        """What makes a curve: same instrument, walked along the ladder."""
+        assert self._digest(3600, 400) != self._digest(7600, 400)
+
+    def test_the_knobs_are_exactly_the_gap(self):
+        knobs = tiers.build_settling_knobs({"from_iteration": 3600, "rung_gap": 400})
+        assert knobs == {"from_iteration": 3600, "rung_gap": 400}
