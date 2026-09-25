@@ -55,18 +55,23 @@ unreadable by design.
   READS the pre-sink corpus. So `prune-checkpoints`'s `_scored_iterations`
   answers for legacy runs alone; it reads the record for the rest.
   **Score before pruning.**
-- **`--config production` is the best measured setup ON EXPLOITABILITY, and
-  it LOSES ON CHIPS** — a river-legal best response over four runouts sharing a
-  flop and a turn (`river-r4`, 748.6 mbb thresholded, which IS the
-  fold-everything floor). Measured 09-21 at matched 100 bb rung 4,000 over
-  20,000 duplicate deals, plain PCS (`cfr_br: off`) beat both CFR-BR arms in
-  11 of 12 arm-seed matches (sign test p = 0.0063) while scoring 1.8-2.0x
-  WORSE on the bound. Those arms moved three knobs, so `production_nobr.yaml`
-  (cfr_br alone) is the arm that would justify changing it. Most of that is
-  plain K-fold averaging: `runouts_per_flop=4` alone reaches 820.7, and R=8
-  is WORSE than R=4. A treatment arm is a YAML that `extends: production.yaml`
-  and moves ONE thing (`production_linplus.yaml` is the pattern); it is deleted
-  when the question closes.
+- **`--config production` is `cfr_br: off` as of 09-24, and EXPLOITABILITY IS
+  RETIRED as the criterion that chose it.** The river-legal responder it used to
+  carry won the exact-BR gate (748.6 mbb thresholded) and that gate was measuring
+  folding: CFR-BR folds the SB first-in 65-80%, the same recipe with it off folds
+  10.1%, and real heads-up folds 10-20%. At matched rung 4,000 the 2.51x
+  exploitability advantage is a REACH ARTEFACT — preflop loss is FLAT (694 vs 757
+  mbb) and the whole difference is postflop (106 vs 1,252), because a strategy
+  that folds never reaches its own postflop. **The postflop was never solved, it
+  was hidden.** On chips the playing arms won 11 of 12 arm-seed matches over
+  20,000 duplicate deals (p = 0.0063), and within ONE run rung 4,000 beats rung
+  1,200 by +81.9 ± 27.5 mbb/hand (2.98σ) while scoring 20% WORSE on the bound.
+  Read `settle` for whether training is still buying anything, `blueprint_match`
+  against the fielded champion for whether a change is an improvement, and the SB
+  fold rate as a shape check. `runouts_per_flop=4` alone reaches 820.7 and R=8 is
+  WORSE than R=4. A treatment arm is a YAML that `extends: production.yaml` and
+  moves ONE thing (`production_linplus.yaml` is the pattern); it is deleted when
+  the question closes.
 - **Experiment bookkeeping** goes through `--experiment`/`--arm`/`--parent`,
   with `--set k=v` for config overrides on a FRESH run; the tags are recorded
   on every eval. **A continuation trains what it was**: `submit --run X --to N`
