@@ -27,8 +27,10 @@ runtime.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
+import mmap
 from multiprocessing import shared_memory
 from typing import TYPE_CHECKING
 
@@ -57,6 +59,21 @@ REACH_DTYPE = np.int64
 VISITED_DTYPE = np.uint8
 
 _ARRAYS = ("regrets", "strategy_sum", "reach_counts", "cumulative_utility", "visited")
+
+
+def _advise_huge_pages(shm: shared_memory.SharedMemory) -> None:
+    """Ask for 2 MB pages on a segment, in every process that maps it.
+
+    Rows of one node sit a street's width apart (0.84 MB on the river), so on
+    4 KB pages nearly every row a kernel touches is its own TLB miss. Honoured
+    where the node sets THP ``shmem_enabled=advise`` (the pool start task does).
+    """
+    advice = getattr(mmap, "MADV_HUGEPAGE", None)
+    mapping = getattr(shm, "_mmap", None)
+    if advice is None or mapping is None:
+        return
+    with contextlib.suppress(OSError):
+        mapping.madvise(advice)
 
 
 class StaticArrayStorage:
@@ -240,6 +257,7 @@ class StaticArrayStorage:
                         "precisely so a mismatch cannot silently attach."
                     ) from exc
             self._shm.append(shm)
+            _advise_huge_pages(shm)
             array = np.ndarray((length,), dtype=dtype, buffer=shm.buf)
             if create:
                 array.fill(0)

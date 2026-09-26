@@ -67,6 +67,18 @@ locals {
     # is a reason to log -- never to fail a start task, which bricks the node.
     sysctl -w kernel.yama.ptrace_scope=0 || echo "WARN could not relax ptrace_scope"
 
+    # Huge pages for SHARED memory on request only. The training table is a
+    # shared segment read a street's width apart per row, so on 4 KB pages
+    # nearly every row is a TLB miss; `advise` lets the process that maps it opt
+    # in with madvise and changes nothing for anyone who does not.
+    echo advise > /sys/kernel/mm/transparent_hugepage/shmem_enabled \
+      || echo "WARN could not set THP shmem_enabled=advise"
+    # The sysfs knob governs the kernel's INTERNAL shm mount only; /dev/shm, where
+    # Python's SharedMemory lives, is a tmpfs with its own `huge=` option, default
+    # never -- measured: shmem_enabled=[advise] alone left 0.00 GB PMD-mapped.
+    mount -o remount,huge=advise /dev/shm \
+      || echo "WARN could not remount /dev/shm with huge=advise"
+
     # Find the data disk by its PROPERTIES, not by a fixed path. The obvious
     # /dev/disk/azure/scsi1/lun0 symlink is created by the Azure Linux Agent's
     # udev rules and does NOT exist on the Batch node image -- assuming it fails
