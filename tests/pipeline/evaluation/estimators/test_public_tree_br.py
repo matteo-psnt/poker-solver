@@ -339,18 +339,18 @@ class TestTheCountedDenominator:
         CALL loses 8 of these 16 branches — a bar that stops at 50%.
         """
         engine = PublicTreeBestResponse(trained_solver, CONFIG, starting_stack=STACK)
-        policy, credit = engine._policy_matrix, engine._skip_branches
+        policy, credit = engine._policy_rows, engine._skip_branches
         credited: list[int] = []
 
-        def never_call(state, legal):
-            sigma, missing = policy(state, legal)
+        def never_call(state, legal, context_key=None):
+            rows, missing, bucket_vec = policy(state, legal, context_key)
             if not state.board and len(legal) > 1:
-                sigma = sigma.copy()
-                sigma[:, 0] += sigma[:, 1]  # onto FOLD, which deals no flop
-                sigma[:, 1] = 0.0
-            return sigma, missing
+                rows = rows.copy()
+                rows[:, 0] += rows[:, 1]  # onto FOLD, which deals no flop
+                rows[:, 1] = 0.0
+            return rows, missing, bucket_vec
 
-        monkeypatch.setattr(engine, "_policy_matrix", never_call)
+        monkeypatch.setattr(engine, "_policy_rows", never_call)
         monkeypatch.setattr(engine, "_skip_branches", lambda n: credited.append(n) or credit(n))
         engine.evaluate()
 

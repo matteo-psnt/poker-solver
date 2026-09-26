@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from numba import njit
 
 from src.core.game.state import FULL_DECK, Card, GameState, Street
 from src.engine.search.range_inference import (
@@ -844,13 +845,16 @@ class PublicTreeBestResponse:
         own_reach: np.ndarray,
         line: str,
     ) -> tuple[np.ndarray, np.ndarray]:
-        # The blueprint path is called with the ORIGINAL arity: the reaches are
-        # only meaningful to the resolver, and an existing test double patches
-        # this method with a two-argument stub.
+        # The blueprint path reads the dense table and builds each action's
+        # child reach from it directly; only the resolver needs the reaches and
+        # a per-combo strategy matrix.
         if self._resolver is None:
-            sigma, missing = self._policy_matrix(state, legal)
+            rows, row_missing, bucket_vec = self._policy_rows(state, legal)
+            missing = row_missing[bucket_vec]
+            reaches = child_reaches(opp_reach, rows, bucket_vec)
         else:
             sigma, missing = self._policy_matrix(state, legal, (opp_reach, own_reach))
+            reaches = (opp_reach * sigma.T).copy()
         tally = self._tally
         tally.decision_mass += float(opp_reach.sum())
         tally.missing_mass += float(opp_reach[missing].sum())
@@ -868,7 +872,7 @@ class PublicTreeBestResponse:
         self_play = np.zeros(NUM_COMBOS, dtype=np.float64)
         for a_idx, action in enumerate(legal):
             child = self._rules.apply_action(state, action)
-            child_reach = opp_reach * sigma[:, a_idx]
+            child_reach = reaches[a_idx]
             if not child_reach.any():
                 # An action the blueprint never takes with ANY combo. The flop
                 # branches under it are work that will not happen, so they are
@@ -895,7 +899,8 @@ class PublicTreeBestResponse:
         best response does not depend on the responder's reach, only its
         attribution does.
         """
-        sigma, _ = self._policy_matrix(state, legal)
+        rows, _, bucket_vec = self._policy_rows(state, legal)
+        sigma = rows[bucket_vec]
         best_children = np.empty((NUM_COMBOS, len(legal)), dtype=np.float64)
         self_children = np.empty((NUM_COMBOS, len(legal)), dtype=np.float64)
         for a_idx, action in enumerate(legal):
@@ -1036,7 +1041,21 @@ class PublicTreeBestResponse:
         context_key = (state.current_player, state.street, state.normalized_betting_sequence())
         if self._resolver is not None and reaches is not None:
             return self._resolver_matrix(state, legal, context_key, reaches)
+        rows, row_missing, bucket_vec = self._policy_rows(state, legal, context_key)
+        return rows[bucket_vec], row_missing[bucket_vec]
 
+    def _policy_rows(
+        self, state: GameState, legal: tuple[Action, ...], context_key: tuple | None = None
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The context's dense (bucket x action) table, its fallback flags, and
+        this board's bucket vector -- what `_policy_matrix` gathers through, for
+        callers that need less than both gathered arrays."""
+        if context_key is None:
+            context_key = (
+                state.current_player,
+                state.street,
+                state.normalized_betting_sequence(),
+            )
         cached = self._policy_cache.get(context_key)
         if cached is None:
             rows, row_missing = blueprint_policy_table(
@@ -1049,8 +1068,7 @@ class PublicTreeBestResponse:
             )
             self._policy_cache[context_key] = cached
         rows, row_missing = cached
-        bucket_vec = self._bucket_vector(state.board, state.street)
-        return rows[bucket_vec], row_missing[bucket_vec]
+        return rows, row_missing, self._bucket_vector(state.board, state.street)
 
     def _resolver_matrix(
         self,
@@ -1317,6 +1335,26 @@ def _flop_worker(job: _FlopJob) -> tuple[_FlopPart, int, int]:
     assert _ENGINE is not None, "worker used before _init_worker"
     part = _ENGINE.flop_part(job)
     return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, _private_kb()
+
+
+@njit(cache=True)
+def child_reaches(opp_reach, rows, bucket_vec):
+    """``opp_reach * rows[bucket_vec][:, a]`` for every action ``a``, as ``(A, combos)``.
+
+    One multiply per element, as the gathered form did, so the bytes match; a
+    blocked combo's bucket -1 reads the table's appended zero row either way.
+    """
+    actions = rows.shape[1]
+    combos = opp_reach.shape[0]
+    out = np.empty((actions, combos), dtype=np.float64)
+    for h in range(combos):
+        b = bucket_vec[h]
+        if b < 0:
+            b += rows.shape[0]
+        r = opp_reach[h]
+        for a in range(actions):
+            out[a, h] = r * rows[b, a]
+    return out
 
 
 def _proc_kb(path: str, field: str) -> int:
