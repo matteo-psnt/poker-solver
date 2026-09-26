@@ -48,8 +48,8 @@ from src.engine.solver.vector.fused import (
     add_into_slots,
     add_weighted_into_slots,
     bucket_dot,
-    card_mass,
     deposit_children,
+    fold_values_into,
     gathered_action_sum,
     regret_matched,
     segment_blocks,
@@ -449,8 +449,14 @@ class VectorCFR:
         fold = kind == TerminalKind.FOLD
         if fold.any():
             sign = 1.0 if player == 0 else -1.0
-            self.terminal_value[player, target[fold]] = (
-                sign * magnitude[fold] * self._compatible_mass(opponent_reach[fold])
+            reach = opponent_reach[fold]
+            fold_values_into(
+                self.terminal_value[player],
+                target[fold],
+                sign * magnitude[fold][:, 0],
+                reach,
+                reach.sum(axis=1),
+                self.hand_cards,
             )
         showdown = kind == TerminalKind.SHOWDOWN
         if showdown.any():
@@ -462,19 +468,6 @@ class VectorCFR:
                 # win/lose direction off one matrix.
                 beaten = reach @ self.showdown_sign.T
             self.terminal_value[player, target[showdown]] = magnitude[showdown] * beaten
-
-    def _compatible_mass(self, reach: np.ndarray) -> np.ndarray:
-        """``(T, H)`` opponent mass that does not collide with each hand.
-
-        Inclusion-exclusion over the two cards rather than an ``(H, H)`` product:
-        total range, minus everything holding either of my cards, plus my own
-        holding back because subtracting both cards removed it twice.
-        """
-        total = reach.sum(axis=1, keepdims=True)
-        per_card = card_mass(reach, self.hand_cards)
-        first = per_card[:, self.hand_cards[:, 0]]
-        second = per_card[:, self.hand_cards[:, 1]]
-        return total - first - second + reach
 
     def backward(self) -> None:
         """Pull counterfactual values up and write regrets onto bucket rows."""

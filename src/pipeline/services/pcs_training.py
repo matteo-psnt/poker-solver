@@ -208,6 +208,7 @@ def train_pcs(
     safe = pcs_parallel.ram_safe_workers(compiled, shared_bytes=shared, **footprint)
     requested = num_workers or (os.cpu_count() or 1)
     workers = min(requested, safe)
+    logger.info("[pcs] transparent huge pages: %s", pcs_parallel.huge_page_modes())
     logger.info(
         "[pcs] %d workers (%d requested, %d RAM-safe at %.2f GB each), %d runouts per flop, "
         "cfr_br=%s",

@@ -215,6 +215,19 @@ def ram_safe_workers(
     return max(1, int(available // per_worker))
 
 
+def huge_page_modes() -> str:
+    """The node's THP policy for anonymous and shared memory, as the kernel reports it."""
+    modes = []
+    for name in ("enabled", "shmem_enabled"):
+        try:
+            modes.append(
+                f"{name}={Path('/sys/kernel/mm/transparent_hugepage', name).read_text().strip()}"
+            )
+        except OSError:
+            modes.append(f"{name}=unavailable")
+    return " ".join(modes)
+
+
 def _smaps_rollup() -> dict[str, int]:
     """This process's memory split, in bytes; empty where /proc does not exist."""
     try:
@@ -370,7 +383,7 @@ def pcs_worker(
         rollup = _smaps_rollup()
         logger.info(
             "[pcs worker %d] %d boards in %.0fs (%.3f boards/s), peak RSS %.2f GB, "
-            "private %.2f GB, PSS %.2f GB",
+            "private %.2f GB, PSS %.2f GB, huge pages anon %.2f GB shmem %.2f GB",
             worker_id,
             kernel.boards,
             elapsed,
@@ -378,6 +391,8 @@ def pcs_worker(
             peak_bytes / 1e9,
             (rollup.get("Private_Clean", 0) + rollup.get("Private_Dirty", 0)) / 1e9,
             rollup.get("Pss", 0) / 1e9,
+            rollup.get("AnonHugePages", 0) / 1e9,
+            rollup.get("ShmemPmdMapped", 0) / 1e9,
         )
         result_queue.put(
             {
