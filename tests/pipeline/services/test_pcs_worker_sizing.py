@@ -39,6 +39,13 @@ def test_a_turn_best_response_holds_one_kernel_per_runout():
     assert worker_footprint(_config(**TURN))["kernels"] == 4
 
 
+def test_plain_pcs_on_shared_turns_rebinds_a_single_kernel():
+    """MEASURED 09-25 on production (cfr_br off, turn runouts): the clamp sized a
+    worker at 16.99 GB for 4 kernels, workers logged peak RSS 7.59 GB, and the
+    D64 ran 7 workers on 64 vCPUs. Only a best response's argmax is joint."""
+    assert worker_footprint(_config(**{**TURN, "cfr_br": "off"}))["kernels"] == 1
+
+
 def test_flop_mode_rebinds_a_single_kernel():
     assert worker_footprint(_config(**FLOP))["kernels"] == 1
 

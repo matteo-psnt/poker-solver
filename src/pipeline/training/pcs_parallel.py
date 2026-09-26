@@ -186,7 +186,18 @@ def worker_bytes(
     # The rank walk holds the fancy-index copy of one seat's showdown reaches
     # while it builds its output -- two (showdowns, hands) arrays.
     live = 2 * (num_terminals // 2)
-    return scratch + cache + temporaries + picks + live * LIVE_HANDS * item + WORKER_OVERHEAD_BYTES
+    # Several runouts sum their regret updates into one slot-wide buffer before
+    # the discount -- per worker, not per kernel.
+    delta = tree.num_slots * item if runouts > 1 else 0
+    return (
+        scratch
+        + cache
+        + temporaries
+        + picks
+        + delta
+        + live * LIVE_HANDS * item
+        + WORKER_OVERHEAD_BYTES
+    )
 
 
 def node_memory_bytes() -> int:

@@ -78,14 +78,15 @@ class WorkerFootprint(TypedDict):
 def worker_footprint(config: Config) -> WorkerFootprint:
     """The kwargs describing one worker's memory, for the clamp AND the log line.
 
-    ``runout_mode='turn'`` holds one kernel per runout, because the joint
-    maximisation needs their values at the same time; sizing the clamp for a
-    single kernel oversubscribes the node by that factor.
+    A turn BEST RESPONSE holds one kernel per runout, because its joint
+    maximisation needs their values at the same time. Plain PCS has no argmax
+    and rebinds one kernel per runout whatever the sampler shares.
     """
+    joint = config.pcs.runout_mode == "turn" and config.pcs.cfr_br != "off"
     return {
         "br_streets": config.pcs.cfr_br,
         "runouts": config.pcs.runouts_per_flop,
-        "kernels": config.pcs.runouts_per_flop if config.pcs.runout_mode == "turn" else 1,
+        "kernels": config.pcs.runouts_per_flop if joint else 1,
     }
 
 
