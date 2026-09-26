@@ -74,6 +74,35 @@ class TestForkJoinMatchesSerial:
         assert forked.missing_policy_mass == serial.missing_policy_mass
 
 
+@pytest.mark.timeout(120)
+@pytest.mark.skipif(
+    "fork" not in __import__("multiprocessing").get_all_start_methods(), reason="needs fork"
+)
+def test_forked_workers_inherit_the_parents_blueprint(monkeypatch):
+    """The pool's path: workers share the PARENT's blueprint rather than
+    rebuilding it. Forced here because the laptop spawns; the factory would
+    refuse, so a pass proves no worker called it and the number is serial's."""
+    import multiprocessing
+
+    from src.pipeline.evaluation.estimators import public_tree_br
+
+    monkeypatch.setattr(public_tree_br, "_FORK", multiprocessing.get_context("fork"))
+    solver = build_trained_test_solver(4, starting_stack=STACK)
+    tier = PublicBRConfig(num_flops=2, num_turns=1, num_rivers=1, board_seed=3)
+
+    def refuse():
+        raise AssertionError("a forked worker rebuilt the blueprint instead of inheriting it")
+
+    serial = compute_public_tree_br(solver, tier, starting_stack=STACK)
+    forked = compute_public_tree_br(
+        solver, replace(tier, num_workers=3), starting_stack=STACK, blueprint_factory=refuse
+    )
+
+    assert forked.exploitability_mbb == serial.exploitability_mbb
+    assert forked.seat_results == serial.seat_results
+    assert public_tree_br._INHERITED is None  # released with the pool
+
+
 class TestRamSafeCap:
     """`--workers` is a ceiling: sixteen blueprints do not fit a 32 GB node once
     the tree or the board caches grow, and the OOM killer reports that as a
@@ -97,8 +126,10 @@ class TestRamSafeCap:
 
         small = PublicBRConfig(num_flops=4, num_turns=4, num_rivers=4)
         full = PublicBRConfig(num_flops=4, num_turns=49, num_rivers=48)
-        kw = {"footprint": int(0.8 * self.GB), "available": 30 * self.GB}
-        assert _ram_safe_workers(16, small, **kw) > _ram_safe_workers(16, full, **kw)
+        footprint, available = int(0.8 * self.GB), 30 * self.GB
+        assert _ram_safe_workers(
+            16, small, footprint=footprint, available=available
+        ) > _ram_safe_workers(16, full, footprint=footprint, available=available)
 
     def test_never_raises_the_request_and_never_below_one(self):
         from src.pipeline.evaluation.estimators.public_tree_br import _ram_safe_workers

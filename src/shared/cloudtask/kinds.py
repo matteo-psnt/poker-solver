@@ -534,15 +534,11 @@ class EvaluateTask(TaskKind):
     """Score published rungs of an existing run."""
 
     name = TaskName.EVALUATE
-    """The SCORED run. Its SCORE goes to the `evals` table, not to a file the
-    exit publish carries -- so what the publish does here is the run's loose
-    metadata, and the rungs this task fetched are already in the container,
-    which makes the rung pass a HEAD each rather than an upload.
-
-    ``evals/*.json`` is not written at all any more: `record_evaluation` writes
-    the sink, and a head-to-head match -- the last pairwise payload -- files its
-    row under run A and carries B's identity in ``results``."""
-    publishes_run = True
+    """The SCORED run. Its score goes to the `evals` table, so the task leaves
+    nothing to publish: it holds a READ-only token (`blob.WRITES_BLOBS`), and a
+    scorer rewriting a run's manifest could clobber a newer one from a run
+    still training. A head-to-head match files its row under run A and carries
+    B's identity in ``results``."""
     unit = "board branches"
     progress_file = "evaluate-progress.json"
 

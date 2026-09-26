@@ -41,7 +41,9 @@ paths:
 - **Profiling a running task**: `poker-solver profile --task <id>` puts a
   request object in the `diagnostics` container, the node serves it and marks
   it `.request.served` (no task SAS carries `delete`), and a speedscope
-  document comes back the same way. Training tasks only; it cannot fail a task.
+  document comes back the same way. Training and evaluation tasks; it cannot
+  fail a task. A fork-join samples ONE worker, whose stack starts in the
+  parent's frames because fork copied them.
   A profile that never arrives explains itself only in the node log
   (`logs --task <id> | grep profile`). numba JIT frames are bare addresses;
   numpy's resolve.

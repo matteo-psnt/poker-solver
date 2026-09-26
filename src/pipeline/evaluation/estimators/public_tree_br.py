@@ -45,7 +45,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import multiprocessing
 import resource
+import sys
 import time
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -472,6 +474,7 @@ class PublicTreeBestResponse:
     ):
         self._on_branch = on_branch
         self._branches_done = 0
+        self._blueprint = blueprint
         self._policy_source = blueprint.policy_source
         self._factory = blueprint_factory
         self._rules = blueprint.rules
@@ -652,15 +655,23 @@ class PublicTreeBestResponse:
             done = self._branches_done - len(jobs)
             self._joined = {}
             if jobs:
-                workers = _ram_safe_workers(min(self._config.num_workers, len(jobs)), self._config)
-                self._joined, peak, anon = _run_jobs(
-                    jobs,
-                    workers=workers,
-                    init=(factory, self._config, self._starting_stack),
-                    publish=publish,
-                    done=done,
-                    total=self.branch_total,
+                inherit = _FORK is not None
+                workers = _ram_safe_workers(
+                    min(self._config.num_workers, len(jobs)), self._config, inherited=inherit
                 )
+                global _INHERITED
+                _INHERITED = self._blueprint if inherit else None
+                try:
+                    self._joined, peak, anon = _run_jobs(
+                        jobs,
+                        workers=workers,
+                        init=(factory, self._config, self._starting_stack),
+                        publish=publish,
+                        done=done,
+                        total=self.branch_total,
+                    )
+                finally:
+                    _INHERITED = None
                 logger.info(
                     "public-tree BR fork-join: %d flop jobs over %d workers, "
                     "peak worker RSS %.2f GB of which private %.2f GB",
@@ -1279,25 +1290,33 @@ def _summarise_decomposition(
 
 
 _ENGINE: PublicTreeBestResponse | None = None
+# The parent's blueprint, set only across a FORKED pool's lifetime: a forked
+# worker reads the parent's arrays copy-on-write instead of loading its own
+# ~2 GB copy (x2.4 while loading), which is what capped a D16 at 5 of 15
+# workers. Its arrays are only ever read, so the pages stay shared.
+_INHERITED: ScorableBlueprint | None = None
+# Fork where the platform has it (Linux, the pool); elsewhere workers are
+# spawned and rebuild the blueprint through the factory.
+_FORK = multiprocessing.get_context("fork") if sys.platform == "linux" else None
 
 
 def _init_worker(
     factory: Callable[[], ScorableBlueprint], config: PublicBRConfig, starting_stack: int
 ) -> None:
-    """Build the engine ONCE per process: the blueprint load is seconds, a job
-    can be milliseconds, and the per-context policy tables amortise across
-    every job the process runs. Rebuilt through the factory rather than
-    received, since the solver is not picklable. Spawned, so logging config
-    does not inherit."""
+    """Build the engine ONCE per process: a job can be milliseconds, and the
+    per-context policy tables amortise across every job the process runs. A
+    forked worker takes the parent's blueprint; a spawned one rebuilds it
+    through the factory, since the solver is not picklable."""
     global _ENGINE
     configure_logging()
-    _ENGINE = PublicTreeBestResponse(factory(), config, starting_stack=starting_stack)
+    blueprint = _INHERITED if _INHERITED is not None else factory()
+    _ENGINE = PublicTreeBestResponse(blueprint, config, starting_stack=starting_stack)
 
 
 def _flop_worker(job: _FlopJob) -> tuple[_FlopPart, int, int]:
     assert _ENGINE is not None, "worker used before _init_worker"
     part = _ENGINE.flop_part(job)
-    return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, _rss_anon_kb()
+    return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, _private_kb()
 
 
 def _proc_kb(path: str, field: str) -> int:
@@ -1307,6 +1326,14 @@ def _proc_kb(path: str, field: str) -> int:
     except OSError:
         return 0
     return next((int(line.split()[1]) for line in lines if line.startswith(field)), 0)
+
+
+def _private_kb() -> int:
+    """Pages only this process holds. RssAnon counts a forked worker's
+    copy-on-write view of the parent's blueprint as its own; this does not."""
+    return _proc_kb("/proc/self/smaps_rollup", "Private_Clean:") + _proc_kb(
+        "/proc/self/smaps_rollup", "Private_Dirty:"
+    )
 
 
 def _rss_anon_kb() -> int:
@@ -1331,6 +1358,11 @@ _LOAD_PEAK = 2.4
 _PER_BOARD_BYTES = 120 * 1024
 # Left to the OS and the page cache the checkpoint is read through.
 _HEADROOM_BYTES = 2 * 2**30
+# What a FORKED worker adds beyond the blueprint it shares with the parent:
+# the engine, its policy tables, and every page the walk writes. MEASURED
+# 09-26 at 4/16/16 on the production tree: 1.47 GB private per worker (the
+# fork-join's "private" figure); kept with margin. Revise from that line.
+_INHERITED_WORKER_BYTES = 1600 * 2**20
 
 
 def _ram_safe_workers(
@@ -1339,6 +1371,7 @@ def _ram_safe_workers(
     *,
     footprint: int | None = None,
     available: int | None = None,
+    inherited: bool = False,
 ) -> int:
     """``requested`` lowered to what free RAM holds; ``--workers`` is a ceiling.
 
@@ -1359,16 +1392,17 @@ def _ram_safe_workers(
     turns = min(config.num_turns, 49)
     rivers = min(config.num_rivers, 48)
     boards = flops * (turns + turns * rivers)
-    per_worker = footprint * _LOAD_PEAK + boards * _PER_BOARD_BYTES
+    own = _INHERITED_WORKER_BYTES if inherited else footprint * _LOAD_PEAK
+    per_worker = own + boards * _PER_BOARD_BYTES
     fits = max(1, int((available - _HEADROOM_BYTES) // per_worker))
     workers = min(requested, fits)
     logger.info(
-        "public-tree BR fork-join: %d workers of %d requested -- %.2f GB private per worker "
-        "(x%.1f load peak, +%.2f GB caches for %d boards) against %.2f GB available",
+        "public-tree BR fork-join: %d workers of %d requested -- %.2f GB per worker "
+        "(%s, +%.2f GB caches for %d boards) against %.2f GB available",
         workers,
         requested,
-        footprint / 2**30,
-        _LOAD_PEAK,
+        own / 2**30,
+        "blueprint inherited from the parent" if inherited else f"x{_LOAD_PEAK} load peak",
         boards * _PER_BOARD_BYTES / 2**30,
         boards,
         available / 2**30,
@@ -1395,7 +1429,9 @@ def _run_jobs(
     """
     parts: dict[tuple[int, int, int], _FlopPart] = {}
     peak = anon = 0
-    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker, initargs=init) as pool:
+    with ProcessPoolExecutor(
+        max_workers=workers, mp_context=_FORK, initializer=_init_worker, initargs=init
+    ) as pool:
         futures = {pool.submit(_flop_worker, job): job for job in jobs}
         for future in as_completed(futures):
             part, rss, rss_anon = future.result()

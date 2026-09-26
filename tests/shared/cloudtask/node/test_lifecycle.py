@@ -125,15 +125,11 @@ class TestMain:
         assert "run-a/.run.json" in container
         assert not any("fetched-by-an-evaluate" in name for name in container), sorted(container)
 
-    def test_an_evaluation_publishes_the_scored_run_and_nothing_else(
-        self, paths, monkeypatch, container
-    ):
-        """Neighbouring runs stay untouched: re-publishing a ladder an earlier
-        evaluate task had fetched cost ~30 minutes per task.
-
-        An eval's SCORE goes to Postgres, not to a file the exit publish
-        carries: `record_evaluation` writes the sink and nothing writes
-        `evals/*.json` at all any more, so no node task produces one."""
+    def test_an_evaluation_publishes_nothing(self, paths, monkeypatch, container):
+        """An evaluation's score goes to Postgres, and its token is READ-only:
+        every exact-BR task used to end on a 403 trying to rewrite the scored
+        run's manifest, which with write access could have clobbered a newer one
+        from a run still training. Neighbouring fetched runs stay untouched too."""
         monkeypatch.setenv("RUN_OP", str(TaskName.EVALUATE))
         monkeypatch.setenv("RUN_ID", "run-scored")
         monkeypatch.setenv("POKER_SOLVER_CHECKPOINT_SAS", SAS)
@@ -146,8 +142,7 @@ class TestMain:
         monkeypatch.setitem(lifecycle.HANDLERS, TaskName.EVALUATE, lambda *a: (0, None))
 
         lifecycle.main()
-        assert "run-scored/.run.json" in container
-        assert not any("run-neighbour" in name for name in container), sorted(container)
+        assert not any(name.startswith("run-") for name in container), sorted(container)
 
 
 def _signalled(plan, paths, log):
