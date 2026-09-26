@@ -98,7 +98,9 @@ def test_train_pcs_hands_the_kernel_count_to_the_clamp(monkeypatch, tmp_path):
         seen.update(kwargs)
         raise StopError
 
-    monkeypatch.setattr(pcs_training.blueprint, "build_card_abstraction", lambda _c: Buckets())
+    monkeypatch.setattr(
+        pcs_training.blueprint, "build_card_abstraction", lambda _c, **_kw: Buckets()
+    )
     monkeypatch.setattr(
         pcs_training.blueprint, "resolve_card_abstraction_hash", lambda _c: "stub-abstraction"
     )

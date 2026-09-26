@@ -14,31 +14,20 @@ solver work lives in :mod:`src.pipeline.training.static_parallel`.
 from __future__ import annotations
 
 import logging
-import time
-import uuid
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from src.core.actions.action_model import ActionModel
-from src.pipeline import blueprint
-from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
-from src.pipeline.training.run_tracker import (
-    ExperimentTag,
-    RunTracker,
-    continued_config,
-    has_run_record,
-)
+from src.pipeline.services.run_opening import open_run, train_recorded
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
-from src.shared.config import DEFAULT_RUNS_DIR
-from src.shared.config.loader import load_training_config
-from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
-    from src.shared.config import Config
+    from pathlib import Path
+
+    from src.pipeline.training.run_tracker import (
+        ExperimentTag,
+    )
     from src.shared.ports.record import RecordSink, RecordSource
 
 PROGRESS_ARTIFACT = "train-progress.json"
@@ -116,115 +105,46 @@ def train_static(
         FileNotFoundError: The card abstraction is missing (precompute it first).
         AbstractionHashMismatchError: The abstraction on disk is stale (recompute it).
     """
-    base_dir = Path(runs_dir) if runs_dir is not None else Path(DEFAULT_RUNS_DIR)
-    # Random suffix: second resolution collides, and two runs sharing a
-    # directory interleave their checkpoints silently.
-    if run_id is None:
-        run_id = f"run-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
-    run_dir = base_dir / run_id
-    # A named run that does not exist yet is a fresh start, not an error --
-    # that is what makes a scheduler retry continue rather than restart.
-    # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
-    # written, so a directory check answers `False` for every run created
-    # after the flip -- which mints fresh metadata over a live ladder and
-    # restarts training from zero.
-    resuming = has_run_record(run_dir, record_source)
-    if resuming:
-        tracker = RunTracker.load(run_dir, record_source, sink)
-        config: Config = continued_config(tracker, config_name, config_overrides, seed)
-    else:
-        if not config_name:
-            raise ValueError("a fresh run needs a config name; only a continuation goes without")
-        overrides: dict[str, object] = dict(config_overrides or {})
-        if seed is not None:
-            overrides["system__seed"] = seed
-        config = load_training_config(config_name, **overrides)
-    # The run's own verbosity. Workers repeat this from the same field, so all
-    # processes agree; --log-level still outranks it via the environment.
-    configure_logging(config.system.log_level)
+    run = open_run(
+        config_name,
+        kernel="scalar",
+        pin_abstraction=False,
+        run_id=run_id,
+        runs_dir=runs_dir,
+        seed=seed,
+        config_overrides=config_overrides,
+        experiment=experiment,
+        sink=sink,
+        record_source=record_source,
+    )
+    config, tracker = run.config, run.tracker
     iterations = num_iterations or config.training.num_iterations
-
-    action_model = ActionModel(config)
-    if resuming:
-        tracker.verify_action_config_hash(action_model.get_config_hash())
-        tracker.verify_card_abstraction_hash(blueprint.resolve_card_abstraction_hash(config))
-        tracker.mark_resumed()
-    else:
-        tag = experiment or ExperimentTag()
-        # Resolve the abstraction BEFORE anything is written, and translate its
-        # two failure modes into messages that name the fix. Bare "no such file"
-        # from deep inside the resolver does not tell a caller that the answer is
-        # `precompute`, and this is the first thing a fresh checkout hits.
-        try:
-            abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
-        except FileNotFoundError as e:
-            raise FileNotFoundError(
-                f"Card abstraction '{config.card_abstraction.config}' for training config "
-                f"'{config_name}' is missing. Precompute it before training. ({e})"
-            ) from e
-        except AbstractionHashMismatchError as e:
-            raise AbstractionHashMismatchError(
-                f"Card abstraction '{config.card_abstraction.config}' for training config "
-                f"'{config_name}' is stale (config hash mismatch). Recompute it. ({e})"
-            ) from e
-        tracker = RunTracker(
-            sink=sink,
-            source=record_source,
-            run_dir=run_dir,
-            config_name=config.system.config_name,
-            config=config,
-            action_config_hash=action_model.get_config_hash(),
-            card_abstraction_hash=abstraction_hash,
-            experiment_id=tag.experiment_id,
-            arm=tag.arm,
-            parent_run_id=tag.parent_run_id,
-            kernel="scalar",
-        )
-    run_dir.mkdir(parents=True, exist_ok=True)
-    # Before training, so `created` is genuinely the log's first event -- a run
-    # listing reads identity from that one line rather than folding.
-    tracker.initialize()
-
-    started = time.time()
-    try:
-        result = train_static_parallel(
+    result = train_recorded(
+        tracker,
+        lambda: train_static_parallel(
             config,
             num_iterations=iterations,
             num_workers=num_workers,
-            session_id=run_id,
-            checkpoint_dir=run_dir,
+            session_id=run.run_id,
+            checkpoint_dir=run.run_dir,
             # seed is optional in config; the static path needs a concrete
             # value because worker seeds are derived from it deterministically.
             base_seed=config.system.seed if config.system.seed is not None else 42,
             checkpoint_retain_every=config.storage.checkpoint_retain_every,
             # The bucket ASSIGNMENT, which the tree fingerprint deliberately does
             # not cover. Without it `load_checkpoint`'s AbstractionMismatchError
-            # cannot fire at all -- it needs the id on BOTH sides -- so the guard
-            # its own docstring calls "the only way that failure is ever visible"
-            # was inert for every run this trainer ever wrote.
+            # cannot fire at all -- it needs the id on BOTH sides.
             abstraction_id=tracker.metadata.card_abstraction_hash,
             checkpoint_every=checkpoint_every,
-            resume=resuming,
+            resume=run.resuming,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             on_checkpoint=tracker.record_checkpoint,
-        )
-    except Exception:
-        # cleanup_if_empty so a run that died before writing anything does not
-        # leave an empty directory for `describe_runs` to report as a real run.
-        tracker.mark_failed(cleanup_if_empty=True)
-        raise
-
-    tracker.update(
-        iterations=result.iterations,
-        runtime_seconds=time.time() - started,
-        num_infosets=result.touched_rows,
-        storage_capacity=result.num_rows,
+        ),
     )
-    tracker.mark_completed()
 
     return StaticTrainingOutput(
-        run_id=run_id,
-        runs_dir=str(base_dir),
+        run_id=run.run_id,
+        runs_dir=str(run.base_dir),
         config_name=config.system.config_name,
         iterations=result.iterations,
         num_rows=result.num_rows,

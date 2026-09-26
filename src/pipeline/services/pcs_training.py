@@ -11,34 +11,26 @@ from __future__ import annotations
 
 import logging
 import os
-import time
-import uuid
-from datetime import UTC, datetime
 from functools import partial
-from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel
 
-from src.core.actions.action_model import ActionModel
 from src.core.game.rules import GameRules
 from src.engine.solver.betting_tree import build_betting_tree
 from src.engine.solver.vector import compile_tree
 from src.pipeline import blueprint
+from src.pipeline.services.run_opening import open_run, train_recorded
 from src.pipeline.training import pcs_parallel
-from src.pipeline.training.run_tracker import (
-    ExperimentTag,
-    RunTracker,
-    continued_config,
-    has_run_record,
-)
 from src.pipeline.training.static_parallel import train_static_parallel
 from src.shared import records
-from src.shared.config import DEFAULT_RUNS_DIR
-from src.shared.config.loader import load_training_config
-from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from src.pipeline.training.run_tracker import (
+        ExperimentTag,
+    )
     from src.shared.config import Config
     from src.shared.ports.record import RecordSink, RecordSource
 
@@ -124,60 +116,25 @@ def train_pcs(
     attempt wrote, so refusing here would kill every retried run. The
     operator-facing refusal lives in `submit` and the task kinds.
     """
-    base_dir = Path(runs_dir) if runs_dir is not None else Path(DEFAULT_RUNS_DIR)
-    if run_id is None:
-        run_id = f"pcs-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6]}"
-    run_dir = base_dir / run_id
-    # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
-    # written, so a directory check answers `False` for every run created
-    # after the flip -- which mints fresh metadata over a live ladder and
-    # restarts training from zero.
-    resuming = has_run_record(run_dir, record_source)
-    if resuming:
-        tracker = RunTracker.load(run_dir, record_source, sink)
-        config: Config = continued_config(tracker, config_name, config_overrides, seed)
-    else:
-        if not config_name:
-            raise ValueError("a fresh run needs a config name; only a continuation goes without")
-        overrides: dict[str, object] = dict(config_overrides or {})
-        if seed is not None:
-            overrides["system__seed"] = seed
-        config = load_training_config(config_name, **overrides)
-    configure_logging(config.system.log_level)
-
-    action_model = ActionModel(config)
-    if resuming:
-        # By the HASH the run recorded, so a preset renamed or rebuilt since
-        # neither stops its own ladder nor mixes a second abstraction into it;
-        # the resolver skips the YAML when pinned, and fails if the hash is gone.
-        abstraction_hash = tracker.metadata.card_abstraction_hash
-        abstraction = blueprint.build_card_abstraction(config, abstraction_hash=abstraction_hash)
-        tracker.verify_action_config_hash(action_model.get_config_hash())
-        if tracker.metadata.kernel != KERNEL:
-            raise ValueError(
-                f"Run '{run_id}' was trained by the {tracker.metadata.kernel!r} kernel; "
-                "continuing it by public chance sampling would mix two lineages in one ladder."
-            )
-        tracker.mark_resumed()
-    else:
-        abstraction = blueprint.build_card_abstraction(config)
-        abstraction_hash = blueprint.resolve_card_abstraction_hash(config)
-        tag = experiment or ExperimentTag()
-        tracker = RunTracker(
-            sink=sink,
-            source=record_source,
-            run_dir=run_dir,
-            config_name=config.system.config_name,
-            config=config,
-            action_config_hash=action_model.get_config_hash(),
-            card_abstraction_hash=abstraction_hash,
-            experiment_id=tag.experiment_id,
-            arm=tag.arm,
-            parent_run_id=tag.parent_run_id,
-            kernel=KERNEL,
-        )
-    run_dir.mkdir(parents=True, exist_ok=True)
-    tracker.initialize()
+    run = open_run(
+        config_name,
+        kernel=KERNEL,
+        pin_abstraction=True,
+        run_id=run_id,
+        runs_dir=runs_dir,
+        seed=seed,
+        config_overrides=config_overrides,
+        experiment=experiment,
+        sink=sink,
+        record_source=record_source,
+    )
+    config, tracker, action_model = run.config, run.tracker, run.action_model
+    # By the HASH the run recorded, fresh or continued: a preset renamed or
+    # rebuilt since neither stops its ladder nor mixes a second abstraction in;
+    # the resolver skips the YAML when pinned, and fails if the hash is gone.
+    abstraction = blueprint.build_card_abstraction(
+        config, abstraction_hash=tracker.metadata.card_abstraction_hash
+    )
 
     rules = GameRules(config.game.small_blind, config.game.big_blind)
     tree = build_betting_tree(
@@ -232,42 +189,32 @@ def train_pcs(
     for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[variable] = "1"
 
-    started = time.time()
-    try:
-        result = train_static_parallel(
+    result = train_recorded(
+        tracker,
+        lambda: train_static_parallel(
             config,
             num_iterations=iterations,
             num_workers=workers,
-            session_id=run_id,
-            checkpoint_dir=run_dir,
+            session_id=run.run_id,
+            checkpoint_dir=run.run_dir,
             abstraction_id=tracker.metadata.card_abstraction_hash,
             base_seed=config.system.seed if config.system.seed is not None else 42,
             checkpoint_retain_every=retain_every or checkpoint_every,
             abstraction=abstraction,
             checkpoint_every=checkpoint_every,
-            resume=resuming,
+            resume=run.resuming,
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             on_checkpoint=tracker.record_checkpoint,
             worker=pcs_parallel.pcs_worker,
             before_checkpoint=partial(pcs_parallel.prepare_checkpoint, config=config),
             extra_arrays=extra,
             dynamic=True,
-        )
-    except Exception:
-        tracker.mark_failed(cleanup_if_empty=True)
-        raise
-
-    tracker.update(
-        iterations=result.iterations,
-        runtime_seconds=time.time() - started,
-        num_infosets=result.touched_rows,
-        storage_capacity=result.num_rows,
+        ),
     )
-    tracker.mark_completed()
 
     return PcsTrainingOutput(
-        run_id=run_id,
-        runs_dir=str(base_dir),
+        run_id=run.run_id,
+        runs_dir=str(run.base_dir),
         config_name=config.system.config_name,
         iterations=result.iterations,
         board_passes=result.iterations * config.pcs.runouts_per_flop,

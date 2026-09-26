@@ -11,8 +11,8 @@ from src.pipeline.abstraction.resolver import AbstractionHashMismatchError
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.lbr.hunl_local_best_response import HandOutcome
 from src.pipeline.services import bucketing as services_bucketing
+from src.pipeline.services import run_opening
 from src.pipeline.services import runs as services_runs
-from src.pipeline.services import static_training as services_training
 from src.pipeline.services.scoring import _shared as services_shared
 from src.pipeline.services.scoring import lbr as services_lbr
 from src.shared.config.loader import load_training_config
@@ -47,17 +47,13 @@ def _fake_metadata() -> SimpleNamespace:
 
 def _patch_abstraction_failure(monkeypatch, tmp_path, exc):
     """Point train_static at a fresh run dir whose abstraction resolution fails."""
-    monkeypatch.setattr(
-        services_training,
-        "load_training_config",
-        lambda name, **ov: _fake_config(),
-    )
-    monkeypatch.setattr(services_training, "ActionModel", lambda cfg: MagicMock())
+    monkeypatch.setattr(run_opening, "load_training_config", lambda name, **ov: _fake_config())
+    monkeypatch.setattr(run_opening, "ActionModel", lambda cfg: MagicMock())
 
     def _raise(_cfg):
         raise exc
 
-    monkeypatch.setattr(services_training.blueprint, "resolve_card_abstraction_hash", _raise)
+    monkeypatch.setattr(run_opening.blueprint, "resolve_card_abstraction_hash", _raise)
 
 
 def test_train_static_translates_missing_abstraction(monkeypatch, tmp_path):

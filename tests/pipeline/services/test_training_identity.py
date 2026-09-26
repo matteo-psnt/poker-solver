@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from src.core.actions.action_model import ActionModel
-from src.pipeline.services import pcs_training, static_training
+from src.pipeline.services import pcs_training, run_opening, static_training
 from src.pipeline.training.run_tracker import RunTracker
 from tests.memory_record import MemoryRecord
 from tests.pipeline.training.test_static_parallel import Buckets, _config
@@ -35,11 +35,11 @@ def continuation(request, monkeypatch, tmp_path):
         source=record,
     )
     tracker.mark_completed()
-    monkeypatch.setattr(service, "load_training_config", lambda *_a, **_kw: config)
+    monkeypatch.setattr(run_opening, "load_training_config", lambda *_a, **_kw: config)
     build = Mock(return_value=Buckets())
-    monkeypatch.setattr(service.blueprint, "build_card_abstraction", build)
+    monkeypatch.setattr(run_opening.blueprint, "build_card_abstraction", build)
     resolve = Mock(return_value="original-buckets")
-    monkeypatch.setattr(service.blueprint, "resolve_card_abstraction_hash", resolve)
+    monkeypatch.setattr(run_opening.blueprint, "resolve_card_abstraction_hash", resolve)
     train = Mock(side_effect=ReachedTrainingError)
     monkeypatch.setattr(service, "train_static_parallel", train)
 
@@ -100,3 +100,39 @@ def test_pcs_continues_on_its_recorded_abstraction_when_the_preset_moved(continu
         invoke()
     assert build.call_args.kwargs["abstraction_hash"] == "original-buckets"
     assert train.call_args.kwargs["abstraction_id"] == "original-buckets"
+
+
+@pytest.mark.parametrize(
+    ("recorded", "service"), [("pcs", "scalar"), ("scalar", "pcs"), (None, "pcs")]
+)
+def test_a_run_continues_only_under_the_kernel_that_trained_it(
+    recorded, service, monkeypatch, tmp_path
+):
+    """Two kernels in one ladder is two lineages. Only PCS used to refuse;
+    a run recorded before the field (None) was scalar, so PCS refuses it too."""
+    config = _config()
+    record = MemoryRecord()
+    tracker = RunTracker(
+        run_dir=tmp_path / "existing",
+        config_name="test",
+        config=config,
+        action_config_hash=ActionModel(config).get_config_hash(),
+        card_abstraction_hash="original-buckets",
+        kernel=recorded,
+        sink=record,
+        source=record,
+    )
+    tracker.mark_completed()
+    monkeypatch.setattr(run_opening, "load_training_config", lambda *_a, **_kw: config)
+    monkeypatch.setattr(
+        run_opening.blueprint, "resolve_card_abstraction_hash", lambda _c: "original-buckets"
+    )
+    invoke = (
+        partial(pcs_training.train_pcs, "test", iterations=2)
+        if service == "pcs"
+        else partial(static_training.train_static, "test", num_iterations=2)
+    )
+    with pytest.raises(ValueError, match="kernel"):
+        invoke(
+            num_workers=1, runs_dir=tmp_path, run_id="existing", sink=record, record_source=record
+        )
