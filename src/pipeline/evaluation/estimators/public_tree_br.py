@@ -71,6 +71,7 @@ from src.engine.solver.infoset.index import preflop_hand_index
 from src.engine.solver.mccfr.chance import begin_street
 from src.engine.solver.policy.lookup import blueprint_policy_table
 from src.pipeline.abstraction.postflop.board_enumeration import CanonicalBoardEnumerator
+from src.pipeline.evaluation.estimators import public_tree_walk
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
@@ -510,6 +511,11 @@ class PublicTreeBestResponse:
         )
         self._br_seat = 0
         self._tally = _Tally()
+        # The compiled flop walk covers the plain measurement; the resolver,
+        # the decomposition and the in-abstraction responder walk in Python.
+        self._compiled = not (config.deployed or config.decompose or config.in_abstraction)
+        self._subtrees: dict[tuple, public_tree_walk.Subtree] = {}
+        self._board_tables: dict[tuple, public_tree_walk.Boards] = {}
         # Fork-join state: a list while the preflop pass RECORDS flop subtrees,
         # a dict while it JOINS the parts workers returned, None on the serial
         # path. `_walk` and `_deal` index the jobs in visit order.
@@ -625,11 +631,34 @@ class PublicTreeBestResponse:
     def _flop_part(
         self, state: GameState, reach: np.ndarray, own_reach: np.ndarray, line: str
     ) -> _FlopPart:
+        if self._compiled:
+            return self._compiled_flop_part(state, reach, own_reach)
         saved, self._tally = self._tally, _Tally()
         best, self_play = self._walk(state, reach, own_reach, line)
         part = _FlopPart(best, self_play, self._tally)
         self._tally = saved
         return part
+
+    def _compiled_flop_part(
+        self, state: GameState, reach: np.ndarray, own_reach: np.ndarray
+    ) -> _FlopPart:
+        """`_flop_part` through the compiled walk: same values, same tally."""
+        tree_key = (state.button_position, state.normalized_betting_sequence())
+        tree = self._subtrees.get(tree_key)
+        if tree is None:
+            tree = self._subtrees[tree_key] = public_tree_walk.build_subtree(self, state)
+        board_key = tuple(card.mask for card in state.board)
+        boards = self._board_tables.get(board_key)
+        if boards is None:
+            boards = self._board_tables[board_key] = public_tree_walk.build_boards(
+                self, state.board
+            )
+        best, self_play, nodes, decision, missing = public_tree_walk.walk_flop_part(
+            tree, boards, self._br_seat, reach, own_reach
+        )
+        return _FlopPart(
+            best, self_play, _Tally(nodes=nodes, decision_mass=decision, missing_mass=missing)
+        )
 
     def _fork_join(
         self, walks: list[tuple[int, int]], factory: Callable[[], ScorableBlueprint]
@@ -913,7 +942,7 @@ class PublicTreeBestResponse:
         else:
             choice = best_children.argmax(axis=1)
         best = np.take_along_axis(best_children, choice[:, None], axis=1)[:, 0]
-        self_play = np.einsum("ij,ij->i", sigma, self_children)
+        self_play = mixed(sigma, self_children)
         if self._config.decompose:
             self._record_gain(
                 state, legal, line, opp_reach, own_reach, sigma, best_children, choice, best
@@ -973,7 +1002,7 @@ class PublicTreeBestResponse:
         must not enter the sum here, where nothing above will cancel it.
         """
         alive = self._alive(state)
-        terms = own_reach * (best - np.einsum("ij,ij->i", sigma, best_children))
+        terms = own_reach * (best - mixed(sigma, best_children))
         terms[~alive] = 0.0
         weight = own_reach * nonblocking_mass(opp_reach)
         weight[~alive] = 0.0
@@ -1050,6 +1079,13 @@ class PublicTreeBestResponse:
         """The context's dense (bucket x action) table, its fallback flags, and
         this board's bucket vector -- what `_policy_matrix` gathers through, for
         callers that need less than both gathered arrays."""
+        rows, row_missing = self._policy_table(state, legal, context_key)
+        return rows, row_missing, self._bucket_vector(state.board, state.street)
+
+    def _policy_table(
+        self, state: GameState, legal: tuple[Action, ...], context_key: tuple | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """The context's dense table with its blocked-combo sentinel row appended."""
         if context_key is None:
             context_key = (
                 state.current_player,
@@ -1058,17 +1094,19 @@ class PublicTreeBestResponse:
             )
         cached = self._policy_cache.get(context_key)
         if cached is None:
-            rows, row_missing = blueprint_policy_table(
-                self._policy_source.rows_at(state), state, self._rules, legal
-            )
-            rows = transform_policy_rows(rows, row_missing, self._config)
-            cached = (
-                np.vstack([rows, np.zeros((1, rows.shape[1]))]),
-                np.append(row_missing, False),
-            )
-            self._policy_cache[context_key] = cached
-        rows, row_missing = cached
-        return rows, row_missing, self._bucket_vector(state.board, state.street)
+            cached = self._policy_cache[context_key] = self.build_policy_table(state, legal)
+        return cached
+
+    def build_policy_table(
+        self, state: GameState, legal: tuple[Action, ...]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """`_policy_table` uncached, for the compiled walk: it holds its own
+        flattened copy, and a second in the cache would double a worker."""
+        rows, row_missing = blueprint_policy_table(
+            self._policy_source.rows_at(state), state, self._rules, legal
+        )
+        rows = transform_policy_rows(rows, row_missing, self._config)
+        return np.vstack([rows, np.zeros((1, rows.shape[1]))]), np.append(row_missing, False)
 
     def _resolver_matrix(
         self,
@@ -1335,6 +1373,24 @@ def _flop_worker(job: _FlopJob) -> tuple[_FlopPart, int, int]:
     assert _ENGINE is not None, "worker used before _init_worker"
     part = _ENGINE.flop_part(job)
     return part, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, _private_kb()
+
+
+@njit(cache=True)
+def mixed(sigma, values):
+    """``sum_a sigma[:, a] * values[:, a]``, added left to right from 0.0.
+
+    NOT ``np.einsum``: its reduction order is the platform's SIMD width (2-wide
+    fused multiply-adds on the laptop, AVX on the pool), so its bytes are not
+    reproducible across machines, and a compiled walk has to match this one.
+    """
+    combos, actions = values.shape
+    out = np.empty(combos, dtype=np.float64)
+    for h in range(combos):
+        acc = 0.0
+        for a in range(actions):
+            acc += sigma[h, a] * values[h, a]
+        out[h] = acc
+    return out
 
 
 @njit(cache=True)
