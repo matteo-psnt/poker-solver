@@ -44,6 +44,12 @@ import numpy as np
 
 from src.core.game.state import Street
 from src.engine.solver.vector.compiled_tree import EDGE_TO_TERMINAL, CompiledTree, TerminalKind
+from src.engine.solver.vector.fused import (
+    bucket_dot,
+    gathered_action_sum,
+    segment_blocks,
+    segment_rows,
+)
 from src.engine.solver.vector.hand_context import HandContext, showdown_matrix
 from src.engine.solver.vector.showdown import RankWalk
 
@@ -53,10 +59,11 @@ if TYPE_CHECKING:
 # A standard deck, fixing the width of the per-card range-mass table.
 NUM_CARDS = 52
 
-# Blocks of (nodes x hands x actions) floats are the kernel's working set. This
-# caps one block's element count so a wide level does not allocate a multi-GB
-# temporary; groups larger than this are processed in several chunks.
-MAX_BLOCK_ELEMENTS = 8_000_000
+# Blocks of (nodes x hands x actions) floats are the kernel's working set; a
+# group wider than this runs in chunks. Small enough to stay in cache: measured
+# 09-26 on a D64 at 19 workers, 8M -> 64k is 4.61 -> 3.78 s/rung, and 16k is
+# slower again because per-chunk overhead takes over. Output is byte-identical.
+MAX_BLOCK_ELEMENTS = 65_536
 
 DTYPE = np.float32
 
@@ -484,16 +491,17 @@ class VectorCFR:
                 targets, is_terminal = self.child_targets(group, chunk)
 
                 actor_children = self.gather_children(targets, is_terminal, actor, below)
-                other_children = self.gather_children(targets, is_terminal, other, below)
 
                 if per_hand:
                     actor_value = np.take_along_axis(
                         actor_children, block.astype(np.int64)[:, :, None], axis=2
                     )[:, :, 0]
                 else:
-                    actor_value = (block[:, buckets, :] * actor_children).sum(axis=-1)
+                    actor_value = bucket_dot(block, buckets, actor_children)
                 self.value[here][actor, slots] = actor_value
-                self.value[here][other, slots] = other_children.sum(axis=-1)
+                self.value[here][other, slots] = gathered_action_sum(
+                    targets, is_terminal, self.value[below][other], self.terminal_value[other]
+                )
 
                 self._scatter_to_buckets(group, chunk, actor_children, actor_value)
 
@@ -541,10 +549,8 @@ class VectorCFR:
         num_buckets = self.compiled.tree.num_buckets(group.street)
         num_actions = group.num_actions
 
-        children = np.add.reduceat(
-            actor_children[:, segments.hand_order, :], segments.segment_start, axis=1
-        )
-        node = np.add.reduceat(actor_value[:, segments.hand_order], segments.segment_start, axis=1)
+        children = segment_blocks(actor_children, segments.hand_order, segments.segment_start)
+        node = segment_rows(actor_value, segments.hand_order, segments.segment_start)
 
         block = np.zeros((children.shape[0], num_buckets, num_actions), dtype=DTYPE)
         block[:, segments.segment_bucket, :] = children - node[:, :, None]
@@ -601,10 +607,8 @@ class VectorCFR:
         if group.actor not in self.update_players:
             return
         segments = self.segments[group.street]
-        reach = self.reach[group.level & 1][group.actor, group.slot_ids[chunk]][
-            :, segments.hand_order
-        ]
-        collapsed = np.add.reduceat(reach, segments.segment_start, axis=1)
+        reach = self.reach[group.level & 1][group.actor, group.slot_ids[chunk]]
+        collapsed = segment_rows(reach, segments.hand_order, segments.segment_start)
 
         num_buckets = self.compiled.tree.num_buckets(group.street)
         mass = np.zeros((collapsed.shape[0], num_buckets), dtype=DTYPE)
