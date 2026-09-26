@@ -147,12 +147,12 @@ def train_pcs(
 
     action_model = ActionModel(config)
     if resuming:
-        # By the HASH the run recorded, so a preset renamed or deleted since
-        # does not stop its own ladder; the resolver skips the YAML when pinned.
+        # By the HASH the run recorded, so a preset renamed or rebuilt since
+        # neither stops its own ladder nor mixes a second abstraction into it;
+        # the resolver skips the YAML when pinned, and fails if the hash is gone.
         abstraction_hash = tracker.metadata.card_abstraction_hash
         abstraction = blueprint.build_card_abstraction(config, abstraction_hash=abstraction_hash)
         tracker.verify_action_config_hash(action_model.get_config_hash())
-        tracker.verify_card_abstraction_hash(abstraction_hash)
         if tracker.metadata.kernel != KERNEL:
             raise ValueError(
                 f"Run '{run_id}' was trained by the {tracker.metadata.kernel!r} kernel; "

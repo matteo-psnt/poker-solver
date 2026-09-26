@@ -124,11 +124,6 @@ def train_static(
     run_dir = base_dir / run_id
     # A named run that does not exist yet is a fresh start, not an error --
     # that is what makes a scheduler retry continue rather than restart.
-    # BOTH layouts. A run written before the event log has a .run.json and no
-    # log, and missing it here is not a cosmetic bug: `resuming` False mints
-    # fresh metadata over a live run, skips verify_action_config_hash, and
-    # restarts training from zero into a directory holding a real ladder --
-    # which save_checkpoint then extends with mixed-lineage rungs and prunes.
     # THROUGH THE RECORD, not the filesystem. `run.jsonl` is no longer
     # written, so a directory check answers `False` for every run created
     # after the flip -- which mints fresh metadata over a live ladder and

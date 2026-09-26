@@ -95,8 +95,7 @@ def _train(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, str 
             cwd=paths.code,
             timeout=plan.timeout_seconds,
             log=log,
-            # Training is the long one, and the only task anybody watches for
-            # hours wondering where the time is going.
+            # The task anybody watches for hours wondering where the time goes.
             profile_dir=paths.work / profile.PROFILES_DIRNAME,
         )
     finally:
@@ -148,7 +147,14 @@ def _evaluate(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> tuple[int, s
                 f"evaluate: run={plan.run_id} method={plan.eval_method}"
                 + (f" at={rung}" if rung else "")
             )
-            code = run_guarded(_cli(argv), cwd=paths.code, timeout=plan.timeout_seconds, log=log)
+            code = run_guarded(
+                _cli(argv),
+                cwd=paths.code,
+                timeout=plan.timeout_seconds,
+                log=log,
+                # An exact-BR rung runs ~95 minutes, longer than most training legs.
+                profile_dir=paths.work / profile.PROFILES_DIRNAME,
+            )
             # One bad rung must not abandon the rest: a partial curve beats none,
             # and the failure is visible in this log and absent from the ledger.
             if code == 0:

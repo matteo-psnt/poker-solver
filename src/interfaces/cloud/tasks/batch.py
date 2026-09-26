@@ -13,6 +13,7 @@ Entra ID is the only way in), so there is no fallback to configure.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -43,6 +44,11 @@ if TYPE_CHECKING:
 # Batch calls are latency-bound round trips, not work, so independent ones are
 # worth issuing together. 16 matches the share downloader.
 _PARALLEL_CALLS = 16
+
+# The SDK's "failsafe deserialization" logs a full traceback for every error
+# response it could not parse -- a streamed file read never parses, so a
+# missing job printed 12 lines of azure internals above the actual answer.
+logging.getLogger("azure.batch._utils.model_base").setLevel(logging.CRITICAL)
 
 JOB_MAX_WALL_CLOCK = timedelta(days=2)
 TASK_MAX_WALL_CLOCK = timedelta(days=1)
