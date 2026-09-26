@@ -37,6 +37,15 @@ if TYPE_CHECKING:
 STREETS = (Street.PREFLOP, Street.FLOP, Street.TURN, Street.RIVER)
 
 
+def strategy_weight(weighting: str, iteration: int, gamma: float) -> float:
+    """What iteration ``iteration`` adds to the average strategy, per unit of reach."""
+    if weighting == "dcfr":
+        return float(compute_dcfr_strategy_weight(iteration, gamma))
+    if weighting == "linear":
+        return float(max(iteration, 1))
+    return 1.0
+
+
 def dcfr_discount(iteration: int, alpha: float, beta: float) -> tuple[float, float] | None:
     """``(positive, negative)`` multipliers for stored regrets at ``iteration``.
 
@@ -111,15 +120,12 @@ class PublicChanceSamplingCFR:
     def _schedule(self, kernel: VectorCFR, iteration: int, runouts: int) -> None:
         """Set the pass controls for absolute iteration ``iteration``."""
         kernel.update_players = (iteration % 2,) if self.alternating else (0, 1)
+        weight = strategy_weight(self.weighting, iteration, self.dcfr_gamma)
         if self.weighting == "dcfr":
-            weight = float(compute_dcfr_strategy_weight(iteration, self.dcfr_gamma))
             scale = 1.0
             kernel.regret_discount = dcfr_discount(iteration, self.dcfr_alpha, self.dcfr_beta)
-        elif self.weighting == "linear":
-            weight = scale = float(max(iteration, 1))
-            kernel.regret_discount = None
         else:
-            weight = scale = 1.0
+            scale = weight
             kernel.regret_discount = None
         # Averaged over the runouts of one iteration, so K passes carry the
         # weight of one board: the update is an estimate of the chance

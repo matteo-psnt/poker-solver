@@ -30,13 +30,13 @@ from src.engine.solver.vector import compile_tree
 from src.engine.solver.vector.cfr_br import BR_REGIONS, CFRBestResponse, TrunkLayout
 from src.engine.solver.vector.hand_context import enumerate_live_hands
 from src.engine.solver.vector.kernel import DTYPE, MAX_BLOCK_ELEMENTS
-from src.engine.solver.vector.pcs import PublicChanceSamplingCFR
+from src.engine.solver.vector.pcs import PublicChanceSamplingCFR, strategy_weight
 from src.pipeline.abstraction.vector_universe import build_hand_context
-from src.pipeline.training.static_parallel import _build_local, worker_seed
+from src.pipeline.training.static_parallel import _build_local
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable
 
     from src.engine.solver.betting_tree import BettingTree
     from src.engine.solver.protocols import BucketingStrategy
@@ -230,6 +230,33 @@ def _smaps_rollup() -> dict[str, int]:
     return fields
 
 
+def root_mass_retained(storage: StaticArrayStorage, config: Config, iterations: int) -> float:
+    """Fraction of the average strategy's ROOT mass the shared table actually holds.
+
+    Every live hand reaches the root with probability one and a strategy row
+    sums to one, so iterations ``[0, iterations)`` put exactly ``hands * sum w(t)``
+    there. Hogwild's unlocked read-modify-write is the only way below 1, so this
+    is the measured share of updates that survived the workers' races.
+    """
+    solver = config.solver
+    expected = LIVE_HANDS * sum(
+        strategy_weight(solver.iteration_weighting, t, solver.dcfr_gamma) for t in range(iterations)
+    )
+    root = storage.tree.node_action_matrix(storage.strategy_sum, 0)
+    return float(np.asarray(root, dtype=np.float64).sum()) / expected
+
+
+def prepare_checkpoint(storage: StaticArrayStorage, iterations: int, *, config: Config) -> None:
+    """What the coordinator does to the table before each PCS checkpoint write."""
+    mark_visited_from_strategy(storage)
+    if not config.pcs.alternating:  # alternating skips the root actor every other t
+        logger.info(
+            "[pcs] root strategy mass retained %.6f at %d (below 1 = updates lost to races)",
+            root_mass_retained(storage, config, iterations),
+            iterations,
+        )
+
+
 def mark_visited_from_strategy(storage: StaticArrayStorage) -> None:
     """``visited`` is what evaluation reads as 'has an answer'; derive it from mass.
 
@@ -246,11 +273,11 @@ def pcs_worker(
     config: Config,
     worker_id: int,
     session_id: str,
-    indices: Sequence[int],
+    indices: Iterable[int],
     base_seed: int,
     result_queue: Any,
     abstraction: BucketingStrategy | None = None,
-    chunk_start: int = 0,
+    _chunk_start: int = 0,  # the scalar worker's seed input; PCS seeds per iteration
     counters: Any = None,
     _merge_lock: Any = None,  # the scalar worker's tally merge; PCS writes stay Hogwild
 ) -> None:
@@ -308,12 +335,14 @@ def pcs_worker(
                 storage.extra_array(TRUNK_ARRAY).nbytes / 1e6,
                 tree.num_slots,
             )
-        rng = np.random.default_rng(worker_seed(base_seed, worker_id, chunk_start))
 
         started = time.time()
         banked = int(counters[worker_id]) if counters is not None else 0
         count = 0
         for iteration in indices:
+            # Seeded by the ITERATION, not the worker: which worker draws which
+            # iteration is a race under dynamic handout, and the boards must not be.
+            rng = np.random.default_rng([base_seed, int(iteration)])
             contexts, boards = iteration_contexts(
                 rng, abstraction, pcs.runouts_per_flop, pcs.runout_mode
             )
@@ -373,7 +402,9 @@ __all__ = (
     "iteration_contexts",
     "mark_visited_from_strategy",
     "pcs_worker",
+    "prepare_checkpoint",
     "ram_safe_workers",
+    "root_mass_retained",
     "sample_boards",
     "sample_boards_shared_turn",
     "trunk_arrays",

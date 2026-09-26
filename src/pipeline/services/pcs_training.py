@@ -14,6 +14,7 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -247,8 +248,9 @@ def train_pcs(
             on_progress=records.progress_writer(progress_file, records.REGISTRY[PROGRESS_ARTIFACT]),
             on_checkpoint=tracker.record_checkpoint,
             worker=pcs_parallel.pcs_worker,
-            before_checkpoint=pcs_parallel.mark_visited_from_strategy,
+            before_checkpoint=partial(pcs_parallel.prepare_checkpoint, config=config),
             extra_arrays=extra,
+            dynamic=True,
         )
     except Exception:
         tracker.mark_failed(cleanup_if_empty=True)

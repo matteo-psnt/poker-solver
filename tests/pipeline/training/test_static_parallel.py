@@ -319,3 +319,20 @@ def test_collect_tolerates_a_worker_that_exited_cleanly_before_its_result_is_rea
         ]
     finally:
         thread.join()
+
+
+def test_iteration_tickets_hand_out_every_iteration_exactly_once():
+    """Workers draining one ticket counter together must tile the chunk: no
+    iteration twice (that would double an update) and none skipped (the
+    coordinator's tile check would then fail the chunk)."""
+    import multiprocessing as mp
+
+    from src.pipeline.training.static_parallel import IterationTickets
+
+    tickets = IterationTickets(mp.get_context("spawn").Value("q", 400), 600)
+    first, second = iter(tickets), iter(tickets)
+    drawn = []
+    for a, b in zip(first, second, strict=False):
+        drawn += [a, b]
+    drawn += list(first) + list(second)
+    assert sorted(drawn) == list(range(400, 600))

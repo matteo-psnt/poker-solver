@@ -9,6 +9,7 @@ table, since nothing here touches rows one at a time.
 from __future__ import annotations
 
 import os
+from functools import partial
 
 import numpy as np
 import pytest
@@ -39,7 +40,7 @@ def _train(tmp_path, *, target: int, workers: int, name: str, **overrides):
         checkpoint_retain_every=4,
         resume=True,
         worker=pcs_parallel.pcs_worker,
-        before_checkpoint=pcs_parallel.mark_visited_from_strategy,
+        before_checkpoint=partial(pcs_parallel.prepare_checkpoint, config=config),
     )
 
 
@@ -124,6 +125,20 @@ class TestCoordinator:
         assert manifest.iteration == 8
         assert manifest.ladder() == [4, 8]
         assert result.touched_rows > 0, "visited must be derived, or evaluation reads an empty run"
+
+    @pytest.mark.timeout(120)
+    def test_one_worker_keeps_all_of_the_root_mass(self, tmp_path):
+        """With nobody to race, the root holds exactly hands * sum w(t) -- so a
+        multi-worker run reading below 1 has measured lost updates, not a
+        formula that was off to begin with."""
+        _train(tmp_path, target=8, workers=1, name="pcs-mass")
+        tree = build_betting_tree(
+            GameRules(1, 2), ActionModel(_config()), Buckets(), starting_stack=20
+        )
+        storage = StaticArrayStorage(tree)
+        assert load_checkpoint(storage, tmp_path / "run") == 8
+        retained = pcs_parallel.root_mass_retained(storage, _config(), 8)
+        assert retained == pytest.approx(1.0, abs=1e-6)
 
     @pytest.mark.timeout(120)
     def test_a_resume_keeps_counting_from_the_rung(self, tmp_path):

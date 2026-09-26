@@ -42,7 +42,7 @@ from src.pipeline.abstraction.resolver import ComboAbstractionResolver
 from src.shared.log import configure_logging
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
     from pathlib import Path
 
     from src.engine.solver.protocols import BucketingStrategy
@@ -92,6 +92,28 @@ def worker_iteration_indices(
     would re-apply the barely-discounted early schedule to a trained table.
     """
     return range(start + worker_id, num_iterations, num_workers)
+
+
+class IterationTickets:
+    """A chunk's iterations handed out one at a time, to whichever worker is free.
+
+    For a kernel whose iteration costs SECONDS: a static split of 200 iterations
+    over 63 workers gives some 4 and some 3, and the chunk waits on the 4s --
+    21% of the box idle. Numbering stays absolute, so *t* is exactly as interleaved.
+    """
+
+    def __init__(self, ticket: Any, end: int):
+        self._ticket = ticket  # a shared ctx.Value("q"), the next iteration to hand out
+        self._end = end
+
+    def __iter__(self) -> Iterator[int]:
+        while True:
+            with self._ticket.get_lock():
+                iteration = self._ticket.value
+                if iteration >= self._end:
+                    return
+                self._ticket.value = iteration + 1
+            yield iteration
 
 
 def _build_local(config: Config, abstraction: BucketingStrategy | None = None):
@@ -343,9 +365,10 @@ def train_static_parallel(
     on_progress: Callable[[int, int], None] | None = None,
     worker: Callable[..., None] = _worker_entry,
     worker_args: tuple[Any, ...] = (),
-    before_checkpoint: Callable[[StaticArrayStorage], None] | None = None,
+    before_checkpoint: Callable[[StaticArrayStorage, int], None] | None = None,
     on_checkpoint: Callable[..., None] | None = None,
     extra_arrays: Mapping[str, int] | None = None,
+    dynamic: bool = False,
 ) -> StaticTrainingResult:
     """Train on static storage across ``num_workers`` processes.
 
@@ -358,7 +381,9 @@ def train_static_parallel(
     the public-chance-sampling one through the same coordinator, since the
     chunking, the absolute-``t`` assignment, the counters and the checkpoint
     per chunk are properties of the shared table rather than of either kernel.
-    ``before_checkpoint`` runs on the coordinator's storage before each write.
+    ``before_checkpoint`` runs on the coordinator's storage, with the iteration
+    reached, before each write.
+    ``dynamic`` hands iterations out through :class:`IterationTickets` instead.
 
     ``on_progress`` is called with (absolute iteration, target) on a timer. It
     has to be a timer and it has to come from the workers: the coordinator is
@@ -423,10 +448,17 @@ def train_static_parallel(
 
         while done < num_iterations:
             chunk_end = min(done + step, num_iterations)
-            assignments = [
-                worker_iteration_indices(w, num_workers, chunk_end, start=done)
-                for w in range(num_workers)
-            ]
+            assignments: list[Iterable[int]]
+            if dynamic:
+                assignments = [IterationTickets(ctx.Value("q", done), chunk_end)] * num_workers
+                active = list(range(num_workers))
+            else:
+                ranges = [
+                    worker_iteration_indices(w, num_workers, chunk_end, start=done)
+                    for w in range(num_workers)
+                ]
+                assignments = list(ranges)
+                active = [w for w, indices in enumerate(ranges) if len(indices) > 0]
             result_queue: mp.Queue = ctx.Queue()
             processes = [
                 ctx.Process(
@@ -446,8 +478,7 @@ def train_static_parallel(
                     ),
                     daemon=False,
                 )
-                for worker_id in range(num_workers)
-                if len(assignments[worker_id]) > 0
+                for worker_id in active
             ]
             for process in processes:
                 process.start()
@@ -466,7 +497,7 @@ def train_static_parallel(
             if completed != chunk_end - done:
                 raise AssertionError(
                     f"workers ran {completed} iterations against a chunk of "
-                    f"{chunk_end - done}; the interleaved assignment does not tile it."
+                    f"{chunk_end - done}; the assignment does not tile it."
                 )
             chunk_dropped = sum(r["dropped"] for r in results)
             if chunk_dropped:
@@ -482,7 +513,7 @@ def train_static_parallel(
             if checkpoint_dir is not None:
                 write_started = time.time()
                 if before_checkpoint is not None:
-                    before_checkpoint(storage)
+                    before_checkpoint(storage, chunk_end)
                 save_checkpoint(
                     storage,
                     checkpoint_dir,
