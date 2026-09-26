@@ -126,6 +126,93 @@ def gathered_action_sum(targets, is_terminal, node_values, terminal_values):
 
 
 @jit(nopython=True, cache=True)
+def card_mass(reach, hand_cards):
+    """``(T, 52)`` range mass holding each card: a hand adds its reach to both cards.
+
+    Replaces ``reach @ incidence``, whose bytes depend on how many rows BLAS is
+    handed; the fold values are computed per chunk now, so they must not.
+    """
+    rows, hands = reach.shape
+    out = np.zeros((rows, 52), dtype=np.float32)
+    for t in range(rows):
+        for h in range(hands):
+            r = reach[t, h]
+            out[t, hand_cards[h, 0]] += r
+            out[t, hand_cards[h, 1]] += r
+    return out
+
+
+@jit(nopython=True, cache=True)
+def regret_matched(source, slot_base, stride, num_buckets, num_actions, uniform):
+    """``regret_match(source[slot_index(...)])`` read straight off storage, ``(n, B, A)``.
+
+    ``np.maximum(x, 0.0)`` is +0.0 for either zero and NaN for NaN; the row
+    total is a +0.0-started ``sum(axis=-1)``.
+    """
+    n = slot_base.shape[0]
+    out = np.empty((n, num_buckets, num_actions), dtype=np.float32)
+    positive = np.empty(num_actions, dtype=np.float32)
+    for i in range(n):
+        for b in range(num_buckets):
+            base = slot_base[i] + b * stride
+            total = _AXIS_START
+            for a in range(num_actions):
+                x = source[base + a]
+                p = x if (x > 0.0 or x != x) else np.float32(0.0)
+                positive[a] = p
+                total += p
+            if total > 0.0:
+                for a in range(num_actions):
+                    out[i, b, a] = positive[a] / total
+            else:
+                for a in range(num_actions):
+                    out[i, b, a] = uniform
+    return out
+
+
+@jit(nopython=True, cache=True)
+def add_into_slots(target, slot_base, stride, block):
+    """``target[slot_index(...)] += block``: one row per node, ``(n, B, A)`` bucket-major."""
+    n, num_buckets, num_actions = block.shape
+    for i in range(n):
+        for b in range(num_buckets):
+            base = slot_base[i] + b * stride
+            for a in range(num_actions):
+                target[base + a] += block[i, b, a]
+
+
+@jit(nopython=True, cache=True)
+def add_weighted_into_slots(target, slot_base, stride, mass, strategy):
+    """``target[slot_index(...)] += mass[:, :, None] * strategy`` without the product array."""
+    n, num_buckets, num_actions = strategy.shape
+    for i in range(n):
+        for b in range(num_buckets):
+            base = slot_base[i] + b * stride
+            m = mass[i, b]
+            for a in range(num_actions):
+                target[base + a] += m * strategy[i, b, a]
+
+
+@jit(nopython=True, cache=True)
+def deposit_children(below, own, opposing, strategy, buckets, targets, is_terminal, actor, other):
+    """Write each node child's ranges: the actor's reach times its strategy, the other's as is.
+
+    ``own[:, :, None] * strategy[:, buckets, :]`` sliced per action, without the
+    ``(n, hands, actions)`` product; terminal children are the caller's.
+    """
+    n, actions = targets.shape
+    hands = own.shape[1]
+    for i in range(n):
+        for a in range(actions):
+            if is_terminal[i, a]:
+                continue
+            t = targets[i, a]
+            for h in range(hands):
+                below[actor, t, h] = own[i, h] * strategy[i, buckets[h], a]
+                below[other, t, h] = opposing[i, h]
+
+
+@jit(nopython=True, cache=True)
 def _run_sum(head, scratch, rest):
     """numpy reduces a run as its first element plus the pairwise sum of the rest."""
     if rest == 0:
@@ -170,4 +257,14 @@ def segment_blocks(values, hand_order, segment_start):
     return out
 
 
-__all__ = ("bucket_dot", "gathered_action_sum", "segment_blocks", "segment_rows")
+__all__ = (
+    "add_into_slots",
+    "add_weighted_into_slots",
+    "bucket_dot",
+    "card_mass",
+    "deposit_children",
+    "gathered_action_sum",
+    "regret_matched",
+    "segment_blocks",
+    "segment_rows",
+)

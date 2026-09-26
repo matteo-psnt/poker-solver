@@ -1,6 +1,6 @@
 """Showdown values in O(H) per terminal, by walking hands in rank order.
 
-``VectorCFR.evaluate_terminals`` values every showdown as one ``(T, H) @ (H, H)``
+``VectorCFR`` could value every showdown as one ``(T, H) @ (H, H)``
 product against the board's win/lose sign matrix. That is 358 GFLOP per
 iteration on the production tree -- invisible behind Apple's AMX, several
 seconds on an EPYC core, and it is the arithmetic a worker on the pool would

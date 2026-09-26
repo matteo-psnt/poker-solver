@@ -126,25 +126,6 @@ def test_train_pcs_hands_the_kernel_count_to_the_clamp(monkeypatch, tmp_path):
     assert seen["br_streets"] == "turn_river"
 
 
-def test_evaluate_terminals_transients_are_counted():
-    """The defect this pins: the clamp read 10.85 GB against a worker's measured
-    12.17 GB at 200 bb, sized 11 onto a box that held 10, and the OOM killer
-    took one — the coordinator then blocked on a chunk that had already run.
-
-    `evaluate_terminals` peaks above the arrays it reads: the rank walk holds
-    the copy of one seat's showdown reaches while it builds its output. Half of
-    any tree's terminals are showdowns, so that is `num_terminals * hands`.
-    """
-    rules = GameRules(1, 2)
-    tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
-    compiled = compile_tree(tree, rules)
-
-    with_river_br = worker_bytes(compiled, br_streets="river")
-    showdowns = compiled.num_terminals // 2
-    transient = 2 * showdowns * LIVE_HANDS * np.dtype(DTYPE).itemsize
-    assert with_river_br > transient
-
-
 def test_headroom_is_a_fraction_so_a_big_node_keeps_real_margin():
     """A flat 3 GB was 2.2% of a 128 GiB box and 0.5% of a 512 GB one: the
     bigger the node, the thinner the margin, which is backwards.
@@ -184,3 +165,25 @@ def test_the_clamp_sizes_the_ring_the_kernel_actually_allocates():
     allocated = kernel.reach.nbytes + kernel.value.nbytes
     per_hand = 4 * context.num_hands * np.dtype(DTYPE).itemsize
     assert allocated == 2 * compiled.widest_level * per_hand
+
+
+def test_the_clamp_sizes_the_terminals_the_kernel_actually_allocates():
+    """Terminals hold one value per seat and hand, nothing else, and the clamp says so.
+
+    Holding a whole-tree RANGE per terminal as well cost 1.24 GB a worker at
+    production, plus a 0.62 GB spike to value them in one batch. Measured
+    against the kernel's own arrays, so a range array coming back fails here.
+    """
+    from src.engine.solver.vector.kernel import VectorCFR
+
+    rules = GameRules(1, 2)
+    tree = build_betting_tree(rules, ActionModel(_config()), Buckets(), starting_stack=20)
+    compiled = compile_tree(tree, rules)
+    kernel = VectorCFR(compiled, build_hand_context(np.arange(5), Buckets()))
+
+    terminal_arrays = sum(
+        array.nbytes
+        for name, array in vars(kernel).items()
+        if name.startswith("terminal_") and isinstance(array, np.ndarray)
+    )
+    assert terminal_arrays == 2 * compiled.num_terminals * LIVE_HANDS * np.dtype(DTYPE).itemsize

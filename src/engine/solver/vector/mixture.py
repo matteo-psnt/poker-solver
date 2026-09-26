@@ -182,7 +182,6 @@ class BoardMixtureCFR:
             )
         for board in self.boards:
             board.forward(initial_range, use_average=True)
-            board.evaluate_terminals()
             board.value[:] = 0.0
 
         for group in reversed(self.boards[0].groups):

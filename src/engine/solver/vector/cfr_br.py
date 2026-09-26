@@ -429,7 +429,6 @@ class CFRBestResponse:
                 kernel.delta_scale = self.delta_scale
                 kernel.regret_discount = self.regret_discount
                 kernel.forward(initial)
-                kernel.evaluate_terminals()
                 kernel.value[:] = 0.0
             self.hybrid_pass(members)
         if self.num_boards > 1:
@@ -593,7 +592,6 @@ class CFRBestResponse:
             kernel.opponent = self.agents[0][1 - player]
             kernel.update_players = (player,)
             kernel.forward(initial)
-            kernel.evaluate_terminals()
             kernel.backward()
             kernel.opponent = None
             return
@@ -609,7 +607,6 @@ class CFRBestResponse:
             kernel.regret_target = self._delta
             try:
                 kernel.forward(initial)
-                kernel.evaluate_terminals()
                 kernel.backward()
             finally:
                 kernel.regret_target = None

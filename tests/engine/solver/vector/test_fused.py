@@ -83,3 +83,53 @@ def test_segment_sums_match_reduceat(num_buckets):
     got_value = segment_rows(value, segments.hand_order, segments.segment_start)
     assert _bytes_equal(got_children, expected_children)
     assert _bytes_equal(got_value, expected_value)
+
+
+def _slots(num_nodes: int, num_buckets: int, actions: int, seed: int):
+    """A storage vector and the node bases a group's slot_index would read."""
+    rng = np.random.default_rng(seed)
+    stride = actions
+    base = np.arange(num_nodes, dtype=np.int64) * num_buckets * stride + 7
+    storage = (rng.standard_normal(num_nodes * num_buckets * stride + 20) * 2).astype(np.float32)
+    storage[::9] = -0.0
+    storage[::13] = 0.0
+    index = (
+        base[:, None]
+        + (np.arange(num_buckets)[:, None] * stride + np.arange(actions)[None, :]).ravel()[None, :]
+    )
+    return storage, base, stride, index
+
+
+@pytest.mark.parametrize("actions", [2, 3, 6])
+def test_regret_matched_matches_regret_match(actions):
+    from src.engine.solver.vector.fused import regret_matched
+    from src.engine.solver.vector.kernel import regret_match
+
+    storage, base, stride, index = _slots(9, 40, actions, seed=actions)
+    storage[index[0, :actions]] = -1.0  # a row with nothing positive plays uniform
+    storage[index[1, actions : 2 * actions]] = np.nan
+    uniform = np.float32(1.0 / actions)
+    expected = regret_match(storage[index].reshape(9, 40, actions), uniform)
+    got = regret_matched(storage, base, stride, 40, actions, uniform)
+    assert _bytes_equal(got, expected)
+
+
+def test_slot_adds_match_fancy_index_adds():
+    from src.engine.solver.vector.fused import add_into_slots, add_weighted_into_slots
+
+    storage, base, stride, index = _slots(9, 40, 4, seed=3)
+    rng = np.random.default_rng(4)
+    block = rng.standard_normal((9, 40, 4)).astype(np.float32)
+    mass = rng.random((9, 40), dtype=np.float32)
+
+    expected = storage.copy()
+    expected[index] += block.reshape(9, -1)
+    got = storage.copy()
+    add_into_slots(got, base, stride, block)
+    assert _bytes_equal(got, expected)
+
+    expected = storage.copy()
+    expected[index] += (mass[:, :, None] * block).reshape(9, -1)
+    got = storage.copy()
+    add_weighted_into_slots(got, base, stride, mass, block)
+    assert _bytes_equal(got, expected)

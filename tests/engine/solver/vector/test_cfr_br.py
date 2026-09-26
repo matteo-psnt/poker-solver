@@ -89,14 +89,12 @@ def _root_values(driver, contexts, boards):
         kernel.opponent = None
         kernel.update_players = ()
         kernel.forward(initial)
-        kernel.evaluate_terminals()
         kernel.value[:] = 0.0
     driver.hybrid_pass()
     hybrid = [sum(float(k.value[p, 0].sum()) for k in driver.kernels) for p in (0, 1)]
 
     for kernel in driver.kernels:
         kernel.forward(initial)
-        kernel.evaluate_terminals()
         kernel.backward()
     matched = [sum(float(k.value[p, 0].sum()) for k in driver.kernels) for p in (0, 1)]
     return hybrid, matched

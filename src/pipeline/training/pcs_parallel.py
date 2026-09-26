@@ -19,6 +19,7 @@ import os
 import resource
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -49,13 +50,13 @@ NUM_CARDS = 52
 BOARD_CARDS = 5
 # Live hands on any full board: C(47, 2). Fixes every scratch shape.
 LIVE_HANDS = int(enumerate_live_hands(np.arange(BOARD_CARDS)).shape[0])
-# What a worker holds beyond its hand-space arrays: the tree and its compiled
-# form, the bucketer's caches, numba, the interpreter and one pass's
-# temporaries. Measured 08-23 on a D16als_v6 at the production tree: peak RSS
-# 5.74 GB per worker, of which ~0.8 GB is the mmapped abstraction's shared
-# pages; six workers ran on the 32 GiB node. Revise from the task log's
-# "peak RSS" line, not from here.
-WORKER_OVERHEAD_BYTES = 1_600_000_000
+# PRIVATE bytes a worker holds beyond the arrays `worker_bytes` counts: the
+# tree, its compiled form, numba and the interpreter. Measured 09-26 at the
+# production tree from /proc/self/smaps_rollup: 3.13-3.22 GB private against
+# 2.90 GB of counted arrays, so ~0.3 GB; this keeps 2x that. Peak RSS is the
+# wrong number -- it counts the shared table and the mmapped abstraction in
+# every worker. Revise from the task log's "private" figure.
+WORKER_OVERHEAD_BYTES = 600_000_000
 # The coordinator, the shared table's page cache and the OS. The floor suits a
 # small node; the fraction is what keeps a big one from running at 99%, where
 # one worker over is an OOM kill rather than a slowdown.
@@ -164,10 +165,11 @@ def worker_bytes(
     # Nodes are a two-slot RING holding one level each, not the whole tree --
     # `VectorCFR` allocates `(2 ring, 2 seats, widest level, hands)` for reach
     # and again for value. At 200 bb that is 1.33 GB where the tree-wide
-    # allocation was 2.81. Terminals are still tree-wide: `terminal_value` is
-    # written in the forward half and read in the backward half, so one of that
-    # pair has to survive the whole walk.
-    scratch = kernels * (2 * compiled.widest_level + num_terminals) * per_hand
+    # allocation was 2.81. Terminals are tree-wide but VALUES only, one per
+    # seat: each is valued as the forward pass reaches it and read back in the
+    # backward pass, so no terminal range is held.
+    terminals = 2 * num_terminals * LIVE_HANDS * item
+    scratch = kernels * (2 * compiled.widest_level * per_hand + terminals)
     cache = kernels * tree.num_slots * item  # bucket-space strategy cache
     temporaries = 6 * MAX_BLOCK_ELEMENTS * item  # one chunk's blocks
     picks = 0
@@ -177,27 +179,10 @@ def worker_bytes(
         streets = frozenset(BR_REGIONS[br_streets])
         nodes = sum(1 for node in tree.nodes if node.street in streets)
         picks = nodes * LIVE_HANDS * runouts
-    # `evaluate_terminals` peaks well above the arrays it reads, and nothing
-    # above counted it. MEASURED at 200 bb: this said 10.85 GB against a
-    # worker's 12.17 GB, so the clamp put 11 workers on a box that held 10 and
-    # the OOM killer took one -- costing a 40-minute probe every rung it ran.
-    #
-    # Half of any tree's terminals are showdowns; a line ends folded or shown.
-    # The rank walk holds the fancy-index copy of one seat's showdown reaches
-    # while it builds its output -- two (showdowns, hands) arrays.
-    live = 2 * (num_terminals // 2)
     # Several runouts sum their regret updates into one slot-wide buffer before
     # the discount -- per worker, not per kernel.
     delta = tree.num_slots * item if runouts > 1 else 0
-    return (
-        scratch
-        + cache
-        + temporaries
-        + picks
-        + delta
-        + live * LIVE_HANDS * item
-        + WORKER_OVERHEAD_BYTES
-    )
+    return scratch + cache + temporaries + picks + delta + WORKER_OVERHEAD_BYTES
 
 
 def node_memory_bytes() -> int:
@@ -228,6 +213,21 @@ def ram_safe_workers(
         kernels=kernels,
     )
     return max(1, int(available // per_worker))
+
+
+def _smaps_rollup() -> dict[str, int]:
+    """This process's memory split, in bytes; empty where /proc does not exist."""
+    try:
+        text = Path("/proc/self/smaps_rollup").read_text()
+    except OSError:
+        return {}
+    fields = {}
+    for line in text.splitlines()[1:]:
+        name, _, rest = line.partition(":")
+        parts = rest.split()
+        if len(parts) == 2 and parts[1] == "kB":
+            fields[name] = int(parts[0]) * 1024
+    return fields
 
 
 def mark_visited_from_strategy(storage: StaticArrayStorage) -> None:
@@ -336,13 +336,19 @@ def pcs_worker(
         # number and the task log is the only place the estimate can be checked.
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         peak_bytes = peak if sys.platform == "darwin" else peak * 1024
+        # RSS counts the shared table and the mmapped abstraction in EVERY
+        # worker; private is what an extra worker actually costs the node.
+        rollup = _smaps_rollup()
         logger.info(
-            "[pcs worker %d] %d boards in %.0fs (%.3f boards/s), peak RSS %.2f GB",
+            "[pcs worker %d] %d boards in %.0fs (%.3f boards/s), peak RSS %.2f GB, "
+            "private %.2f GB, PSS %.2f GB",
             worker_id,
             kernel.boards,
             elapsed,
             kernel.boards / elapsed if elapsed > 0 else 0.0,
             peak_bytes / 1e9,
+            (rollup.get("Private_Clean", 0) + rollup.get("Private_Dirty", 0)) / 1e9,
+            rollup.get("Pss", 0) / 1e9,
         )
         result_queue.put(
             {

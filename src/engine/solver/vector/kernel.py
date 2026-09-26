@@ -45,8 +45,13 @@ import numpy as np
 from src.core.game.state import Street
 from src.engine.solver.vector.compiled_tree import EDGE_TO_TERMINAL, CompiledTree, TerminalKind
 from src.engine.solver.vector.fused import (
+    add_into_slots,
+    add_weighted_into_slots,
     bucket_dot,
+    card_mass,
+    deposit_children,
     gathered_action_sum,
+    regret_matched,
     segment_blocks,
     segment_rows,
 )
@@ -55,9 +60,6 @@ from src.engine.solver.vector.showdown import RankWalk
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-# A standard deck, fixing the width of the per-card range-mass table.
-NUM_CARDS = 52
 
 # Blocks of (nodes x hands x actions) floats are the kernel's working set; a
 # group wider than this runs in chunks. Small enough to stay in cache: measured
@@ -146,10 +148,14 @@ def strategy_block(
     source: np.ndarray, compiled: CompiledTree, group: NodeGroup, chunk: slice, uniform: np.floating
 ) -> np.ndarray:
     """Regret matching over ``source``, shaped ``(n, B, A)``; both kernels share it."""
-    num_actions = group.num_actions
-    num_buckets = compiled.tree.num_buckets(group.street)
-    block = source[slot_index(compiled, group, chunk)].reshape(-1, num_buckets, num_actions)
-    return regret_match(block, uniform)
+    return regret_matched(
+        source,
+        group.slot_base[chunk],
+        group.slot_stride,
+        compiled.tree.num_buckets(group.street),
+        group.num_actions,
+        uniform,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +262,8 @@ class VectorCFR:
         shape = (2, 2, compiled.widest_level, self.num_hands)
         self.reach = np.zeros(shape, dtype=DTYPE)
         self.value = np.zeros(shape, dtype=DTYPE)
-        self.terminal_reach = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
+        # Values only: a terminal is valued the moment the forward pass reaches
+        # it, so no whole-tree array of terminal RANGES is ever held.
         self.terminal_value = np.zeros((2, compiled.num_terminals, self.num_hands), dtype=DTYPE)
 
         # (array, per_hand): a bucket block, or pure per-hand action indices.
@@ -300,12 +307,6 @@ class VectorCFR:
             self.rank_walk = RankWalk(context.showdown_rank, context.hand_cards)
         else:
             self.showdown_sign = showdown_matrix(context.showdown_rank, context.blocks)
-        # (H, 52) incidence, so per-card range mass is one matrix product. Folds
-        # need only blocker-corrected mass, and going through it costs O(H x 52)
-        # where the showdown path costs O(H x H) -- a ~20x difference across
-        # 50,952 fold terminals, which is why they do not share a code path.
-        self.card_incidence = np.zeros((self.num_hands, NUM_CARDS), dtype=DTYPE)
-        self.card_incidence[np.arange(self.num_hands)[:, None], context.hand_cards] = 1.0
         self.hand_cards = context.hand_cards
 
     # ---- per-group shape helpers ----------------------------------------
@@ -344,7 +345,6 @@ class VectorCFR:
         paying that twice. The cache is one float per storage slot.
         """
         self.reach[:] = 0.0
-        self.terminal_reach[:] = 0.0
         # The root is the only node at level 0, so buffer 0, slot 0.
         self.reach[0, 0, 0] = initial_range
         self.reach[0, 1, 0] = initial_range
@@ -366,6 +366,7 @@ class VectorCFR:
                 targets, is_terminal = self.child_targets(group, chunk)
 
                 own_reach = self.reach[here][actor, slots]
+                other_reach = self.reach[here][other, slots]
                 if per_hand:
                     actor_reach = np.zeros((*own_reach.shape, group.num_actions), dtype=DTYPE)
                     np.put_along_axis(
@@ -375,31 +376,45 @@ class VectorCFR:
                         2,
                     )
                 else:
-                    actor_reach = own_reach[:, :, None] * bucket_strategy[:, buckets, :]
+                    actor_reach = None
                     if not use_average:
                         self._accumulate_strategy_sum(group, chunk, bucket_strategy)
-                other_reach = self.reach[here][other, slots]
+                    deposit_children(
+                        self.reach[below],
+                        own_reach,
+                        other_reach,
+                        bucket_strategy,
+                        buckets,
+                        targets,
+                        is_terminal,
+                        actor,
+                        other,
+                    )
 
                 for action in range(group.num_actions):
                     target = targets[:, action]
                     terminal = is_terminal[:, action]
-                    self._deposit(
-                        self.terminal_reach,
-                        target[terminal],
-                        actor,
-                        other,
-                        actor_reach[terminal, :, action],
-                        other_reach[terminal],
-                    )
-                    inner = ~terminal
-                    self._deposit(
-                        self.reach[below],
-                        target[inner],
-                        actor,
-                        other,
-                        actor_reach[inner, :, action],
-                        other_reach[inner],
-                    )
+                    if terminal.any():
+                        if actor_reach is None:
+                            mover = (
+                                own_reach[terminal] * bucket_strategy[terminal][:, buckets, action]
+                            )
+                        else:
+                            mover = actor_reach[terminal, :, action]
+                        # A terminal's value is the OPPONENT's range there, so
+                        # each seat is valued from the other's reach.
+                        self._value_terminals(target[terminal], actor, other_reach[terminal])
+                        self._value_terminals(target[terminal], other, mover)
+                    if actor_reach is not None:
+                        inner = ~terminal
+                        self._deposit(
+                            self.reach[below],
+                            target[inner],
+                            actor,
+                            other,
+                            actor_reach[inner, :, action],
+                            other_reach[inner],
+                        )
 
     @staticmethod
     def _deposit(
@@ -421,46 +436,32 @@ class VectorCFR:
         store[actor, target] = actor_reach
         store[other, target] = other_reach
 
-    def evaluate_terminals(self) -> None:
-        """Value every terminal at once, from the ranges the forward pass left.
+    def _value_terminals(self, target: np.ndarray, player: int, opponent_reach: np.ndarray) -> None:
+        """``player``'s value at terminals ``target``, from the opponent's range there.
 
-        Two batched operations cover all 101,904 terminals. Folds take a
-        blocker-corrected range mass, which needs no card information beyond
-        which holdings collide — the winner is public. Showdowns take one matrix
-        product against the board's win/lose sign matrix, with both players'
-        halves stacked into a single call so BLAS sees one large multiply
-        instead of two.
+        Folds take a blocker-corrected range mass -- the winner is public, so no
+        card information beyond which holdings collide. Showdowns walk the
+        board's rank order. Both are row-independent, so valuing a chunk at a
+        time gives what one whole-tree batch gave.
         """
-        kind = self.compiled.terminal_kind
-        magnitude = self.compiled.terminal_value.astype(DTYPE)
-
-        folds = np.flatnonzero(kind == TerminalKind.FOLD)
-        if folds.shape[0]:
-            for player in (0, 1):
-                sign = 1.0 if player == 0 else -1.0
-                reach = self.terminal_reach[1 - player, folds]
-                self.terminal_value[player, folds] = (
-                    sign * magnitude[folds][:, None] * self._compatible_mass(reach)
-                )
-
-        showdowns = np.flatnonzero(kind == TerminalKind.SHOWDOWN)
-        if showdowns.shape[0]:
-            scale = magnitude[showdowns][:, None]
-            if self.showdown == "walk":
-                for player in (0, 1):
-                    beaten = self.rank_walk.values(self.terminal_reach[1 - player, showdowns])
-                    self.terminal_value[player, showdowns] = scale * beaten
-                return
-            count = showdowns.shape[0]
-            # showdown_sign is antisymmetric, so each player reads its own
-            # win/lose direction off the same matrix; only the range it is
-            # multiplied against changes.
-            stacked = np.concatenate(
-                [self.terminal_reach[1, showdowns], self.terminal_reach[0, showdowns]]
+        kind = self.compiled.terminal_kind[target]
+        magnitude = self.compiled.terminal_value[target].astype(DTYPE)[:, None]
+        fold = kind == TerminalKind.FOLD
+        if fold.any():
+            sign = 1.0 if player == 0 else -1.0
+            self.terminal_value[player, target[fold]] = (
+                sign * magnitude[fold] * self._compatible_mass(opponent_reach[fold])
             )
-            beaten = stacked @ self.showdown_sign.T
-            self.terminal_value[0, showdowns] = scale * beaten[:count]
-            self.terminal_value[1, showdowns] = scale * beaten[count:]
+        showdown = kind == TerminalKind.SHOWDOWN
+        if showdown.any():
+            reach = opponent_reach[showdown]
+            if self.showdown == "walk":
+                beaten = self.rank_walk.values(reach)
+            else:
+                # showdown_sign is antisymmetric, so each seat reads its own
+                # win/lose direction off one matrix.
+                beaten = reach @ self.showdown_sign.T
+            self.terminal_value[player, target[showdown]] = magnitude[showdown] * beaten
 
     def _compatible_mass(self, reach: np.ndarray) -> np.ndarray:
         """``(T, H)`` opponent mass that does not collide with each hand.
@@ -470,7 +471,7 @@ class VectorCFR:
         holding back because subtracting both cards removed it twice.
         """
         total = reach.sum(axis=1, keepdims=True)
-        per_card = reach @ self.card_incidence
+        per_card = card_mass(reach, self.hand_cards)
         first = per_card[:, self.hand_cards[:, 0]]
         second = per_card[:, self.hand_cards[:, 1]]
         return total - first - second + reach
@@ -557,8 +558,8 @@ class VectorCFR:
         if self.delta_scale != 1.0:
             block *= DTYPE(self.delta_scale)
 
-        index = self._slot_index(group, chunk)
         if self.regret_target is None:
+            index = self._slot_index(group, chunk)
             self.apply_regret_block(index, block, segments.segment_bucket)
         else:
             # Deferred mode: this pass is one of several whose updates belong to
@@ -566,7 +567,7 @@ class VectorCFR:
             # CFR+ floor waits until they have all been summed. Flooring each
             # contribution separately would clip a negative that a later one was
             # about to cancel, which is a different algorithm.
-            self.regret_target[index] += block.reshape(children.shape[0], -1)
+            add_into_slots(self.regret_target, group.slot_base[chunk], group.slot_stride, block)
 
     def apply_regret_block(
         self, index: np.ndarray, block: np.ndarray, occupied: np.ndarray
@@ -616,16 +617,14 @@ class VectorCFR:
         if self.strategy_weight != 1.0:
             mass *= DTYPE(self.strategy_weight)
 
-        index = self._slot_index(group, chunk)
-        self.strategy_sum[index] += (mass[:, :, None] * bucket_strategy).reshape(
-            collapsed.shape[0], -1
+        add_weighted_into_slots(
+            self.strategy_sum, group.slot_base[chunk], group.slot_stride, mass, bucket_strategy
         )
 
     def iterate(self, initial_range: np.ndarray) -> None:
         """One full-tree CFR iteration: every infoset at every node is updated."""
         self.iteration += 1
         self.forward(initial_range)
-        self.evaluate_terminals()
         self.backward()
 
     # ---- scoring ---------------------------------------------------------
@@ -668,7 +667,6 @@ class VectorCFR:
         filled with a value that does not mean what it appears to.
         """
         self.forward(initial_range, use_average=True)
-        self.evaluate_terminals()
         self.value[:] = 0.0
 
         for group in reversed(self.groups):

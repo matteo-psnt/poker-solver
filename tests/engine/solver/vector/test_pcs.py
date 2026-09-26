@@ -81,7 +81,6 @@ class TestOneBoardIsTheFixedBoardKernel:
         walk = VectorCFR(compiled, contexts[0], cfr_plus=True, showdown="walk")
         for kernel in (product, walk):
             kernel.forward(initial)
-            kernel.evaluate_terminals()
         scale = float(np.abs(product.terminal_value).max())
         assert scale > 0
         assert np.allclose(walk.terminal_value, product.terminal_value, atol=1e-4 * scale)
