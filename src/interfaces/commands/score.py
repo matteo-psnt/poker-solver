@@ -19,7 +19,7 @@ from typing import Literal
 from pydantic import Field
 
 from src.interfaces.cloud.tasks import dispatch, spec
-from src.interfaces.commands._base import Command, CommandError
+from src.interfaces.commands._base import Command, CommandError, eval_index_rows
 from src.interfaces.commands.evaluate import EVAL_METHODS
 from src.shared.cloudtask.kinds import TaskName
 
@@ -135,6 +135,12 @@ class ScorePayload(dispatch.Dispatched):
     scheduler. STRINGS, not ints: an empty one means the latest checkpoint, which
     is a rung the ladder cannot name in advance."""
     rungs: list[str] = Field(default_factory=list)
+    """The tiers this run's EXISTING scores of this method sit in. Printed so a
+    mismatch is visible at dispatch: the knobs live on `evaluate`, so omitting
+    them silently takes ITS defaults (8/2/2, unthresholded) rather than whatever
+    the run was measured at, and a ladder on the coarse ruler INVERTS A/B signs.
+    Cost me a seven-rung ladder on 09-26 before `curve` reported the collision."""
+    existing_tiers: list[str] = Field(default_factory=list)
 
 
 def run(args: argparse.Namespace) -> ScorePayload:
@@ -169,13 +175,43 @@ def run(args: argparse.Namespace) -> ScorePayload:
         ],
         pool=args.pool,
     )
-    return payload.extend(ScorePayload, run_id=run_id, method=args.method, rungs=rungs)
+    return payload.extend(
+        ScorePayload,
+        run_id=run_id,
+        method=args.method,
+        rungs=rungs,
+        existing_tiers=_existing_tiers(run_id, args.method),
+    )
+
+
+def _existing_tiers(run_id: str, method: str) -> list[str]:
+    """Distinct tiers this run already has scores of ``method`` in.
+
+    Best-effort: a record that cannot be reached must not stop a dispatch, since
+    the tier note is an aid and the scoring is the job.
+    """
+    from src.adapters.postgres import connect  # noqa: PLC0415 -- see `run`
+    from src.pipeline.evaluation import ledger as eval_ledger  # noqa: PLC0415
+
+    try:
+        rows = eval_index_rows(connect.engine_from_environment(), run_id)
+    except Exception:  # noqa: BLE001 -- an unreachable record is not a refusal
+        return []
+    # "method", the key the eval DOCUMENT uses and `tier_label` reads -- not
+    # "eval_method", which is the flag's name on this side of the wire.
+    labels = {eval_ledger.tier_label(row) for row in rows if row.get("method") == method}
+    return sorted(labels)
 
 
 def render(payload: ScorePayload) -> None:
     rungs = ", ".join(rung or "latest" for rung in payload.rungs)
     print(f"Scoring {payload.run_id} with {payload.method} at: {rungs}")
     dispatch.render_queued(payload)
+    # AFTER the queue lines, because the tier is a check on what was just sent:
+    # if it does not match what these tasks will produce, cancel now rather than
+    # reading the curve in an hour and finding two rulers in it.
+    for tier in payload.existing_tiers:
+        print(f"  existing {payload.method} scores of this run are in: {tier}")
 
 
 COMMAND = Command(

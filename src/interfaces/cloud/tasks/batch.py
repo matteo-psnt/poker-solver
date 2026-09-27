@@ -199,6 +199,15 @@ class BatchTask(BaseModel):
     end_time: str | None = None
     node: str | None = None
     failure: TaskFailure | None = None
+    retry_count: int = 0
+    """Batch's retry count, so a CRASH-LOOP is distinguishable from progress.
+
+    Load-bearing, not diagnostic. Batch re-runs a failed task and the retry is
+    `running` like any other, so four consecutive OOM deaths read as one healthy
+    task for as long as the retries last -- measured 09-27 at 4.7 hours across
+    four tasks before anyone looked at `tasks --run`. The attempt number is the
+    only field that separates the two.
+    """
 
 
 class Job(BaseModel):
@@ -239,6 +248,7 @@ def _task_record(task: Any, job_id: str = "") -> BatchTask:
         start_time=_isoformat(execution.start_time) if execution is not None else None,
         end_time=_isoformat(execution.end_time) if execution is not None else None,
         node=task.node_info.node_id if task.node_info is not None else None,
+        retry_count=(execution.retry_count or 0) if execution is not None else 0,
     )
 
 

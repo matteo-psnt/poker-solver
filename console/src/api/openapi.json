@@ -384,6 +384,11 @@
             ],
             "title": "Result"
           },
+          "retry_count": {
+            "default": 0,
+            "title": "Retry Count",
+            "type": "integer"
+          },
           "start_time": {
             "anyOf": [
               {
@@ -2822,6 +2827,20 @@
               }
             ],
             "title": "Training Tasks"
+          },
+          "worker_counts": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Worker Counts",
+            "type": "array"
           }
         },
         "required": [
@@ -2836,6 +2855,7 @@
           "card_abstraction_hash",
           "iterations",
           "runtime_seconds",
+          "worker_counts",
           "trainer_knobs",
           "progress",
           "coverage_flat_from",
@@ -3230,6 +3250,13 @@
           "code_snapshot": {
             "title": "Code Snapshot",
             "type": "string"
+          },
+          "existing_tiers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Existing Tiers",
+            "type": "array"
           },
           "job_id": {
             "title": "Job Id",

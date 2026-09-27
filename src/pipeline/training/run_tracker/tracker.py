@@ -181,6 +181,18 @@ class RunTracker:
         # which on a run converted from the old layout is all of them.
         self.initialize()
 
+    def record_worker_count(self, num_workers: int) -> None:
+        """Stamp the EFFECTIVE worker count on the attempt now running.
+
+        The effective one, not the request: `ram_safe_workers` clamps against the
+        node's RAM, so the request is not what trained the table. Recorded because
+        a resume at a different count is destructive and was, until 09-27,
+        invisible in the record -- see `AttemptRecord.num_workers`.
+        """
+        if self.metadata.attempts:
+            self.metadata.attempts[-1].num_workers = num_workers
+            self.initialize()
+
     def mark_completed(self) -> None:
         """Mark run as completed."""
         self.initialize()  # Ensure directory exists

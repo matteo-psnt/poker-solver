@@ -88,6 +88,22 @@ def run(args: argparse.Namespace) -> RunInfoPayload:
     )
 
 
+def _workers(counts: list[int | None]) -> str:
+    """The worker count, and LOUDLY when it changed across a resume.
+
+    A change is not a detail: continuing a 7-worker table at 36 workers drove
+    exploitability from 1,954 to 8,623 mbb and took ~1,600 rungs to recover
+    (09-27), and nothing in the record said it had happened.
+    """
+    known = [c for c in counts if c is not None]
+    if not known:
+        return ""
+    distinct = sorted(set(known))
+    if len(distinct) == 1:
+        return f", {distinct[0]} workers"
+    return f", workers CHANGED {'->'.join(str(c) for c in known)}  <-- corrupts the table"
+
+
 def render(payload: RunInfoPayload) -> None:
     tag = ""
     if payload.experiment_id:
@@ -105,7 +121,7 @@ def render(payload: RunInfoPayload) -> None:
         print(f"  {group:<7} " + "  ".join(f"{k}={v}" for k, v in knobs.items()))
     print(
         f"  {payload.iterations:,} iterations over {payload.training_tasks} training task(s), "
-        f"{payload.runtime_seconds:.0f}s compute"
+        f"{payload.runtime_seconds:.0f}s compute{_workers(payload.worker_counts)}"
     )
 
     rows = payload.progress or []

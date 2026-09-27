@@ -623,3 +623,47 @@ class TestWhichWorktreeTrainedIt:
 
         assert restored.git_branch is None
         assert restored.attempts[0].git_branch is None
+
+
+class TestWorkerCountIsRecordedPerAttempt:
+    """The worker count a run trained at, recorded where a resume can change it.
+
+    MEASURED 09-27, which is why this is pinned rather than filed: an arm trained
+    to rung 400 at 7 workers scored 1,954 mbb; continuing it at 36 workers drove
+    that to 8,623 by rung 800 -- worse than the 36-worker arm ever reached alone --
+    and it took ~1,600 rungs to recover. Nothing in the record said the count had
+    changed, so the ladder looked like a training defect.
+    """
+
+    def _tracker(self, tmp_path, record):
+        config = Config.default()
+        return RunTracker(
+            run_dir=tmp_path / "run-workers",
+            config_name="test",
+            config=config,
+            action_config_hash=ActionModel(config).get_config_hash(),
+            sink=record,
+            source=record,
+        )
+
+    def test_the_effective_count_lands_on_the_running_attempt(self, tmp_path, record):
+        tracker = self._tracker(tmp_path, record)
+        tracker.record_worker_count(7)
+        assert tracker.metadata.attempts[-1].num_workers == 7
+
+    def test_a_resume_at_a_different_count_is_recoverable_from_the_record(self, tmp_path, record):
+        tracker = self._tracker(tmp_path, record)
+        tracker.record_worker_count(7)
+        tracker.mark_resumed()
+        tracker.record_worker_count(36)
+        counts = [attempt.num_workers for attempt in tracker.metadata.attempts]
+        assert counts == [7, 36], (
+            "a worker-count change across a resume must be visible per attempt; "
+            "one number for the whole run cannot express it"
+        )
+
+    def test_it_survives_the_round_trip_through_the_record(self, tmp_path, record):
+        tracker = self._tracker(tmp_path, record)
+        tracker.record_worker_count(14)
+        restored = RunMetadata.from_dict(tracker.metadata.to_dict())
+        assert restored.attempts[-1].num_workers == 14

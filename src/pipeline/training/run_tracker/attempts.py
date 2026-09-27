@@ -70,6 +70,12 @@ class AttemptRecord:
     # See RunMetadata.code_snapshot: a resume can run DIFFERENT code from the
     # attempt before it, which is the whole reason attempts carry provenance.
     code_snapshot: str | None = None
+    # The EFFECTIVE worker count, after `ram_safe_workers` clamped the request.
+    # Per attempt because it CAN differ across a resume, and measured 09-27 to
+    # matter: continuing a 7-worker table at 36 workers drove exploitability from
+    # 1954 to 8623 mbb and took ~1,600 rungs to recover. None on runs trained
+    # before this was recorded.
+    num_workers: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +91,7 @@ class AttemptRecord:
             "git_dirty": self.git_dirty,
             "git_branch": self.git_branch,
             "code_snapshot": self.code_snapshot,
+            "num_workers": self.num_workers,
         }
 
     @classmethod
@@ -106,4 +113,5 @@ class AttemptRecord:
             git_branch=(
                 data.get("git_branch") if isinstance(data.get("git_branch"), str) else None
             ),
+            num_workers=(int(data["num_workers"]) if data.get("num_workers") is not None else None),
         )

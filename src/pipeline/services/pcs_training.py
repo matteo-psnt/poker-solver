@@ -184,6 +184,23 @@ def train_pcs(
         config.solver.model_dump(),
         config.pcs.model_dump(),
     )
+    # REFUSED here rather than at dispatch, because the comparison has to be
+    # against the EFFECTIVE count: `ram_safe_workers` clamps the request, so the
+    # laptop cannot know what a given pool will actually run and would refuse a
+    # continuation that was in fact identical.
+    trained_at = [a.num_workers for a in tracker.metadata.attempts[:-1] if a.num_workers]
+    if trained_at and workers not in trained_at:
+        raise ValueError(
+            f"this run trained at {'/'.join(str(w) for w in sorted(set(trained_at)))} "
+            f"worker(s) and this attempt would run {workers}. Continuing a table at a "
+            "different worker count is DESTRUCTIVE -- measured 09-27, a 7-worker table "
+            "continued at 36 went from 1,954 to 8,623 mbb exploitable and took ~1,600 "
+            f"rungs to recover. Re-dispatch with --workers {trained_at[-1]}, or start a "
+            "fresh run."
+        )
+    # On the ATTEMPT, so a resume that changes it is visible in the record rather
+    # than only in this log line.
+    tracker.record_worker_count(workers)
     # The kernel is numpy and numba on one core per worker; BLAS threads on
     # top of that only oversubscribe the node.
     for variable in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):

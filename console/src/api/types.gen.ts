@@ -685,6 +685,11 @@ export interface components {
             phase: components["schemas"]["Phase"];
             /** Result */
             result?: string | null;
+            /**
+             * Retry Count
+             * @default 0
+             */
+            retry_count: number;
             /** Start Time */
             start_time?: string | null;
             /** State */
@@ -1761,6 +1766,8 @@ export interface components {
             };
             /** Training Tasks */
             training_tasks?: number | null;
+            /** Worker Counts */
+            worker_counts: (number | null)[];
         };
         /** RunParts */
         RunParts: {
@@ -1919,6 +1926,8 @@ export interface components {
         ScorePayload: {
             /** Code Snapshot */
             code_snapshot: string;
+            /** Existing Tiers */
+            existing_tiers?: string[];
             /** Job Id */
             job_id: string;
             /** Method */

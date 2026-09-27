@@ -334,6 +334,11 @@ class RunDigest(BaseModel):
     iterations: int
     runtime_seconds: float
     attempts: int
+    # The effective worker count per attempt, in order. A LIST because it can
+    # differ across a resume and that is destructive: continuing a 7-worker table
+    # at 36 drove exploitability 1954 -> 8623 mbb on 09-27. None for attempts
+    # trained before it was recorded.
+    worker_counts: list[int | None]
     # The RESOLVED solver/pcs knobs, which is what `--config` plus a `--set` list
     # actually produced. They were on the metadata's `config` all along and no
     # reader surfaced them, so telling two arms apart meant reading a node's log:
@@ -391,6 +396,7 @@ def run_digest(
         iterations=metadata.iterations,
         runtime_seconds=metadata.runtime_seconds,
         attempts=len(metadata.attempts),
+        worker_counts=[attempt.num_workers for attempt in metadata.attempts],
         trainer_knobs=_trainer_knobs(metadata),
         progress=progress,
         coverage_flat_from=run_events.plateau_iteration(progress),

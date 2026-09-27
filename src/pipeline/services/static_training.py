@@ -80,9 +80,13 @@ def train_static(
     Args:
         config_name: Stem of a config under ``config/training``. Ignored on a
             continuation, which trains the config on the run's own record.
-        num_workers: Worker processes. A pure throughput knob: the table is
-            shared and there are no per-worker maps, so raising it does not
-            raise memory.
+        num_workers: Worker processes. NOT a pure throughput knob -- it changes
+            the RESULT. Measured 09-27 on the PCS kernel: 7 workers beat 36 by
+            +222 mbb/hand over 20,000 duplicate deals (three seeds, +141 to
+            +222), and continuing a 7-worker table at 36 destroyed it. Memory
+            does not rise with it (the table is shared, no per-worker maps),
+            which is what made it look free. Keep it CONSTANT across a run's
+            attempts; the effective count is recorded per attempt.
         num_iterations: ABSOLUTE iteration target. Continuing past it is a
             no-op, so a retried task converges rather than repeating.
         checkpoint_every: Checkpoint every N iterations (0 = only at the end).
@@ -119,6 +123,9 @@ def train_static(
     )
     config, tracker = run.config, run.tracker
     iterations = num_iterations or config.training.num_iterations
+    # See pcs_training: recorded per attempt so a resume that changes it is
+    # visible in the record, not just in a log line.
+    tracker.record_worker_count(num_workers)
     result = train_recorded(
         tracker,
         lambda: train_static_parallel(

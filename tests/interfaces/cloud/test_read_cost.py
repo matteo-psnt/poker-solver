@@ -106,7 +106,12 @@ def _task(task_id: str) -> _Obj:
         state="BatchTaskState.COMPLETED",
         creation_time=None,
         execution_info=_Obj(
-            result=None, exit_code=0, failure_info=None, start_time=None, end_time=None
+            result=None,
+            exit_code=0,
+            failure_info=None,
+            start_time=None,
+            end_time=None,
+            retry_count=0,
         ),
         node_info=None,
     )

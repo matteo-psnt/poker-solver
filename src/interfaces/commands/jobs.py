@@ -128,7 +128,12 @@ def render(payload: JobsPayload) -> None:
             word = task.outcome or task.phase
             exit_code = "" if task.exit_code is None else f"  exit={task.exit_code}"
             because = f"  ({task.exit_meaning})" if task.exit_meaning else ""
-            print(f"   {word:<10} {task.task}{exit_code}{because}")
+            # The ATTEMPT, whenever it is not the first. Batch reruns a failed task
+            # and the rerun reads `running`, so a crash-loop is indistinguishable
+            # from progress on this screen without it -- which is exactly how four
+            # OOM-looping scores looked healthy for 4.7 hours on 09-27.
+            attempt = f"  ATTEMPT {task.retry_count + 1}" if task.retry_count else ""
+            print(f"   {word:<10} {task.task}{attempt}{exit_code}{because}")
     if payload.hidden_jobs:
         listed = len(payload.jobs) + payload.hidden_jobs
         print(f"\n  showing {len(payload.jobs)} of {listed} job(s) — `--limit 0` for all")

@@ -74,3 +74,40 @@ class TestTheDefaultView:
         """A job container stays open all day after its tasks have finished."""
         jobs = [_job("poker-20260901-mem", state="BatchJobState.ACTIVE", phase="finished")]
         assert select(jobs, show_all=False, limit=20).jobs == []
+
+
+class TestCrashLoopIsVisible:
+    """A retried task must not read like a healthy one.
+
+    Batch reruns a failed task and the rerun is `running` like any other, so four
+    consecutive OOM deaths rendered as one working task. Measured 09-27: four
+    scores crash-looped for 4.7 hours while `jobs` showed them running, and only
+    `tasks --run` (attempt numbers) exposed it.
+    """
+
+    def test_a_retried_task_renders_its_attempt_number(self, capsys):
+        from src.interfaces.commands.jobs import JobsPayload, render
+
+        looping = BatchTask(
+            task="score-pcs-9101-600",
+            job="poker-20260927",
+            state=None,
+            phase="running",
+            retry_count=3,
+        )
+        first = BatchTask(
+            task="score-pcs-9101-800", job="poker-20260927", state=None, phase="running"
+        )
+        render(
+            JobsPayload(
+                jobs=[
+                    Job(job="poker-20260927", state="BatchJobState.ACTIVE", tasks=[looping, first])
+                ],
+                total_jobs=1,
+            )
+        )
+        out = capsys.readouterr().out
+        assert "ATTEMPT 4" in out, "a crash-looping task must say which attempt it is on"
+        # The first attempt stays quiet, or every line carries noise and the
+        # signal stops being one.
+        assert "score-pcs-9101-800  ATTEMPT" not in out
