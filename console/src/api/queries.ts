@@ -157,12 +157,22 @@ export const useCombos = (enabled: boolean) =>
     enabled,
   });
 
-export const useSolverNode = (path: string, board: string, average: boolean, enabled: boolean) =>
+export const useSolverNode = (
+  path: string,
+  board: string,
+  average: boolean,
+  enabled: boolean,
+  stack?: number,
+) =>
   useQuery<SolverNode>({
-    queryKey: ["blueprint", "node", path, board, average],
+    // `stack` is in the key: switching depth must refetch, not reuse the grid of
+    // the depth before it. A cached 100 bb range shown under a 6 bb label is the
+    // exact failure the server's own 422 exists to prevent.
+    queryKey: ["blueprint", "node", path, board, average, stack ?? "deepest"],
     queryFn: () =>
       get(
-        `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}`,
+        `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}` +
+          (stack === undefined ? "" : `&stack=${stack}`),
       ),
     enabled,
   });

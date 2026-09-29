@@ -405,7 +405,17 @@ sudo tee /etc/blueprint.env >/dev/null <<EOF
 RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
-READER_EXTRA=${AT:+--at $AT}
+# THE SAME LADDER AS THE SEAT. The rungs are staged once above and the reader adds
+# no copy of them: measured 09-29, one 100 bb blueprint under `play_only` is 0.77 GB
+# against 1.92 GB loading all five arrays, so the whole ladder fits beside the seat's
+# 2.89 GB on a 15 GB box. `/api/run` then lists every stack and
+# `/api/node?stack=N` picks one, which is what lets the chart show a 6 bb range
+# rather than implying the 100 bb one applies at every depth.
+#
+# `$SEAT_RUNGS` is reused verbatim -- it is already `--rung run:at:thr` per rung and
+# `blueprint-serve` ignores the threshold field. Building a second list here is how
+# the two would drift into disagreeing about what is fielded.
+READER_EXTRA=${AT:+--at $AT}$SEAT_RUNGS
 EOF
 # The DSN carries a password; the unit runs as root and is the only reader.
 sudo chmod 600 /etc/blueprint.env

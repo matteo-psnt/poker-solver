@@ -747,8 +747,20 @@ export interface components {
             big_blind: number;
             /** Combos */
             combos: number;
+            /**
+             * Depths
+             * @default []
+             */
+            depths: number[];
             /** Run */
             run: string;
+            /**
+             * Runs By Depth
+             * @default {}
+             */
+            runs_by_depth: {
+                [key: string]: string;
+            };
             /** Small Blind */
             small_blind: number;
             /** Starting Stack */
@@ -2406,6 +2418,7 @@ export interface operations {
                 path?: string;
                 board?: string;
                 average?: boolean;
+                stack?: number | null;
             };
             header?: never;
             path?: never;

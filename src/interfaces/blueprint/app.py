@@ -241,6 +241,14 @@ class BlueprintRun(BaseModel):
     small_blind: int
     big_blind: int
     combos: int
+    # Every starting stack this server holds, deepest first. The chipzen box loads
+    # the seat's whole depth ladder, so one process can answer for 100 bb down to
+    # 3 bb; `starting_stack` above is the DEFAULT (deepest) and `/api/node?stack=`
+    # selects any of these. A single-run server reports its one stack here.
+    depths: list[int] = []
+    # `stack -> run id`, so a client can say WHICH blueprint a depth came from
+    # rather than implying the deepest run trained them all.
+    runs_by_depth: dict[int, str] = {}
 
 
 class Combos(BaseModel):
@@ -390,19 +398,46 @@ def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
 
 
 def create_app(
-    load_blueprint: Callable[[], ScorableBlueprint],
+    load_blueprint: Callable[[], ScorableBlueprint | dict[int, ScorableBlueprint]],
     *,
     run_id: str = "unknown",
+    run_ids: dict[int, str] | None = None,
 ) -> FastAPI:
-    """Build the app around one blueprint, loaded now and never replaced.
+    """Build the app around a blueprint, or a LADDER of them, loaded now.
 
     Eagerly, not lazily: a server that loads on first request answers its
     readiness check before it can serve anything, and the first caller pays a
     minute with no way to tell that from a hang. Which is also what makes
     reaching this server at all the readiness signal the deploy waits on.
+
+    ``load_blueprint`` may return one blueprint or a ``{starting_stack: blueprint}``
+    ladder. The chipzen box already stages every depth for the seat, so serving
+    them all here costs the load, not another copy of the deepest run --
+    measured 09-29 at 0.77 GB for one 100 bb blueprint under `play_only`.
+
+    PLAY stays on the deepest rung deliberately. A session is stateful and its
+    depth would have to be pinned for the whole hand; the chart is a read and can
+    switch freely. Widening `Sessions` is a separate change with a separate
+    failure mode.
     """
-    blueprint = load_blueprint()
+    loaded = load_blueprint()
+    ladder: dict[int, ScorableBlueprint] = (
+        dict(loaded) if isinstance(loaded, dict) else {loaded.config.game.starting_stack: loaded}
+    )
+    if not ladder:
+        raise ValueError("create_app needs at least one blueprint")
+    # Deepest first: it is the default, and the order a client should offer.
+    depths = sorted(ladder, reverse=True)
+    blueprint = ladder[depths[0]]
+    names = dict(run_ids or {})
     sessions = Sessions(blueprint)
+
+    def _pick(stack: int | None) -> ScorableBlueprint | None:
+        """The blueprint for a stack, or None if this server does not hold it."""
+        if stack is None:
+            return blueprint
+        return ladder.get(stack)
+
     app = FastAPI(title=f"blueprint server — {run_id}", docs_url="/api/docs")
 
     @app.get("/api/health")
@@ -425,6 +460,8 @@ def create_app(
                 small_blind=config.game.small_blind,
                 big_blind=config.game.big_blind,
                 combos=len(_COMBO_LABELS),
+                depths=depths,
+                runs_by_depth={stack: names.get(stack, run_id) for stack in depths},
             ).model_dump()
         )
 
@@ -434,11 +471,25 @@ def create_app(
         return JSONResponse(Combos(combos=list(_COMBO_LABELS)).model_dump())
 
     @app.get("/api/node")
-    def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
-        """The strategy at one spot, for every combo the board allows."""
+    def _node(
+        path: str = "", board: str = "", average: bool = True, stack: int | None = None
+    ) -> JSONResponse:
+        """The strategy at one spot, for every combo the board allows.
+
+        ``stack`` selects a rung of the depth ladder; omitted means the deepest.
+        A stack this server does not hold is a 422 that NAMES what it has, because
+        the alternative -- silently answering from the deepest blueprint -- would
+        label a 100 bb range as a 6 bb one and no reader could tell.
+        """
+        chosen = _pick(stack)
+        if chosen is None:
+            return JSONResponse(
+                {"error": f"no blueprint at starting_stack={stack}; have {depths}"},
+                status_code=422,
+            )
         try:
             cards = parse_board(board)
-            node = replay(blueprint, path, cards)
+            node = replay(chosen, path, cards)
         except NeedsBoardError as stopped:
             # Not a refusal: a line that crosses to the flop has no strategy
             # until someone says which flop. The walk so far comes back so the
@@ -468,7 +519,7 @@ def create_app(
                     line=_line_payload(node.line),
                 ).model_dump()
             )
-        grid = strategy_grid(blueprint, node, use_average=average)
+        grid = strategy_grid(chosen, node, use_average=average)
         return JSONResponse(
             SolverNode(
                 path=path,

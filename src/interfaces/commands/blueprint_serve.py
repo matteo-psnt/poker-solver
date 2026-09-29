@@ -34,6 +34,8 @@ from src.shared.cloudtask.node.paths import NodePaths
 if TYPE_CHECKING:
     import argparse
 
+    from src.engine.solver.policy.source import ScorableBlueprint
+
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8790
 
@@ -55,6 +57,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Serve the checkpoint at this iteration rather than the newest.",
     )
+    parser.add_argument(
+        "--rung",
+        action="append",
+        default=None,
+        metavar="RUN[:AT]",
+        help="A SHALLOWER blueprint to serve beside `--run`, repeatable. Same "
+        "spelling as `chipzen-seat --rung`, so one deploy can hand both the same "
+        "ladder. `/api/run` lists the stacks held and `/api/node?stack=N` picks "
+        "one; omitting it reads the deepest. Serving the seat's whole ladder costs "
+        "the load, not another copy of the deepest run.",
+    )
 
 
 class BlueprintServePayload(BaseModel):
@@ -67,6 +80,8 @@ class BlueprintServePayload(BaseModel):
     url: str
     host: str
     port: int
+    rungs: list[str] = []
+    """Shallower blueprints beside `run`, as `run[:at]`. Empty serves one depth."""
 
 
 def run(args: argparse.Namespace) -> BlueprintServePayload:
@@ -80,6 +95,22 @@ def run(args: argparse.Namespace) -> BlueprintServePayload:
     run_dir = resolve_run_dir(args.run, args.runs_dir)
     if not run_dir.is_dir():
         raise CommandError(f"No run directory at {run_dir}.")
+    # Resolved HERE too: a bad `--rung` should be refused beside a bad `--run`,
+    # not a minute into the load of the rungs that were fine.
+    rungs = []
+    for spec in args.rung or []:
+        # `run[:at[:threshold]]`, the SEAT's spelling, so one deploy can hand both
+        # units the same list. The threshold is the seat's and is ignored here -- a
+        # reader shows the table as trained. Splitting on the FIRST colon only would
+        # read "12000:0.20" as the iteration and refuse every fielded rung.
+        name, _, rest = spec.partition(":")
+        at, _, _threshold = rest.partition(":")
+        directory = resolve_run_dir(name, args.runs_dir)
+        if not directory.is_dir():
+            raise CommandError(f"No run directory at {directory} (from --rung {spec!r}).")
+        if at and not at.isdigit():
+            raise CommandError(f"--rung {spec!r}: {at!r} is not an iteration.")
+        rungs.append(f"{directory}:{at}" if at else str(directory))
     return BlueprintServePayload(
         run=run_dir.name,
         run_dir=str(run_dir),
@@ -87,6 +118,7 @@ def run(args: argparse.Namespace) -> BlueprintServePayload:
         url=f"http://{HOST}:{args.port}",
         host=HOST,
         port=args.port,
+        rungs=rungs,
     )
 
 
@@ -129,12 +161,27 @@ def render(payload: BlueprintServePayload) -> None:
         )
         return solver
 
-    def _load():
-        """Load once, at app construction."""
-        return _build(run_dir, payload.at_iteration)
+    def _load_ladder() -> tuple[dict[int, ScorableBlueprint], dict[int, str]]:
+        """Every rung, keyed by starting stack, plus which run each came from.
 
-    print(f"Loading {payload.run} …")
-    app = create_app(_load, run_id=payload.run)
+        `--run` is applied LAST so it wins a tie: two rungs at one stack is a
+        deploy mistake, and the deepest is the one the operator named explicitly.
+        """
+        ladder: dict[int, ScorableBlueprint] = {}
+        names: dict[int, str] = {}
+        specs = [*payload.rungs, f"{run_dir}:{payload.at_iteration or ''}"]
+        for spec in specs:
+            directory, _, at = spec.rpartition(":")
+            path = Path(directory or spec)
+            solver = _build(path, int(at) if at else None)
+            stack = solver.config.game.starting_stack
+            ladder[stack] = solver
+            names[stack] = path.name
+        return ladder, names
+
+    print(f"Loading {payload.run} and {len(payload.rungs)} rung(s) …")
+    ladder, names = _load_ladder()
+    app = create_app(lambda: ladder, run_id=payload.run, run_ids=names)
     print(f"Blueprint server on {payload.url}   (Ctrl-C to stop)")
 
     try:

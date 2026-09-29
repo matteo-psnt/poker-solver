@@ -128,8 +128,18 @@ def mount(app: FastAPI) -> None:
         return forward("/api/combos", {})
 
     @app.get("/api/blueprint/node", response_model=contract.SolverNode)
-    def _node(path: str = "", board: str = "", average: bool = True) -> JSONResponse:
-        return forward("/api/node", {"path": path, "board": board, "average": average})
+    def _node(
+        path: str = "", board: str = "", average: bool = True, stack: int | None = None
+    ) -> JSONResponse:
+        # `stack` picks a rung of the depth ladder; omitted reads the deepest. Sent
+        # only when asked for, so a single-depth server never sees a parameter it
+        # would have to ignore.
+        query: dict[str, str | bool] = {"path": path, "board": board, "average": average}
+        if stack is not None:
+            # A STRING, because that is what `forward` puts on a query string and an
+            # int here would only be stringified a layer later.
+            query["stack"] = str(stack)
+        return forward("/api/node", query)
 
     # Play is stateful, so these carry a body and a session id. The proxy still
     # holds no state of its own: the session lives where the blueprint does, and

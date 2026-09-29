@@ -72,6 +72,10 @@ const routes = [
       path: z.string().default(""),
       board: z.string().default(""),
       average: z.boolean().default(true),
+      // The DEPTH, when the server holds a ladder. Optional rather than defaulted:
+      // absent means "the deepest", which is what a single-run server has, and
+      // baking a number in would make a shared link wrong on a different box.
+      stack: z.number().optional(),
     }),
   }),
 

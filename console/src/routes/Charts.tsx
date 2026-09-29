@@ -35,7 +35,7 @@ const route = getRouteApi("/blueprint");
  * has no strategy at all until someone says which flop.
  */
 export function Charts() {
-  const { path, board, average } = route.useSearch();
+  const { path, board, average, stack } = route.useSearch();
   const navigate = useNavigate({ from: "/blueprint" });
   /**
    * A pin belongs to the SPOT it was taken in, so it is STORED with one.
@@ -47,7 +47,11 @@ export function Charts() {
    * under a label saying "pinned". Two contradictory answers to one question,
    * on screen together.
    */
-  const spot = `${path}|${board}|${average}`;
+  // STACK IS PART OF THE SPOT. A pin taken at one depth must not survive a switch
+  // to another: the grid would redraw from the new depth while the rail beside it
+  // still showed the old one's strategy and combo count, under a label saying
+  // "pinned" -- the same two-contradictory-answers bug the board once had.
+  const spot = `${path}|${board}|${average}|${stack ?? "deepest"}`;
   const [held, setHeld] = useState<{ spot: string; cell: Cell } | null>(null);
   const pinned = held?.spot === spot ? held.cell : null;
   const [hovered, setHovered] = useState<Cell | null>(null);
@@ -57,9 +61,9 @@ export function Charts() {
 
   const run = useBlueprintRun();
   const combos = useCombos(!!run.data);
-  const node = useSolverNode(path, board, average, !!run.data);
+  const node = useSolverNode(path, board, average, !!run.data, stack);
 
-  const set = (next: Partial<{ path: string; board: string; average: boolean }>) =>
+  const set = (next: Partial<{ path: string; board: string; average: boolean; stack: number }>) =>
     navigate({ search: (old) => ({ ...old, ...next }) });
 
   const grid = node.data?.grid ?? null;
@@ -139,7 +143,17 @@ export function Charts() {
         title={
           grid ? `${grid.street} · ${seatName(grid.actor, node.data?.button ?? 0)} to act` : "chart"
         }
-        aside={<Average average={average} onSet={set} />}
+        aside={
+          <>
+            <Depth
+              depths={run.data?.depths ?? []}
+              stack={stack}
+              bigBlind={run.data?.big_blind ?? 2}
+              onSet={set}
+            />
+            <Average average={average} onSet={set} />
+          </>
+        }
         // `combos` is fetched once with staleTime Infinity and is not retried,
         // so a 503 from the blueprint box would otherwise blank the grid for the
         // life of the tab with no reason given anywhere.
@@ -538,6 +552,47 @@ function ActionRow({
 }
 
 /** The average/current toggle, which belongs to the numbers rather than the line. */
+/**
+ * Which DEPTH of the ladder the grid reads.
+ *
+ * Absent when the server holds one run, which is the ordinary case on a box that
+ * is not also seating chipzen -- a selector offering one option is noise. The
+ * stacks come from `/api/run`, deepest first, and are labelled in BIG BLINDS
+ * because that is the unit the strategy is actually about: a 6 bb range is a
+ * different game from a 100 bb one, and "12 chips" says that far less clearly.
+ */
+function Depth({
+  depths,
+  stack,
+  bigBlind,
+  onSet,
+}: {
+  depths: number[];
+  stack?: number;
+  bigBlind: number;
+  onSet: (next: { stack: number }) => void;
+}) {
+  if (depths.length < 2) return null;
+  return (
+    <label className="flex items-center gap-2 text-[11px] text-[var(--fg-muted)]">
+      depth
+      <select
+        className="bg-[var(--bg-raised)] text-[var(--fg)] text-[11px] rounded px-1 py-0.5"
+        value={stack ?? depths[0]}
+        onChange={(event) => onSet({ stack: Number(event.target.value) })}
+      >
+        {depths.map((chips) => (
+          <option key={chips} value={chips}>
+            {/* From the server's own big blind, never a hardcoded 2: the label is
+                the only thing telling you which game this range belongs to. */}
+            {Math.round(chips / bigBlind)} bb
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function Average({
   average,
   onSet,
