@@ -150,6 +150,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "checkpoint). Two arms are only comparable at a matched training budget, so "
         "pass this whenever one of them was continued further than the other.",
     )
+    parser.add_argument(
+        "--vs-policy-threshold",
+        type=float,
+        default=0.0,
+        help="[blueprint_match] Purify the OPPONENT's table at this probability, the "
+        "way the seat purifies what it serves. With --policy-threshold on the same "
+        "run and rung this makes a self-match a single-knob A/B over SERVING: the "
+        "sampling streams are shared, so the pairs that are not zero are exactly "
+        "the decisions the cut changed.",
+    )
     # LBR options (--method lbr).
     parser.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
     parser.add_argument("--runouts", type=int, default=12, help="[lbr] Equity runouts per node.")
@@ -241,8 +251,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--policy-threshold",
         type=float,
         default=0.0,
-        help="[exact_br] Eval-time thresholding of the blueprint: zero actions below this "
-        "probability and renormalise. A separate tier.",
+        help="[exact_br, blueprint_match] Eval-time thresholding of the blueprint: zero "
+        "actions below this probability and renormalise. A separate tier. Under "
+        "blueprint_match it purifies side A, which is what the SEAT does to every "
+        "rung it serves; see --vs-policy-threshold for the control.",
     )
     parser.add_argument(
         "--purify",
@@ -402,6 +414,8 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         vs_at=args.vs_at,
         match_deals=args.deals if args.deals is not None else MATCH_DEALS,
         match_seed=args.seed if args.seed is not None else 1,
+        match_threshold_a=args.policy_threshold,
+        match_threshold_b=args.vs_policy_threshold,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
@@ -452,6 +466,23 @@ def render(payload: services.EvaluationPayload) -> None:
         winner = payload.run_id if edge > 0 else results["run_b"]
         rung_b = results.get("rung_b")
         print(f"  vs:            {results['run_b']} @ {rung_b if rung_b else 'latest'}")
+        thr_a, thr_b = (
+            results.get("policy_threshold_a", 0.0),
+            results.get("policy_threshold_b", 0.0),
+        )
+        if thr_a or thr_b:
+            # Rows changed, not just the knob: a cut that moved nothing is a
+            # no-op arm whose exact zero says nothing about serving.
+            print(
+                f"  Served at:     A {thr_a:.2f} ({results.get('rows_thresholded_a', 0):,} rows"
+                f" cut)  B {thr_b:.2f} ({results.get('rows_thresholded_b', 0):,} rows cut)"
+            )
+        divergent = results.get("divergent_pairs")
+        if divergent is not None:
+            # The knob's real sample size: duplicate deals cancel exactly where
+            # the two sides agree, so an edge rests only on these pairs.
+            share = divergent / results["num_deals"] if results["num_deals"] else 0.0
+            print(f"  Diverged on:   {divergent:,} of {results['num_deals']:,} pairs ({share:.1%})")
         print(f"  Edge (A over B): {edge:+.2f} mbb/hand (± {se:.2f})  {sigma:.1f}σ")
         print(
             f"  Deals:         {results['num_deals']:,} duplicate ({results['num_hands']:,} hands)"

@@ -54,6 +54,12 @@ CONDITIONAL_TIER_KNOBS = (
     # so two edges over different opponents are not two readings of one thing.
     "run_b",
     "rung_b",
+    # ...and HOW each side was served. The seat purifies at 0.20 while every gate
+    # matched raw tables, so a fielded-configuration row must not pair with the
+    # raw one that picked the rung. Conditional, so rows written before this
+    # pair exactly as they did.
+    "policy_threshold_a",
+    "policy_threshold_b",
     # settling: the rung gap the drift was measured over IS the instrument.
     "from_iteration",
     "rung_gap",
@@ -255,12 +261,19 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
     which is exactly why pairing two rows measured against different opponents
     has to be refused rather than averaged.
     """
-    return {
+    knobs: dict[str, Any] = {
         "run_b": results["run_b"],
         "rung_b": results.get("rung_b"),
         "num_deals": results["num_deals"],
         "base_seed": results["seed"],
     }
+    # Emitted only when a side was actually purified, so every raw-vs-raw row
+    # ever written keeps the tier digest it already has.
+    for side in ("a", "b"):
+        threshold = float(results.get(f"policy_threshold_{side}") or 0.0)
+        if threshold > 0.0:
+            knobs[f"policy_threshold_{side}"] = threshold
+    return knobs
 
 
 def build_settling_knobs(results: dict[str, Any]) -> dict[str, Any]:

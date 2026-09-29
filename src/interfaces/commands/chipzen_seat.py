@@ -161,9 +161,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "duplicate deals, a native rung beats the 100 bb blueprint by 466 "
         "mbb/hand at 6 bb, 316 at 10 bb, 218 at 15 bb, 235 at 25 bb and 93 at "
         "35 bb; at 50 bb they are even. THRESHOLD overrides --policy-threshold "
-        "for that rung, because the optimum moves with depth: 0.10 beat 0.02 "
-        "by 38.0 +/- 15.6 mbb/hand at 25 bb and 0.05 beat it by 19.1 +/- 6.4 "
-        "at 6 bb, while 0.02 stays the measured point at 100 bb.",
+        "for that rung, because the optimum RISES WITH DEPTH: re-measured 09-29 "
+        "on ranges that play rather than fold, the cross-opponent peak is 0.20 "
+        "at 25 bb, 0.35 at 50 bb and 0.50 at 100 bb, worth +68 to +91 mbb/hand "
+        "over the same pairing served raw.",
     )
     parser.add_argument(
         "--once",

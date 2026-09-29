@@ -1,10 +1,14 @@
 """Head-to-head gates: run against run, and blueprint against deployed resolver."""
 
+from __future__ import annotations
+
 import functools
 import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
+from src.engine.solver.policy.threshold import apply_policy_threshold
 from src.pipeline.blueprint.construction import build_static_evaluation_solver
 from src.pipeline.evaluation.estimators.blueprint_match import play_blueprint_match
 from src.pipeline.evaluation.estimators.resolver_match import play_resolver_match
@@ -15,7 +19,13 @@ from src.pipeline.services.scoring._shared import (
     effective_abstraction_hash,
     load_blueprint,
 )
-from src.shared.ports.record import RecordSource
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from src.engine.solver.mccfr.static_solver import StaticTreeSolver
+    from src.engine.solver.storage.static_array import StaticArrayStorage
+    from src.shared.ports.record import RecordSource
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +166,23 @@ def evaluate_run_resolver_gate(
     )
 
 
+def _threshold_side(
+    storage: StaticArrayStorage, solver: StaticTreeSolver, threshold: float, side: str
+) -> int:
+    """Purify one side of a match in place, as the seat does at load. Rows changed."""
+    if threshold <= 0.0:
+        return 0
+    changed, trained = apply_policy_threshold(storage, solver.tree, threshold)
+    logger.info(
+        "match side %s thresholded at %.3f: %d of %d trained rows changed",
+        side,
+        threshold,
+        changed,
+        trained,
+    )
+    return changed
+
+
 def evaluate_blueprint_match(
     run_dir_a: Path,
     run_dir_b: Path,
@@ -164,6 +191,8 @@ def evaluate_blueprint_match(
     seed: int = 1,
     at_a: int | None = None,
     at_b: int | None = None,
+    policy_threshold_a: float = 0.0,
+    policy_threshold_b: float = 0.0,
     record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head match between two runs' blueprints on duplicate deals.
@@ -174,6 +203,13 @@ def evaluate_blueprint_match(
     Both rungs are addressable because two arms are only comparable at matched
     TRAINING BUDGET: without ``at_b`` an arm that happened to be continued
     further plays its whole extra ladder, which is a different arm.
+
+    The two policy thresholds exist because the SEAT purifies what it serves
+    (0.20 per rung) while every gate to date matched raw tables, so the fielded
+    configuration had never been measured on chips. Set per side, they turn a
+    self-match into a single-knob A/B over serving: the sampling streams are
+    shared, so identical tables give provably all-zero pairs and the only
+    divergence is where the cut changed a decision.
 
     Raises:
         FileNotFoundError: Missing run metadata/checkpoint or abstraction file.
@@ -203,6 +239,17 @@ def evaluate_blueprint_match(
         at_b,
         play_only=True,
     )
+    # A self-match loads the same checkpoint twice, and thresholding is in place:
+    # were the two tables one array, cutting A would cut B and the match would
+    # report a provable zero as "the threshold costs nothing".
+    if np.shares_memory(storage_a.strategy_sum, storage_b.strategy_sum):
+        raise ValueError(
+            "The two blueprints share one strategy table, so a per-side policy "
+            "threshold would apply to both and the match would measure nothing."
+        )
+    changed_a = _threshold_side(storage_a, solver_a, policy_threshold_a, "A")
+    changed_b = _threshold_side(storage_b, solver_b, policy_threshold_b, "B")
+
     rung_a = at_a if at_a is not None else checkpoint_iteration_of(run_dir_a)
     rung_b = at_b if at_b is not None else checkpoint_iteration_of(run_dir_b)
     result = play_blueprint_match(solver_a, solver_b, num_deals=num_deals, seed=seed)
@@ -223,6 +270,18 @@ def evaluate_blueprint_match(
         # uninterpretable later without which rung, which abstraction and which
         # betting tree the other half brought.
         "rung_b": rung_b,
+        "policy_threshold_a": policy_threshold_a,
+        "policy_threshold_b": policy_threshold_b,
+        # How much of each table the cut actually moved. A threshold that
+        # changed no row is a no-op arm, and the chip edge would be an exact
+        # zero for a reason that has nothing to do with the strategy.
+        "rows_thresholded_a": changed_a,
+        "rows_thresholded_b": changed_b,
+        # Pairs where the two sides actually played differently. Duplicate deals
+        # cancel exactly while the tables agree, so on a self-match under one
+        # threshold this is the SAMPLE SIZE of the knob: an edge of zero over
+        # zero divergent pairs means the cut never fired, not that it is free.
+        "divergent_pairs": sum(1 for sample in result.pair_samples_mbb if sample != 0.0),
         "card_abstraction_hash_b": metadata_b.card_abstraction_hash,
         "action_config_hash_b": metadata_b.action_config_hash,
         "config_name_b": metadata_b.config_name,

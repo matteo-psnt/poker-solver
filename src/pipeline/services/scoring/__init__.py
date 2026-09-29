@@ -100,6 +100,9 @@ def evaluate_and_record(
     vs_at: int | None = None,
     match_deals: int = 2000,
     match_seed: int = 1,
+    # blueprint_match: what each side PURIFIES to before playing, as the seat does.
+    match_threshold_a: float = 0.0,
+    match_threshold_b: float = 0.0,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
@@ -205,6 +208,8 @@ def evaluate_and_record(
             seed=match_seed,
             at_a=at_iteration,
             at_b=vs_at,
+            policy_threshold_a=match_threshold_a,
+            policy_threshold_b=match_threshold_b,
             record_source=record_source,
         )
         estimator = BLUEPRINT_MATCH_ESTIMATOR_LABEL

@@ -3,8 +3,14 @@
 Small probabilities in an average strategy are mostly the residue of early
 iterations that never got averaged away. Zeroing them and renormalising measured
 940.1 -> 854.0 mbb/hand on the programme gate (three seeds, `--policy-threshold
-0.02`); 0.10 measured WORSE, so the knob is not monotone and 0.02 is the value
-that was verified.
+0.02`), where 0.10 measured WORSE.
+
+On CHIPS the ordering inverts and keeps going, which is what fields a value ten
+times larger: over duplicate deals against a different opponent, with the same
+pairing served raw as the control, the cut is worth +68.3 mbb/hand at 0.20 and
++86.5 at 0.35 (50 bb, 09-29), and the optimum rises with depth. The bound is a
+fold-meter and a purified range folds less often than it plays, so it ranks
+purification the wrong way round -- gate this knob on a match.
 
 Why here rather than at lookup: the deployed player reaches the blueprint through
 the resolver, which reads it for leaf values and range inference as well as for

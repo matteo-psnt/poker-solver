@@ -332,10 +332,15 @@ fi
 #   d06 run-pcs-production-to4k-d06-cfrbr-s7-082811-16288:4000:0.20
 #   d03 run-pcs-production-to4k-d03-cfrbr-s7-095309-24766:4000:0.20
 #
-# The 0.20 serving threshold is CARRIED OVER UNCHANGED, deliberately: it was tuned on
-# 08-31 against strategies that fold 62%, and purifying a range that actually PLAYS
-# may cost more than it saves. One change at a time; that is the next experiment.
-DEFAULT_RUNGS="run-pcs-production-to12k-d50-040438-26625:12000:0.20,\
+# Serving thresholds, MEASURED 09-29 (the 08-31 values were tuned against strategies
+# that fold 62%, so they had to be re-read on ranges that actually PLAY). Purification
+# wins at every depth -- ten of ten self-match arms positive, and confirmed against a
+# DIFFERENT opponent at three depths with the raw-vs-raw pairing as the control -- and
+# the optimum RISES WITH DEPTH: the peak is 0.20 at 25 bb, 0.35 at 50 bb and 0.50 at
+# 100 bb. d50 takes 0.35 (+86.5 mbb/hand over the raw control against the old rung,
+# against +68.3 at 0.20); the shallower rungs keep the 0.20 that every arm confirmed.
+# 0.35 and 0.50 are UNMEASURED below 50 bb, which is the next sweep.
+DEFAULT_RUNGS="run-pcs-production-to12k-d50-040438-26625:12000:0.35,\
 run-pcs-production-to12k-d35-040443-23758:12000:0.20,\
 run-pcs-production-to12k-d25-040447-19378:12000:0.20,\
 run-pcs-production-to12k-d15-041035-5670:12000:0.20,\
@@ -457,8 +462,29 @@ sudo install -m 0644 "$units/chipzen-seat-watchdog.timer" /etc/systemd/system/
 sudo install -m 0755 "$units/chipzen-seat-watchdog" /usr/local/bin/
 
 # POLICY_THRESHOLD must never be empty here: the unit expands it unquoted into
-# argparse. 0.02 is the measured point (940.1 -> 854.0 mbb/hand on the gate over
-# three seeds); 0 fields the table as trained.
+# argparse. It purifies the BASE blueprint -- every hand deeper than the shallowest
+# rung below -- while each `$RUNGS` entry carries its own suffix.
+#
+# 0.20, not the 0.02 fielded until 09-29. That 0.02 was tuned on EXPLOITABILITY
+# (940.1 -> 854.0 mbb/hand, and 0.10 measured WORSE there), which is a fold-meter;
+# on CHIPS the ordering inverts. MEASURED 09-29 on duplicate deals, `26596@16000`
+# purified against `3512@12000` raw with the raw-vs-raw pairing as the control:
+# the cut is worth +47.7 mbb/hand at 100 bb, +71.1 at 50 bb and +35.2 at 25 bb,
+# and a self-match at eight depths put every one of ten arms positive. 0 fields
+# the table as trained.
+#
+# 0.35, because the optimum RISES WITH DEPTH and this serves the deepest hands
+# (the seat takes the rung nearest in LOG depth, so this one covers ~70 bb up).
+# Cross-opponent gain over the raw control, 40,000 duplicate deals: at 100 bb
+# 0.20 +57.6, 0.35 +61.3, 0.50 +91.4; at 50 bb 0.20 +68.3, 0.35 +86.5, 0.50
+# +65.4; at 25 bb 0.20 is already the peak. 0.35 is the highest value no
+# measurement argues against.
+#
+# NOT 0.50, though it scored best at 100 bb: 0.50 and above are ARGMAX (a row
+# keeps its largest action when everything is below the cut, so at most one
+# action can hold half the mass), it was WORSE than 0.35 at 50 bb, and 0.7 sigma
+# is not enough to field a fully deterministic strategy -- which is the one thing
+# these static opponents cannot punish and an adaptive one could.
 #
 # SEAT_EXTRA carries $AT through to the seat. `blueprint-serve` grew an `--at`
 # of its own, but the READER'S unit is baked into cloud-init without one, so in
@@ -531,7 +557,7 @@ RUN=$RUN_ID
 RUNS_DIR=$WORK/data/runs
 CHIPZEN_ENV=${CHIPZEN_ENV:-prod}
 POKER_SOLVER_RECORD_DSN=$RECORD_DSN
-POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.02}
+POLICY_THRESHOLD=${POLICY_THRESHOLD:-0.35}
 SEAT_EXTRA=${AT:+--at $AT}${BUDGET_MS:+ --budget-ms $BUDGET_MS}${RESOLVER_FLAG}${RESOLVER_OFF_TREE:+ --resolver-off-tree-only}$SEAT_RUNGS
 EOF
 # The DSN carries a password, and this file gained one the moment the seat began
