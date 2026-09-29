@@ -298,6 +298,28 @@ class RunMetadata:
                 )
             )
 
+        # The worker count travels the same way and for the same reason: it is not
+        # knowable when `attempt_started` is emitted (it needs the compiled tree),
+        # so it rides on the checkpoints and is read back per attempt. Scoped to
+        # each attempt's own slice, or a resume at a different count would report
+        # the previous attempt's.
+        starts = [
+            position
+            for position, event in enumerate(events)
+            if event.get(run_events.EVENT_KEY) == run_events.ATTEMPT_STARTED
+        ]
+        for ordinal, attempt in enumerate(attempts):
+            if ordinal >= len(starts):
+                break
+            end = starts[ordinal + 1] if ordinal + 1 < len(starts) else len(events)
+            # CHECKPOINT, not PROGRESS -- `record_checkpoint` is what carries it,
+            # and the two are different event names.
+            workers = run_events.tail_value(
+                events[starts[ordinal] : end], "num_workers", None, kind=run_events.CHECKPOINT
+            )
+            if workers is not None:
+                attempt.num_workers = int(workers)
+
         payload = {
             **created,
             "iterations": run_events.tail_value(events, "iterations", 0, kind=run_events.PROGRESS),

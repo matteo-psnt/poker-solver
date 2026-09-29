@@ -663,7 +663,39 @@ class TestWorkerCountIsRecordedPerAttempt:
         )
 
     def test_it_survives_the_round_trip_through_the_record(self, tmp_path, record):
+        """Through the EVENT LOG, which is the only path that reaches the record.
+
+        The first version of this asserted on `RunMetadata.from_dict(to_dict())`
+        -- an in-MEMORY round trip that passed while the field never reached
+        Postgres at all, because attempt provenance travels on `attempt_started`
+        and that fires before the worker count can be known. `runinfo` read
+        `worker_counts: [None]` on the first real run. Rebuild from events or this
+        test proves nothing.
+        """
         tracker = self._tracker(tmp_path, record)
+        tracker.initialize()
         tracker.record_worker_count(14)
-        restored = RunMetadata.from_dict(tracker.metadata.to_dict())
-        assert restored.attempts[-1].num_workers == 14
+        # A checkpoint is what carries it, so a run that never checkpointed has
+        # nothing to report -- that is the honest shape, not a bug.
+        tracker.record_checkpoint(iteration=400, attempt_runtime_seconds=1.0)
+
+        rebuilt = RunMetadata.from_events([dict(e) for e in record.events(tracker.run_id)])
+        assert rebuilt.attempts[-1].num_workers == 14
+
+    def test_each_attempt_reports_its_own_count_across_a_resume(self, tmp_path, record):
+        """The destructive case: 7 workers, then 36. Both must be recoverable.
+
+        A single value for the run, or an unscoped scan of the events, would hand
+        the first attempt the second's count and hide exactly the change that
+        drove exploitability 1,954 -> 8,623 mbb.
+        """
+        tracker = self._tracker(tmp_path, record)
+        tracker.initialize()
+        tracker.record_worker_count(7)
+        tracker.record_checkpoint(iteration=400, attempt_runtime_seconds=1.0)
+        tracker.mark_resumed()
+        tracker.record_worker_count(36)
+        tracker.record_checkpoint(iteration=800, attempt_runtime_seconds=1.0)
+
+        rebuilt = RunMetadata.from_events([dict(e) for e in record.events(tracker.run_id)])
+        assert [a.num_workers for a in rebuilt.attempts] == [7, 36]

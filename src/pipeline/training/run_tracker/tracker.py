@@ -67,6 +67,9 @@ class RunTracker:
         self._source = source
         self.metadata_file = run_events.log_path(self.run_dir)
         self._initialized = False
+        # Set by `record_worker_count` once the node can compute it, then carried
+        # by every checkpoint. None until then, and on a reader that never trains.
+        self._num_workers: int | None = None
 
         # Load existing or prepare new metadata
         if has_run_record(self.run_dir, source):
@@ -182,16 +185,20 @@ class RunTracker:
         self.initialize()
 
     def record_worker_count(self, num_workers: int) -> None:
-        """Stamp the EFFECTIVE worker count on the attempt now running.
+        """The EFFECTIVE worker count for the attempt now running.
 
         The effective one, not the request: `ram_safe_workers` clamps against the
-        node's RAM, so the request is not what trained the table. Recorded because
-        a resume at a different count is destructive and was, until 09-27,
-        invisible in the record -- see `AttemptRecord.num_workers`.
+        node's RAM, so the request is not what trained the table.
+
+        It rides on every CHECKPOINT rather than on `attempt_started`, which has
+        already been emitted by the time a caller can know it -- the count needs
+        the compiled tree, which needs the config `open_run` returns. That is the
+        same reason `attempt_runtime_seconds` travels this way, and the fold reads
+        both back with `tail_value` scoped to the current attempt.
         """
+        self._num_workers = num_workers
         if self.metadata.attempts:
             self.metadata.attempts[-1].num_workers = num_workers
-            self.initialize()
 
     def mark_completed(self) -> None:
         """Mark run as completed."""
@@ -263,6 +270,11 @@ class RunTracker:
         would throw away a good rung and mark the run failed over telemetry.
         """
         try:
+            # See `record_worker_count`: the count is not knowable when
+            # `attempt_started` is emitted, so it travels with the rows that land
+            # after it, like `attempt_runtime_seconds`.
+            if self._num_workers is not None:
+                fields.setdefault("num_workers", self._num_workers)
             self._record(run_events.CHECKPOINT, **fields)
             iteration = fields.get("iteration")
             if self._sink is not None and isinstance(iteration, int):
