@@ -87,16 +87,38 @@ def build_static_evaluation_solver(
     mix_at: int | None = None,
     mix_weight: float = 0.5,
     play_only: bool = False,
+    share_as: str | None = None,
+    attach: bool = False,
 ) -> tuple[StaticTreeSolver, StaticArrayStorage, dict[str, Any]]:
     """Build a read-only blueprint over a STATIC checkpoint.
 
-    ``session_id=None`` allocates process-local arrays rather than shared memory:
-    an evaluation is a single read-only process, and taking a named segment would
-    collide with a training run of the same id.
+    Process-local arrays by default: an evaluation is a single read-only process,
+    and taking a named segment would collide with a training run of the same id.
+
+    ``share_as`` overrides that with a session name, so several SERVING processes
+    on one box map one copy instead of each loading their own. The segment name
+    folds in the tree fingerprint, and every depth is a different tree, so one
+    ``share_as`` yields one segment set PER DEPTH with no further keying. Pass a
+    reserved name that cannot be a run id -- see ``SERVE_SESSION``.
+
+    ``attach`` maps an existing set instead of creating it, and then the
+    checkpoint is NOT read: the creator already filled those pages, and reading
+    over them would both waste the load and race a live reader. Requires
+    ``share_as``.
 
     The third return value is what the eval record needs to tell a non-default
     ``policy_iterate``/``avg_window_from`` apart from the plain average.
     """
+    # BEFORE the abstraction: `build_card_abstraction` loads ~773 MB, and a caller
+    # that cannot be served should not pay for it.
+    if attach and share_as is None:
+        raise ValueError("attach=True needs share_as: there is no session to attach to")
+    if attach and at_iteration is None:
+        # `loaded` feeds `assemble_policy(loaded_iteration=...)`, and an attacher has
+        # no file to read it off. The rung is what the creator named its segments
+        # after, so a caller that cannot state it is not attaching to a known set.
+        raise ValueError("attach=True needs at_iteration: the rung is not discoverable")
+
     action_model = ActionModel(config)
     card_abstraction = build_card_abstraction(
         config,
@@ -107,7 +129,7 @@ def build_static_evaluation_solver(
     tree = build_betting_tree(
         rules, action_model, card_abstraction, starting_stack=config.game.starting_stack
     )
-    storage = StaticArrayStorage(tree)
+    storage = StaticArrayStorage(tree, session_id=share_as, attach=attach)
     # Verifies the tree fingerprint, so a checkpoint written against a different
     # tree is refused rather than silently reinterpreted row-for-row.
     if play_only and policy_iterate != "average":
@@ -115,11 +137,19 @@ def build_static_evaluation_solver(
             f"play_only loads {PLAY_ARRAYS} and leaves the rest zero, but "
             f"policy_iterate={policy_iterate!r} reads them. Ask for one or the other."
         )
-    loaded = load_checkpoint(
-        storage,
-        checkpoint_dir,
-        arrays=PLAY_ARRAYS if play_only else None,
-        at_iteration=at_iteration,
+    # An attacher reads NOTHING: the pages are already the creator's loaded arrays.
+    # `at_iteration` still selects which segments to attach, via the fingerprint and
+    # the caller's own bookkeeping, so it is not silently ignored -- it simply has
+    # no file to read.
+    loaded = (
+        at_iteration
+        if attach
+        else load_checkpoint(
+            storage,
+            checkpoint_dir,
+            arrays=PLAY_ARRAYS if play_only else None,
+            at_iteration=at_iteration,
+        )
     )
     policy_record = assemble_policy(
         storage,

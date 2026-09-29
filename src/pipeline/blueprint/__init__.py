@@ -26,7 +26,13 @@ from src.pipeline.blueprint.construction import (
     resolve_card_abstraction_hash,
 )
 
+# The session name the SERVING processes share their blueprints under. Reserved:
+# a segment name folds in the session id, so this must be something no training run
+# can be called -- a run id is always `pcs-*` or `run-*`, never this.
+SERVE_SESSION = "serve-ladder"
+
 __all__ = [
+    "SERVE_SESSION",
     "build_card_abstraction",
     "build_static_evaluation_solver",
     "resolve_card_abstraction_hash",

@@ -119,6 +119,13 @@ def render(payload: BlueprintServePayload) -> None:
             metadata,
             abstraction_hash=metadata.card_abstraction_hash,
             at_iteration=at_iteration,
+            # Same reason the SEAT does it: a reader answers `/api/node`,
+            # `/api/combos` and `/api/play` from `strategy_sum` and `visited`, and
+            # never resumes. The three resume-only arrays are 1.23 GB of a 2.7 GB
+            # blueprint, and this box holds the seat's whole ladder beside us --
+            # measured 09-29 at 1.84 GB private here against the seat's 2.82 GB
+            # for EIGHT rungs, entirely because this call loaded all five arrays.
+            play_only=True,
         )
         return solver
 
