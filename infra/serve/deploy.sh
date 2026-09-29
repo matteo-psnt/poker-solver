@@ -305,13 +305,43 @@ fi
 # A DEFAULT rather than a refusal on purpose: a deploy that fails is noticed, but
 # a deploy that half-works is what actually happened, and the safe half is the
 # ladder staying up.
-DEFAULT_RUNGS="run-pcs-production-to12k-d50-long-s7-161947-15074:12000:0.20,\
-run-pcs-production-to12k-d35-long-s7-161938-11549:12000:0.20,\
-run-pcs-production-to12k-d25-long-s7-102205-23109:12000:0.20,\
-run-pcs-production-to4k-d15-cfrbr-s7-082749-388:4000:0.20,\
-run-pcs-production-to4k-d10-cfrbr-s7-082804-23297:4000:0.20,\
-run-pcs-production-to4k-d06-cfrbr-s7-082811-16288:4000:0.20,\
-run-pcs-production-to4k-d03-cfrbr-s7-095309-24766:4000:0.20"
+# REPLACED 09-29. The 08-31 ladder was trained to the config of the 940.1-mbb
+# exact-BR gate arm -- cfr_br=river + linplus + runouts_per_flop=1 -- i.e. chosen by
+# the instrument since shown to be a fold-meter. Its 50 bb rung folds the SB first-in
+# **61.7%**, which `--policy-profile` itself calls ">50% NOT A CANDIDATE", and carries
+# only 68.1 mbb of postflop against 566.5 preflop because it rarely reaches its own
+# postflop. chipzen sat EVEN for a month with it: 48.5% over 99 matches.
+#
+# These are the same depths on the CURRENT recipe (cfr_br off, dcfr beta=0,
+# runouts_per_flop=4) at 14 workers, 12,000 rungs, seed 7. Each beat the rung it
+# replaces on CHIPS over 20,000 duplicate deals, and the edge is MONOTONE in depth --
+# which is why this is a result and not seven coin flips against a ~+53 null:
+#
+#   d03 +9.5+/-3   d06 +25.3+/-7   d10 +59.0+/-13   d15 +104.2+/-18
+#   d25 +109.0+/-22   d35 +115.4+/-25   d50 +152.4+/-31   (mbb/hand)
+#
+# The four deepest are matched 12,000-vs-12,000, single-knob on the recipe. 69% of
+# hands are played at 45+ bb, so d50/d35 carry the gain and d03 is a rounding error.
+#
+# TO REVERT: the 08-31 ladder was
+#   d50 run-pcs-production-to12k-d50-long-s7-161947-15074:12000:0.20
+#   d35 run-pcs-production-to12k-d35-long-s7-161938-11549:12000:0.20
+#   d25 run-pcs-production-to12k-d25-long-s7-102205-23109:12000:0.20
+#   d15 run-pcs-production-to4k-d15-cfrbr-s7-082749-388:4000:0.20
+#   d10 run-pcs-production-to4k-d10-cfrbr-s7-082804-23297:4000:0.20
+#   d06 run-pcs-production-to4k-d06-cfrbr-s7-082811-16288:4000:0.20
+#   d03 run-pcs-production-to4k-d03-cfrbr-s7-095309-24766:4000:0.20
+#
+# The 0.20 serving threshold is CARRIED OVER UNCHANGED, deliberately: it was tuned on
+# 08-31 against strategies that fold 62%, and purifying a range that actually PLAYS
+# may cost more than it saves. One change at a time; that is the next experiment.
+DEFAULT_RUNGS="run-pcs-production-to12k-d50-040438-26625:12000:0.20,\
+run-pcs-production-to12k-d35-040443-23758:12000:0.20,\
+run-pcs-production-to12k-d25-040447-19378:12000:0.20,\
+run-pcs-production-to12k-d15-041035-5670:12000:0.20,\
+run-pcs-production-to12k-d10-041039-12284:12000:0.20,\
+run-pcs-production-to12k-d06-041042-19674:12000:0.20,\
+run-pcs-production-to12k-d03-041046-2454:12000:0.20"
 if [ -z "${RUNGS:-}" ]; then
     RUNGS="$DEFAULT_RUNGS"
     echo "==> no rungs given; fielding the default 8-rung ladder"
