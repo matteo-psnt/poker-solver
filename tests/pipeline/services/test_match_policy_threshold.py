@@ -9,6 +9,7 @@ provably all-zero pairs and every non-zero pair is a decision the cut changed.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -78,11 +79,19 @@ class TestSharedTableIsRefused:
 
     def test_a_shared_strategy_table_raises(self, monkeypatch):
         solver = build_trained_test_solver(1)
-        metadata = type(
-            "M",
-            (),
-            {"config": solver.config, "run_id": "r", "card_abstraction_hash": "h"},
-        )()
+
+        @dataclass
+        class _Metadata:
+            """A DATACLASS, like the real `RunMetadata`: the resolver overrides copy
+            it with `dataclasses.replace`. A bare `type(...)` stub satisfied that
+            call by accident and then a pydantic-shaped stub satisfied a WRONG one --
+            `ty` caught `model_copy` on a class that has no such method."""
+
+            config: object
+            run_id: str = "r"
+            card_abstraction_hash: str = "h"
+
+        metadata = _Metadata(config=solver.config)
         monkeypatch.setattr(matches, "load_run_metadata", lambda *a, **k: metadata)
         monkeypatch.setattr(matches, "effective_abstraction_hash", lambda *a, **k: "h")
         monkeypatch.setattr(

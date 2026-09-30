@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 from typing import TYPE_CHECKING, Any
@@ -144,7 +145,26 @@ def evaluate_run_resolver_gate(
         "num_deals": result.num_deals,
         "num_hands": result.num_hands,
         "resolver_decisions": result.resolver_decisions,
+        # The other seat's, so the per-aggression rate below can be checked for
+        # seat symmetry rather than assumed to have it.
+        "blueprint_decisions": result.blueprint_decisions,
         "resolver_fallbacks": result.resolver_fallbacks,
+        # WHY the resolver was retired, which this gate could not previously see:
+        # not the chip edge (nothing, at any deal count anyone runs) but DOUBLE
+        # the stack-off rate on the same deals, which an elimination format
+        # punishes far harder than mbb/hand shows. Per-aggression rates over
+        # thousands of actions, so they resolve where the chip edge cannot.
+        "resolver_stack_off_rate": result.resolver_stack_off_rate,
+        "blueprint_stack_off_rate": result.blueprint_stack_off_rate,
+        "resolver_stack_offs": result.resolver_stack_offs,
+        "blueprint_stack_offs": result.blueprint_stack_offs,
+        "resolver_aggressions": result.resolver_aggressions,
+        "blueprint_aggressions": result.blueprint_aggressions,
+        # 1.0 is uniform over the whole menu. The diagnosed failure: at the
+        # fielded budget the root row measured 0.997 -- a coin flip over
+        # {check, three sizes, all-in}, which ships stacks at random.
+        "resolver_root_entropy": result.resolver_root_entropy,
+        "played_root_entropy": result.played_root_entropy,
         "time_budget_ms": time_budget_ms,
         "workers": workers,
         "root_prior_weight": config.resolver.root_prior_weight,
@@ -164,6 +184,38 @@ def evaluate_run_resolver_gate(
         results=results,
         checkpoint_iteration=checkpoint_iteration_of(run_dir),
     )
+
+
+def _resolver_fields(telemetry: Any | None) -> dict[str, Any]:
+    """The deployed side's stack-off and root-entropy counts, or nothing.
+
+    Empty when side A played the bare table, so a plain match keeps the exact
+    result shape -- and the tier digest -- it already had.
+    """
+    if telemetry is None:
+        return {}
+    decisions = telemetry.entropy_decisions
+    return {
+        "resolver_decisions": telemetry.decisions,
+        "blueprint_decisions": telemetry.blueprint_decisions,
+        "resolver_fallbacks": telemetry.fallbacks,
+        "resolver_stack_offs": telemetry.resolver_stack_offs,
+        "blueprint_stack_offs": telemetry.blueprint_stack_offs,
+        "resolver_aggressions": telemetry.resolver_aggressions,
+        "blueprint_aggressions": telemetry.blueprint_aggressions,
+        "resolver_stack_off_rate": (
+            telemetry.resolver_stack_offs / telemetry.resolver_aggressions
+            if telemetry.resolver_aggressions
+            else 0.0
+        ),
+        "blueprint_stack_off_rate": (
+            telemetry.blueprint_stack_offs / telemetry.blueprint_aggressions
+            if telemetry.blueprint_aggressions
+            else 0.0
+        ),
+        "resolver_root_entropy": telemetry.resolver_entropy_sum / decisions if decisions else 0.0,
+        "played_root_entropy": telemetry.played_entropy_sum / decisions if decisions else 0.0,
+    }
 
 
 def _threshold_side(
@@ -193,6 +245,23 @@ def evaluate_blueprint_match(
     at_b: int | None = None,
     policy_threshold_a: float = 0.0,
     policy_threshold_b: float = 0.0,
+    resolver_a: bool = False,
+    # Applied to side A's config when it plays deployed. Pinning the iteration
+    # count is what makes two arms comparable at all: the resolver is otherwise
+    # WALL-CLOCK budgeted, so a busier box does fewer iterations and lands on a
+    # different strategy. `resolver_match` documents the same requirement.
+    resolver_max_iterations: int | None = None,
+    resolver_root_prior_weight: float | None = None,
+    # The weight the deployed row puts on the resolver. ZERO is the CONTROL for an
+    # off-menu opponent: side A still reaches the blueprint through the resolver's
+    # lookup path -- including the shadow that translates an off-tree state -- but
+    # plays the blueprint's own decisions, so any gap is the resolver's DECISIONS
+    # rather than the path around them. MEASURED 09-30: a bare side A cannot be the
+    # control, because it cannot play at all. Against `gears@4600` it raised
+    # `KeyError: State is off-tree ... 'c-x-x-b0.25-r0.40'` on all four attempts --
+    # `TreePolicySource` refuses an off-tree state by design, since a uniform
+    # fallback there would average a missing strategy into a plausible score.
+    resolver_blend_alpha: float | None = None,
     record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head match between two runs' blueprints on duplicate deals.
@@ -225,9 +294,20 @@ def evaluate_blueprint_match(
 
     # `play_only`: a match never reads regrets, and two blueprints are resident
     # at once here where every other estimator holds one.
+    # Side A's resolver knobs, overridden HERE rather than at train time: how a
+    # checkpoint is PLAYED is not a property of how it was trained. A no-op when
+    # side A plays the bare table, which never reads them.
+    config_a = _with_resolver_overrides(
+        metadata_a.config,
+        leaf_continuation_fraction=None,
+        max_iterations=resolver_max_iterations,
+        root_prior_weight=resolver_root_prior_weight,
+        leaf_rollouts=None,
+        blend_alpha=resolver_blend_alpha,
+    )
     solver_a, storage_a, _ = build_blueprint_for(
         run_dir_a,
-        metadata_a,
+        dataclasses.replace(metadata_a, config=config_a),
         effective_abstraction_hash(run_dir_a, metadata_a, None),
         at_a,
         play_only=True,
@@ -252,7 +332,9 @@ def evaluate_blueprint_match(
 
     rung_a = at_a if at_a is not None else checkpoint_iteration_of(run_dir_a)
     rung_b = at_b if at_b is not None else checkpoint_iteration_of(run_dir_b)
-    result = play_blueprint_match(solver_a, solver_b, num_deals=num_deals, seed=seed)
+    result = play_blueprint_match(
+        solver_a, solver_b, num_deals=num_deals, seed=seed, resolver_a=resolver_a
+    )
     results = {
         "run_a": metadata_a.run_id,
         "run_b": metadata_b.run_id,
@@ -282,6 +364,20 @@ def evaluate_blueprint_match(
         # threshold this is the SAMPLE SIZE of the knob: an edge of zero over
         # zero divergent pairs means the cut never fired, not that it is free.
         "divergent_pairs": sum(1 for sample in result.pair_samples_mbb if sample != 0.0),
+        # WHICH strategy side A played, and under which knobs. `opponent` is lbr's
+        # existing vocabulary and already an unconditional tier knob, so reusing the
+        # name is what makes a deployed arm refuse to pair with a bare one.
+        "opponent": "deployed" if resolver_a else "blueprint",
+        **(
+            {
+                "resolver_max_iterations": config_a.resolver.max_iterations,
+                "root_prior_weight": config_a.resolver.root_prior_weight,
+                "resolver_blend_alpha": config_a.resolver.policy_blend_alpha,
+            }
+            if resolver_a
+            else {}
+        ),
+        **_resolver_fields(result.telemetry),
         "card_abstraction_hash_b": metadata_b.card_abstraction_hash,
         "action_config_hash_b": metadata_b.action_config_hash,
         "config_name_b": metadata_b.config_name,

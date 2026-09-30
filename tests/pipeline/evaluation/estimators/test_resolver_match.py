@@ -128,13 +128,21 @@ class TestParallelDealsAreTheSameExperiment:
             blueprint_factory=functools.partial(_pinned_solver, 3),
         )
 
-        assert parallel.pair_samples_mbb == serial.pair_samples_mbb
-        assert parallel.resolver_mbb_per_hand == serial.resolver_mbb_per_hand
-        assert parallel.se_mbb == serial.se_mbb
-        assert parallel.resolver_decisions == serial.resolver_decisions
-        assert parallel.resolver_fallbacks == serial.resolver_fallbacks
-        # Not vacuous: a match that never resolved would agree trivially.
+        # EVERY field, not a list of the ones someone remembered: this test
+        # enumerated five, so a counter added later could be dropped or summed
+        # into the wrong slot in the parallel path and still pass. Floats compare
+        # approximately because the parallel path sums per chunk and then across
+        # chunks -- a different GROUPING of the same additions, which can differ
+        # in the last bit without differing as an experiment.
+        for name in serial.__dataclass_fields__:
+            mine, theirs = getattr(parallel, name), getattr(serial, name)
+            expected = pytest.approx(theirs) if isinstance(theirs, float) else theirs
+            assert mine == expected, name
+
+        # Not vacuous: a match that never resolved, or never acted, would agree
+        # trivially on every counter above.
         assert serial.resolver_decisions > 0
+        assert serial.resolver_aggressions + serial.blueprint_aggressions > 0
 
     def test_without_a_factory_it_stays_serial_rather_than_failing(self):
         """`workers` alone cannot split: a solver cannot cross a process boundary."""

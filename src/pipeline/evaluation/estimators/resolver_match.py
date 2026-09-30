@@ -39,8 +39,60 @@ from src.shared.log import configure_logging
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from src.core.game.actions import Action
     from src.core.game.rules import GameRules
     from src.engine.solver.policy.source import ScorableBlueprint
+
+
+@dataclass
+class MatchTelemetry:
+    """What a block of deals counted, besides the chips.
+
+    A dataclass rather than a wider tuple: the play loop returned
+    ``(samples, decisions, fallbacks)`` through four functions, and every metric
+    added to answer a new question had to be threaded through all of them in
+    order -- which is how a counter ends up summed into the wrong slot.
+    """
+
+    decisions: int = 0
+    # The BLUEPRINT seat's decisions. Without it the per-aggression stack-off rate
+    # cannot be checked for seat symmetry: if one seat acts far more often it also
+    # reaches different streets and different stack depths, and the rate would
+    # carry a composition difference rather than a shoving one.
+    blueprint_decisions: int = 0
+    fallbacks: int = 0
+    resolver_stack_offs: int = 0
+    blueprint_stack_offs: int = 0
+    resolver_aggressions: int = 0
+    blueprint_aggressions: int = 0
+    resolver_entropy_sum: float = 0.0
+    played_entropy_sum: float = 0.0
+    entropy_decisions: int = 0
+
+    def absorb(self, other: MatchTelemetry) -> None:
+        """Add another block's counts into this one."""
+        for name in self.__dataclass_fields__:
+            setattr(self, name, getattr(self, name) + getattr(other, name))
+
+    def note_action(self, action: Action, stack_after: int, *, is_resolver: bool) -> None:
+        """Count an aggressive action, and whether it shipped the whole stack.
+
+        Judged on the STACK AFTER the action rather than on ``action.amount``:
+        `Action.amount` means a different thing per type (chips above the call for
+        RAISE, chips committed now for BET, an absolute total for ALL_IN), so
+        arithmetic here would have to reproduce three conventions. A zero stack
+        afterwards asks the same question and has one answer. Calling an all-in is
+        NOT a stack-off -- the seat's own definition -- which `is_aggressive`
+        already excludes.
+        """
+        if not action.type.is_aggressive():
+            return
+        if is_resolver:
+            self.resolver_aggressions += 1
+            self.resolver_stack_offs += int(stack_after == 0)
+        else:
+            self.blueprint_aggressions += 1
+            self.blueprint_stack_offs += int(stack_after == 0)
 
 
 @dataclass(frozen=True)
@@ -54,8 +106,46 @@ class ResolverMatchResult:
     num_deals: int
     num_hands: int
     resolver_decisions: int
+    blueprint_decisions: int
     resolver_fallbacks: int
     pair_samples_mbb: list[float]
+    # The metrics the resolver was actually RETIRED on, which this gate could not
+    # see: it was worth nothing on chips (-203.6 +/- 133.1) and doubled the
+    # stack-off rate, 5.25% vs 2.37%, and in an ELIMINATION format a stack-off
+    # that loses ends the match. Both are per-DECISION rates over thousands of
+    # decisions, so they resolve at a deal count where the chip edge cannot: at
+    # 4,000 deals se_mbb is ~80 while a 5% rate carries ~0.2 points.
+    resolver_stack_offs: int
+    blueprint_stack_offs: int
+    resolver_aggressions: int
+    blueprint_aggressions: int
+    # Mean normalised entropy of the resolver's own root row, and of the blended
+    # row that is actually played. 1.0 is uniform over the whole menu.
+    resolver_root_entropy: float
+    played_root_entropy: float
+
+    @property
+    def resolver_stack_off_rate(self) -> float:
+        """Stack-offs as a share of the resolver seat's AGGRESSIVE actions.
+
+        Per aggression, not per decision: a seat that folds more has fewer
+        chances to ship, so a per-decision rate moves with the fold rate and two
+        arms are not comparable on it.
+        """
+        return (
+            self.resolver_stack_offs / self.resolver_aggressions
+            if self.resolver_aggressions
+            else 0.0
+        )
+
+    @property
+    def blueprint_stack_off_rate(self) -> float:
+        """The same for the bare-blueprint seat: the control, on the same deals."""
+        return (
+            self.blueprint_stack_offs / self.blueprint_aggressions
+            if self.blueprint_aggressions
+            else 0.0
+        )
 
 
 def play_resolver_match(
@@ -86,6 +176,10 @@ def play_resolver_match(
     Measured why: 100 deals took 62 minutes single-threaded on a 16-vCPU node,
     and se_mbb=1078 there puts ~50 mbb resolution at ~46,500 deals. Serially
     that is ~480 node-hours, which is not an experiment anyone runs.
+
+    That 37 s/deal is STALE. Re-measured 09-30 after the compiled showdown kernels,
+    a deployed match runs at 2.25 s/deal -- 17x faster, so 4,000 deals is ~2.5 h on
+    one node. Read the clock before sizing a fan-out around this paragraph.
     """
     rules = solver.rules
     big_blind = solver.config.game.big_blind
@@ -108,10 +202,11 @@ def play_resolver_match(
                 )
             )
         pair_samples_mbb = [sample for part in parts for sample in part[0]]
-        decisions = sum(part[1] for part in parts)
-        fallbacks = sum(part[2] for part in parts)
+        telemetry = MatchTelemetry()
+        for part in parts:
+            telemetry.absorb(part[1])
     else:
-        pair_samples_mbb, decisions, fallbacks = _play_deals(
+        pair_samples_mbb, telemetry = _play_deals(
             solver,
             rules,
             big_blind=big_blind,
@@ -131,10 +226,22 @@ def play_resolver_match(
         p_value=summary["p_value"],
         num_deals=num_deals,
         num_hands=2 * num_deals,
-        resolver_decisions=decisions,
-        resolver_fallbacks=fallbacks,
+        resolver_decisions=telemetry.decisions,
+        blueprint_decisions=telemetry.blueprint_decisions,
+        resolver_fallbacks=telemetry.fallbacks,
         pair_samples_mbb=pair_samples_mbb,
+        resolver_stack_offs=telemetry.resolver_stack_offs,
+        blueprint_stack_offs=telemetry.blueprint_stack_offs,
+        resolver_aggressions=telemetry.resolver_aggressions,
+        blueprint_aggressions=telemetry.blueprint_aggressions,
+        resolver_root_entropy=_mean(telemetry.resolver_entropy_sum, telemetry.entropy_decisions),
+        played_root_entropy=_mean(telemetry.played_entropy_sum, telemetry.entropy_decisions),
     )
+
+
+def _mean(total: float, count: int) -> float:
+    """A mean that reports 0.0 rather than raising when nothing was counted."""
+    return total / count if count else 0.0
 
 
 def _chunk_bounds(num_deals: int, workers: int) -> list[tuple[int, int]]:
@@ -157,7 +264,7 @@ def _deals_worker(
     start: int,
     stop: int,
     allin_runouts: int,
-) -> tuple[list[float], int, int]:
+) -> tuple[list[float], MatchTelemetry]:
     """One contiguous block of deals, in its own process.
 
     Rebuilds the blueprint rather than receiving it; returns the raw parts so
@@ -192,7 +299,7 @@ def _play_deals(
     start: int,
     stop: int,
     allin_runouts: int = 1,
-) -> tuple[list[float], int, int]:
+) -> tuple[list[float], MatchTelemetry]:
     """Deals ``[start, stop)``, shared by the serial and parallel paths.
 
     ONE implementation on purpose: two copies of this drifting apart would leave
@@ -200,8 +307,7 @@ def _play_deals(
     ones -- which is the failure `deal_for` is commented against.
     """
     pair_samples_mbb: list[float] = []
-    decisions = 0
-    fallbacks = 0
+    telemetry = MatchTelemetry()
 
     for deal in range(start, stop):
         hole_cards, board_stack, button = deal_for(seed, deal)
@@ -217,7 +323,7 @@ def _play_deals(
             np.random.seed(
                 int(np.random.SeedSequence([seed, deal, resolver_seat]).generate_state(1)[0])
             )
-            payoff, game_decisions, game_fallbacks = _play_game(
+            payoff, game = _play_game(
                 solver,
                 rules,
                 hole_cards=hole_cards,
@@ -237,13 +343,12 @@ def _play_deals(
                 runout_rng=np.random.default_rng(np.random.SeedSequence([seed, deal])),
             )
             seat_payoffs.append(payoff)
-            decisions += game_decisions
-            fallbacks += game_fallbacks
+            telemetry.absorb(game)
 
         payoff_seat0, payoff_seat1 = seat_payoffs
         pair_samples_mbb.append(pair_mean_mbb(payoff_seat0, payoff_seat1, big_blind))
 
-    return pair_samples_mbb, decisions, fallbacks
+    return pair_samples_mbb, telemetry
 
 
 def _play_game(
@@ -259,30 +364,38 @@ def _play_game(
     resolver_rng: np.random.Generator | None = None,
     allin_runouts: int = 1,
     runout_rng: np.random.Generator | None = None,
-) -> tuple[float, int, int]:
-    """One game off a fixed deck; returns (resolver-seat payoff, decisions, fallbacks)."""
+) -> tuple[float, MatchTelemetry]:
+    """One game off a fixed deck; returns the resolver seat's payoff and its counts."""
     agent = BlueprintAgent(solver, use_resolver=True, rng=resolver_rng)
+    telemetry = MatchTelemetry()
     state = rules.create_initial_state(
         starting_stack=starting_stack,
         hole_cards=hole_cards,
         button=button,
     )
 
-    decisions = 0
     while not state.is_terminal:
         if solver.is_chance_node(state):
             state = deal_from_stack(state, board_stack)
             continue
-        if state.current_player == resolver_seat:
-            decisions += 1
+        actor = state.current_player
+        is_resolver = actor == resolver_seat
+        if is_resolver:
+            telemetry.decisions += 1
             action = agent.act(state, time_budget_ms=time_budget_ms)
         else:
+            telemetry.blueprint_decisions += 1
             action = solver.sample_action_from_strategy(state, use_average=True)
         # History-replay range inference: the resolver observes every realized
         # action (both seats), so its next solve sees Bayes-updated ranges
         # instead of uniform ones.
         agent.observe(state, action)
         state = state.apply_action(action, rules)
+        # After the apply, so a stack-off is read off what the action LEFT the
+        # actor with. Both seats, because the resolver's cost was never its
+        # absolute shove rate -- it was DOUBLE the bare blueprint's on the same
+        # deals, and the blueprint seat here is that control.
+        telemetry.note_action(action, state.stacks[actor], is_resolver=is_resolver)
 
     assert agent.resolver is not None  # use_resolver=True above
     if not state.ended_by_fold and len(state.board) < 5:
@@ -291,7 +404,11 @@ def _play_game(
         )
     else:
         payoff = float(state.get_payoff(resolver_seat, rules))
-    return payoff, decisions, agent.resolver.fallback_count
+    telemetry.fallbacks = agent.resolver.fallback_count
+    telemetry.resolver_entropy_sum = agent.resolver.resolver_entropy_sum
+    telemetry.played_entropy_sum = agent.resolver.played_entropy_sum
+    telemetry.entropy_decisions = agent.resolver.entropy_decisions
+    return payoff, telemetry
 
 
 def deal_for(

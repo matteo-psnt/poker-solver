@@ -227,6 +227,36 @@ def ledger_row(document: dict[str, Any]) -> dict[str, Any]:
         "edge_mbb_per_hand": results.get("a_mbb_per_hand", results.get("resolver_mbb_per_hand")),
         "edge_se_mbb": results.get("se_mbb"),
     }
+    # The resolver gate's DECIDING numbers. Its chip edge cannot resolve at any
+    # deal count this project runs (se ~170 at 1,000 deals), while the stack-off
+    # rate -- what `--no-resolver` was actually fielded for -- carries a fraction
+    # of a point at the same cost. Projected with their DENOMINATORS: a rate whose
+    # count stays in the document is a number no later reader can test, which is
+    # how these were first recorded.
+    row["results"].update(
+        {
+            key: results[key]
+            for key in (
+                "resolver_stack_off_rate",
+                "blueprint_stack_off_rate",
+                "resolver_stack_offs",
+                "blueprint_stack_offs",
+                "resolver_aggressions",
+                "blueprint_aggressions",
+                "blueprint_decisions",
+                # WHICH player side A was. Without it a deployed row and a bare
+                # row are indistinguishable in the index -- measured: the first
+                # deployed match recorded its entropy and its shove counts and
+                # nothing that said the resolver had been in the hand at all.
+                "opponent",
+                "resolver_max_iterations",
+                "root_prior_weight",
+                "resolver_root_entropy",
+                "played_root_entropy",
+            )
+            if key in results
+        }
+    )
     return row
 
 

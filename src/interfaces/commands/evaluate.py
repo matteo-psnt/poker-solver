@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
@@ -194,7 +194,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--opponent",
         choices=["blueprint", "deployed"],
         default="blueprint",
-        help="[lbr] Strategy under measurement: raw table, or blueprint+resolver as deployed.",
+        help="[lbr, blueprint_match] Strategy under measurement: the raw table, or "
+        "blueprint+resolver as deployed. Under blueprint_match it is SIDE A, which "
+        "is the only way to measure the resolver against a genuinely off-menu "
+        "opponent -- resolver_match plays a blueprint against itself, so every line "
+        "it walks is one its own tree has a node for.",
     )
     parser.add_argument(
         "--resolver-iterations",
@@ -416,11 +420,46 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         match_seed=args.seed if args.seed is not None else 1,
         match_threshold_a=args.policy_threshold,
         match_threshold_b=args.vs_policy_threshold,
+        match_resolver_a=args.opponent == "deployed",
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
         policy_profile=args.policy_profile,
     )
+
+
+def _print_resolver_telemetry(results: dict[str, Any]) -> None:
+    """The resolver's stack-off rate and root entropy, when a row carries them.
+
+    Shared by the resolver gate and a deployed chip match, because both measure
+    the same two quantities and the chip edge of neither can resolve them: the
+    estimator's own docstring puts 50 mbb resolution at ~46,500 deals, while a
+    per-aggression rate carries a fraction of a point at a thousand.
+
+    `get`, because every row recorded before 09-30 carries none of these and the
+    ledger re-renders those.
+    """
+    ours = results.get("resolver_stack_off_rate")
+    theirs = results.get("blueprint_stack_off_rate")
+    if ours is not None and theirs is not None:
+        ratio = f"{ours / theirs:.2f}x" if theirs else "no blueprint shove to compare"
+        print(
+            f"  Stack-offs:    {ours:.2%} of our aggressions vs {theirs:.2%} for the "
+            f"bare blueprint ({ratio})"
+        )
+        # With their DENOMINATORS: a rate printed alone cannot be tested, and the
+        # first run of this gate reported three ratios nobody could put a sigma on.
+        print(
+            f"                 {results['resolver_stack_offs']:,} of "
+            f"{results['resolver_aggressions']:,} aggressions vs "
+            f"{results['blueprint_stack_offs']:,} of "
+            f"{results['blueprint_aggressions']:,}"
+        )
+    if (entropy := results.get("resolver_root_entropy")) is not None:
+        print(
+            f"  Root entropy:  {entropy:.3f} resolver, "
+            f"{results['played_root_entropy']:.3f} played  (1.0 = UNIFORM over the menu)"
+        )
 
 
 def render(payload: services.EvaluationPayload) -> None:
@@ -477,6 +516,17 @@ def render(payload: services.EvaluationPayload) -> None:
                 f"  Served at:     A {thr_a:.2f} ({results.get('rows_thresholded_a', 0):,} rows"
                 f" cut)  B {thr_b:.2f} ({results.get('rows_thresholded_b', 0):,} rows cut)"
             )
+        if results.get("opponent") == "deployed":
+            # The deployed side's own numbers. Printed here as well as in the
+            # resolver-gate branch because a deployed CHIP match is the only place
+            # the resolver's off-tree benefit can show, and the first one printed
+            # nothing that said the resolver had been in the hand.
+            print(
+                f"  Side A played: DEPLOYED (blueprint+resolver), "
+                f"{results.get('resolver_max_iterations')} iterations, "
+                f"prior {results.get('root_prior_weight')}"
+            )
+            _print_resolver_telemetry(results)
         divergent = results.get("divergent_pairs")
         if divergent is not None:
             # The knob's real sample size: duplicate deals cancel exactly where
@@ -496,6 +546,12 @@ def render(payload: services.EvaluationPayload) -> None:
         # printing it as a scalar is a TypeError, which is how this line first
         # shipped. An interval is also the more honest thing to show: it says
         # whether zero is inside it.
+        # Printed FIRST: the chip edge below has never resolved at any deal count
+        # this project runs (se ~80 at 4,000 deals), while these two are what the
+        # resolver was actually retired on and carry ~0.2 points at the same cost.
+        # `get`, because every row recorded before 09-30 carries neither and the
+        # ledger re-renders those.
+        _print_resolver_telemetry(results)
         low, high = results["confidence_95_mbb"]
         print(
             f"  Resolver edge: {results['resolver_mbb_per_hand']:+.2f} mbb/hand "

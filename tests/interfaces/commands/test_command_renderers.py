@@ -155,8 +155,46 @@ class TestResolverMatchRenderer:
             "resolver_fallbacks": 3,
             "leaf_continuation_fraction": 0.5,
             "resolver_max_iterations": 64,
+            "resolver_stack_off_rate": 0.0525,
+            "blueprint_stack_off_rate": 0.0237,
+            "resolver_stack_offs": 105,
+            "blueprint_stack_offs": 47,
+            "resolver_aggressions": 2000,
+            "blueprint_aggressions": 1983,
+            "resolver_root_entropy": 0.997,
+            "played_root_entropy": 0.612,
         },
     )
+
+    def test_it_reports_what_the_resolver_was_retired_on(self, capsys):
+        """Stack-offs and root entropy, printed ABOVE the chip edge: the edge has
+        never resolved at a runnable deal count and these two decided the field."""
+        evaluate.render(self.PAYLOAD)
+        out = capsys.readouterr().out
+
+        assert "5.25% of our aggressions vs 2.37%" in out
+        assert "2.22x" in out
+        assert "0.997 resolver, 0.612 played" in out
+        # The denominators, without which no reader can put a sigma on the ratio.
+        assert "105 of 2,000 aggressions vs 47 of 1,983" in out
+
+    def test_a_row_recorded_before_the_telemetry_still_renders(self, capsys):
+        """The ledger re-renders old rows, and none of them carry these keys."""
+        older = self.PAYLOAD.model_copy(
+            update={
+                "results": {
+                    key: value
+                    for key, value in self.PAYLOAD.results.items()
+                    if "stack_off" not in key and "entropy" not in key and "aggressions" not in key
+                }
+            }
+        )
+
+        evaluate.render(older)
+        out = capsys.readouterr().out
+
+        assert "+12.50 mbb/hand" in out
+        assert "Stack-offs" not in out
 
     def test_it_renders_the_interval_without_dying(self, capsys):
         evaluate.render(self.PAYLOAD)

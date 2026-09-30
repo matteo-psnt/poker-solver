@@ -273,6 +273,16 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         threshold = float(results.get(f"policy_threshold_{side}") or 0.0)
         if threshold > 0.0:
             knobs[f"policy_threshold_{side}"] = threshold
+    # A DEPLOYED side A is a different player, so it must not pair with the bare
+    # match that chose the rung -- and at an unpinned iteration count it is not
+    # comparable to another deployed arm either. `opponent` is already a tier knob
+    # (lbr's), so naming it that is what splits the tier. Conditional, so every
+    # bare row keeps the digest it has.
+    if results.get("opponent") == "deployed":
+        knobs["opponent"] = "deployed"
+        knobs["resolver_max_iterations"] = results.get("resolver_max_iterations")
+        knobs["root_prior_weight"] = results.get("root_prior_weight")
+        knobs["resolver_blend_alpha"] = results.get("resolver_blend_alpha")
     return knobs
 
 

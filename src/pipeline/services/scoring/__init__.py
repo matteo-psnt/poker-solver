@@ -103,6 +103,9 @@ def evaluate_and_record(
     # blueprint_match: what each side PURIFIES to before playing, as the seat does.
     match_threshold_a: float = 0.0,
     match_threshold_b: float = 0.0,
+    # blueprint_match: whether side A plays the DEPLOYED system (blueprint routed
+    # through the resolver) rather than the bare table.
+    match_resolver_a: bool = False,
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
@@ -210,6 +213,10 @@ def evaluate_and_record(
             at_b=vs_at,
             policy_threshold_a=match_threshold_a,
             policy_threshold_b=match_threshold_b,
+            resolver_a=match_resolver_a,
+            resolver_max_iterations=resolver_max_iterations,
+            resolver_root_prior_weight=resolver_root_prior_weight,
+            resolver_blend_alpha=resolver_blend_alpha,
             record_source=record_source,
         )
         estimator = BLUEPRINT_MATCH_ESTIMATOR_LABEL

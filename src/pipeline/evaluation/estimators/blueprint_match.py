@@ -23,7 +23,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from src.engine.search.agent import BlueprintAgent
 from src.pipeline.evaluation.estimators.resolver_match import (
+    MatchTelemetry,
     complete_board,
     deal_for,
     deal_from_stack,
@@ -48,6 +50,10 @@ class BlueprintMatchResult:
     num_deals: int
     num_hands: int
     pair_samples_mbb: list[float]
+    # Populated only when side A plays the DEPLOYED system. The resolver's cost is
+    # a stack-off rate and its symptom is an undecided root row, and neither is
+    # visible in a chip edge -- see `resolver_match` for the same instruments.
+    telemetry: MatchTelemetry | None = None
 
 
 def play_blueprint_match(
@@ -56,6 +62,7 @@ def play_blueprint_match(
     *,
     num_deals: int = 2000,
     seed: int = 1,
+    resolver_a: bool = False,
 ) -> BlueprintMatchResult:
     """Play duplicate deals of A vs B and report A's chip edge.
 
@@ -69,6 +76,7 @@ def play_blueprint_match(
     starting_stack = solver_a.config.game.starting_stack
 
     pair_samples_mbb: list[float] = []
+    telemetry = MatchTelemetry()
 
     for deal in range(num_deals):
         hole_cards, board_stack, button = deal_for(seed, deal)
@@ -81,18 +89,24 @@ def play_blueprint_match(
         seat_payoffs: list[float] = []
         for a_seat in (0, 1):
             np.random.seed(game_seed)
-            seat_payoffs.append(
-                _play_game(
-                    solver_a,
-                    solver_b,
-                    rules,
-                    hole_cards=hole_cards,
-                    board_stack=board_stack,
-                    button=button,
-                    starting_stack=starting_stack,
-                    a_seat=a_seat,
-                )
+            payoff, game = _play_game(
+                solver_a,
+                solver_b,
+                rules,
+                hole_cards=hole_cards,
+                board_stack=board_stack,
+                button=button,
+                starting_stack=starting_stack,
+                a_seat=a_seat,
+                resolver_a=resolver_a,
+                # Pinned per (deal, seat) like resolver_match's, so a deployed
+                # side A is reproducible rather than reading the ambient stream.
+                resolver_rng=np.random.default_rng(np.random.SeedSequence([seed, deal, a_seat]))
+                if resolver_a
+                else None,
             )
+            seat_payoffs.append(payoff)
+            telemetry.absorb(game)
 
         payoff_seat0, payoff_seat1 = seat_payoffs
         pair_samples_mbb.append(pair_mean_mbb(payoff_seat0, payoff_seat1, big_blind))
@@ -106,6 +120,7 @@ def play_blueprint_match(
         num_deals=num_deals,
         num_hands=2 * num_deals,
         pair_samples_mbb=pair_samples_mbb,
+        telemetry=telemetry if resolver_a else None,
     )
 
 
@@ -119,8 +134,21 @@ def _play_game(
     button: int,
     starting_stack: int,
     a_seat: int,
-) -> float:
-    """One game off a fixed deck; returns blueprint A's payoff."""
+    resolver_a: bool = False,
+    resolver_rng: np.random.Generator | None = None,
+) -> tuple[float, MatchTelemetry]:
+    """One game off a fixed deck; returns blueprint A's payoff and its counts.
+
+    ``resolver_a`` makes side A the DEPLOYED system -- blueprint routed through the
+    runtime resolver -- rather than the bare table. That is the only way to measure
+    the resolver against a genuinely off-menu opponent: `resolver_match` plays a
+    blueprint against ITSELF, so every line it walks is one its own tree has a node
+    for, and the resolver's claimed benefit is entirely off-tree.
+    """
+    telemetry = MatchTelemetry()
+    # A fresh agent per game, matching its documented contract (one resolver per
+    # agent lifetime, a new agent per hand).
+    agent = BlueprintAgent(solver_a, use_resolver=True, rng=resolver_rng) if resolver_a else None
     state = rules.create_initial_state(
         starting_stack=starting_stack,
         hole_cards=hole_cards,
@@ -131,11 +159,32 @@ def _play_game(
         if solver_a.is_chance_node(state):
             state = deal_from_stack(state, board_stack)
             continue
-        actor = solver_a if state.current_player == a_seat else solver_b
-        action = actor.sample_action_from_strategy(state, use_average=True)
+        actor_seat = state.current_player
+        is_a = actor_seat == a_seat
+        if is_a and agent is not None:
+            telemetry.decisions += 1
+            action = agent.act(state)
+        else:
+            actor = solver_a if is_a else solver_b
+            if is_a:
+                telemetry.decisions += 1
+            else:
+                telemetry.blueprint_decisions += 1
+            action = actor.sample_action_from_strategy(state, use_average=True)
+        # Every realized action, both seats: the resolver's range inference is a
+        # history replay, and B's sizes are the off-menu ones the shadow exists for.
+        if agent is not None:
+            agent.observe(state, action)
         state = state.apply_action(action, rules)
+        telemetry.note_action(action, state.stacks[actor_seat], is_resolver=is_a)
 
     if not state.ended_by_fold and len(state.board) < 5:
         state = complete_board(state, board_stack)
 
-    return float(state.get_payoff(a_seat, rules))
+    if agent is not None and agent.resolver is not None:
+        telemetry.fallbacks = agent.resolver.fallback_count
+        telemetry.resolver_entropy_sum = agent.resolver.resolver_entropy_sum
+        telemetry.played_entropy_sum = agent.resolver.played_entropy_sum
+        telemetry.entropy_decisions = agent.resolver.entropy_decisions
+
+    return float(state.get_payoff(a_seat, rules)), telemetry

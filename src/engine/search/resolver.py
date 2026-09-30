@@ -33,6 +33,18 @@ if TYPE_CHECKING:
     from src.shared.config import ResolverConfig
 
 
+def _normalised_entropy(strategy: np.ndarray) -> float:
+    """Shannon entropy over log(len), so 1.0 is uniform whatever the menu size.
+
+    A one-action menu has no entropy to measure and log(1) is zero, so it reports
+    0.0 rather than dividing by it -- a forced action is maximally decided.
+    """
+    if strategy.size < 2:
+        return 0.0
+    mass = strategy[strategy > 0.0]
+    return float(-np.sum(mass * np.log(mass)) / np.log(strategy.size))
+
+
 @dataclass
 class ResolveResult:
     """Resolver output for a single decision."""
@@ -88,6 +100,18 @@ class HUResolver:
         self.lookup_fell_back_broken: int = 0
         self.rows_uniform: int = 0
         self.rows_total: int = 0
+        # How UNIFORM the root row is, as entropy over log(len(actions)) -- 1.0 is
+        # a coin flip over the whole menu, 0.0 is one action. Normalised because
+        # the menu size varies by state, so raw nats cannot be averaged across
+        # decisions. Counted because the resolver's whole documented failure is a
+        # starved solve: regret matching begins at UNIFORM and at the fielded
+        # budget the root row measured 1.604 nats against a 1.609 maximum, i.e.
+        # 0.997 here -- uniform random over {check, three sizes, all-in}, which is
+        # a jamming machine. Both rows are kept: `resolver` says whether the solve
+        # converged, `played` says what reached the table after the blend.
+        self.resolver_entropy_sum: float = 0.0
+        self.played_entropy_sum: float = 0.0
+        self.entropy_decisions: int = 0
         # An on-tree parallel state, so ONE off-menu size from the opponent does
         # not turn every later blueprint lookup on the hand into a uniform row.
         self._shadow = TreeShadow(rules, action_model)
@@ -209,6 +233,8 @@ class HUResolver:
         blueprint_strategy = self._blueprint_strategy(state, root_actions, use_average=True)
         strategy = self._blend_strategies(resolver_strategy, blueprint_strategy)
 
+        self._note_entropy(resolver_strategy, strategy)
+
         idx = int(self.rng.choice(len(root_actions), p=strategy))
         chosen_action = root_actions[idx]
 
@@ -220,6 +246,12 @@ class HUResolver:
             blueprint_strategy=blueprint_strategy,
             action_values=action_values,
         )
+
+    def _note_entropy(self, resolver_strategy: np.ndarray, played: np.ndarray) -> None:
+        """Accumulate the root row's normalised entropy for both strategies."""
+        self.resolver_entropy_sum += _normalised_entropy(resolver_strategy)
+        self.played_entropy_sum += _normalised_entropy(played)
+        self.entropy_decisions += 1
 
     def _solve_root(self, state: GameState, ranges: PlayerRanges, budget_ms: int):
         """Build the local tree and run the subgame CFR; shared by solve paths."""
