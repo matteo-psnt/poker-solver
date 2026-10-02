@@ -157,7 +157,14 @@ class HUResolver:
         self._shadow.observe(state, action)
 
     def act(self, state: GameState, *, time_budget_ms: int | None = None) -> Action:
-        """Resolve local subgame and sample an action at the root."""
+        """Resolve local subgame and sample an action at the root.
+
+        Before ``config.min_street`` the blueprint answers untouched: only a river
+        subgame is solved exactly, so restricting to it is what separates "search
+        helps" from "the leaf guess hurts".
+        """
+        if not self._may_resolve(state):
+            return self._blueprint_action(state)
         budget = int(time_budget_ms or self.config.time_budget_ms)
         try:
             result = self.solve(state, time_budget_ms=budget)
@@ -291,6 +298,26 @@ class HUResolver:
             root_prior_weight=weight,
         )
         return tree.root.actions, solution
+
+    def _blueprint_action(self, state: GameState) -> Action:
+        """Sample the blueprint, through the resolver's OWN lookup path.
+
+        Not `blueprint.sample_action_from_strategy`: the bare table RAISES on an
+        off-menu state by design, and a real opponent bets sizes the abstraction
+        never enumerated. MEASURED 09-30 twice -- a bare side A died on
+        `KeyError: State is off-tree ... 'c-x-x-b0.25-r0.40'`, and so did the
+        first street-gated arm, from this very line. `_blueprint_strategy` goes
+        through the shadow, which translates the line and falls back to uniform
+        rather than refusing.
+        """
+        actions = list(self.rules.get_legal_actions(state, action_model=self.action_model))
+        distribution = self._blueprint_strategy(state, actions, use_average=True)
+        return actions[int(self.rng.choice(len(actions), p=distribution))]
+
+    def _may_resolve(self, state: GameState) -> bool:
+        """Whether the resolver may act on this street at all."""
+        order = ("preflop", "flop", "turn", "river")
+        return order.index(state.street.name.lower()) >= order.index(self.config.min_street)
 
     def _blueprint_strategy_matrix(self, state: GameState, actions: list[Action]) -> np.ndarray:
         """Per-combo blueprint strategy over ``actions`` at ``state``.

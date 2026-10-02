@@ -314,6 +314,17 @@ class ResolverConfig(StrictFrozenModel):
     #
     # 0.0 is today's behaviour, so this changes nothing until it is measured.
     root_prior_weight: NonNegFloat = Field(default=0.0)
+    # The EARLIEST street the resolver is allowed to act on; before it the
+    # blueprint answers. "preflop" is every street, the historical behaviour.
+    #
+    # It exists because only a RIVER subgame is solved exactly. MEASURED 09-30 at
+    # max_depth 6: a river tree has 53 leaves and ZERO truncated, so no leaf model
+    # applies and the subgame IS the whole remaining game -- which is what the
+    # literature's nested subgame solving does. Flop and turn hold 13 truncated
+    # leaves of 53 at depth 6 AND at depth 10, so a quarter of their leaves are a
+    # guess that no knob here can remove. Restricting to the river is therefore
+    # the only arm that tests SEARCH rather than the guess.
+    min_street: Literal["preflop", "flop", "turn", "river"] = Field(default="preflop")
 
 
 class SolverConfig(StrictFrozenModel):

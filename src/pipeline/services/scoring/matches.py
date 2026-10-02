@@ -43,6 +43,7 @@ BLUEPRINT_MATCH_ESTIMATOR_LABEL = (
 def _with_resolver_overrides(
     config: Any,
     *,
+    min_street: str | None = None,
     leaf_continuation_fraction: float | None,
     max_iterations: int | None,
     root_prior_weight: float | None,
@@ -68,6 +69,7 @@ def _with_resolver_overrides(
     # here has had to edit that condition too, and forgetting it would silently
     # return the run's config while the caller believed it had overridden one.
     requested = {
+        "min_street": min_street,
         "leaf_continuation_fraction": leaf_continuation_fraction,
         "max_iterations": max_iterations,
         "root_prior_weight": root_prior_weight,
@@ -262,6 +264,12 @@ def evaluate_blueprint_match(
     # `TreePolicySource` refuses an off-tree state by design, since a uniform
     # fallback there would average a missing strategy into a plausible score.
     resolver_blend_alpha: float | None = None,
+    # The earliest street the deployed side's resolver may act on. `river` is the
+    # only arm that tests SEARCH rather than the leaf guess: MEASURED 09-30, a
+    # river subgame at max_depth 6 has 53 leaves and ZERO truncated, so it is the
+    # whole remaining game solved exactly -- while flop and turn leave 13 of 53 to
+    # an assumption that is identical at depth 6 and depth 10.
+    resolver_min_street: str | None = None,
     record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head match between two runs' blueprints on duplicate deals.
@@ -299,6 +307,7 @@ def evaluate_blueprint_match(
     # side A plays the bare table, which never reads them.
     config_a = _with_resolver_overrides(
         metadata_a.config,
+        min_street=resolver_min_street,
         leaf_continuation_fraction=None,
         max_iterations=resolver_max_iterations,
         root_prior_weight=resolver_root_prior_weight,
@@ -373,6 +382,7 @@ def evaluate_blueprint_match(
                 "resolver_max_iterations": config_a.resolver.max_iterations,
                 "root_prior_weight": config_a.resolver.root_prior_weight,
                 "resolver_blend_alpha": config_a.resolver.policy_blend_alpha,
+                "resolver_min_street": config_a.resolver.min_street,
             }
             if resolver_a
             else {}

@@ -519,3 +519,87 @@ class TestStarvedSolveDegradesToTheBlueprint:
                 root_prior=np.zeros((3, 3)),
                 root_prior_weight=1.0,
             )
+
+
+class TestTheStreetGate:
+    """`min_street` exists because only a RIVER subgame is solved exactly.
+
+    MEASURED 09-30 at `max_depth=6`: a river tree has 53 leaves and ZERO
+    truncated, so no leaf model applies and the subgame IS the whole remaining
+    game -- which is what nested subgame solving means in the literature. Flop and
+    turn hold 13 truncated leaves of 53 at depth 6 AND at depth 10, so a quarter
+    of their leaves rest on an assumption no knob here can remove. Restricting to
+    the river is therefore the only arm that tests SEARCH rather than the guess.
+
+    ⚠️ "check-down is exact on the river" is CONDITIONAL on the round being fully
+    expanded: at `max_depth=2` the river still had 10 truncated leaves of 19.
+    """
+
+    @staticmethod
+    def _resolver(min_street: str):
+        state, rules = _make_initial_state()
+        config = make_test_config(
+            seed=42, **{"resolver.max_iterations": 8, "resolver.min_street": min_street}
+        )
+        solver, _storage = build_test_solver(config, DummyCardAbstraction())
+        return (
+            HUResolver(
+                blueprint=solver,
+                action_model=ActionModel(config),
+                rules=rules,
+                config=config.resolver,
+            ),
+            state,
+        )
+
+    def test_preflop_is_the_default_and_gates_nothing(self):
+        config = make_test_config(seed=42)
+
+        assert config.resolver.min_street == "preflop"
+
+    def test_a_river_gate_refuses_to_resolve_preflop(self):
+        resolver, state = self._resolver("river")
+
+        assert resolver._may_resolve(state) is False
+
+    def test_an_ungated_resolver_resolves_preflop(self):
+        resolver, state = self._resolver("preflop")
+
+        assert resolver._may_resolve(state) is True
+
+    def test_a_gated_act_still_returns_a_legal_action(self):
+        """The blueprint answers below the gate, so play must not break there."""
+        resolver, state = self._resolver("river")
+        rules = GameRules(small_blind=1, big_blind=2)
+        config = make_test_config(seed=42)
+
+        action = resolver.act(state, time_budget_ms=25)
+
+        assert action in rules.get_legal_actions(state, action_model=ActionModel(config))
+
+    def test_below_the_gate_an_off_menu_state_does_not_raise(self):
+        """MEASURED: routing the gate at `self.blueprint.sample_action_from_strategy`
+        killed three 4,000-deal arms with `KeyError: State is off-tree`. The bare
+        table refuses an off-menu line BY DESIGN; only the resolver's own lookup
+        path translates it through the shadow."""
+        resolver, state = self._resolver("river")
+        rules = GameRules(small_blind=1, big_blind=2)
+        config = make_test_config(seed=42)
+        # A size the abstraction never enumerated, reached by the opponent.
+        from src.core.game.actions import raises
+
+        off_menu = state.apply_action(raises(7), rules)
+
+        action = resolver.act(off_menu, time_budget_ms=25)
+
+        assert action in rules.get_legal_actions(off_menu, action_model=ActionModel(config))
+
+    def test_the_gate_does_not_resolve_and_does_not_fall_back(self):
+        """Below the gate it is the BLUEPRINT answering, not the resolver failing
+        into the blueprint -- a fallback would mean the solve ran and raised."""
+        resolver, state = self._resolver("river")
+
+        resolver.act(state, time_budget_ms=25)
+
+        assert resolver.fallback_count == 0
+        assert resolver.entropy_decisions == 0

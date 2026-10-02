@@ -92,6 +92,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "i.e. 22 iterations per 300 ms versus 72.",
     )
     parser.add_argument(
+        "--resolver-min-street",
+        choices=["preflop", "flop", "turn", "river"],
+        default=None,
+        help="[blueprint_match] The earliest street a deployed side A's resolver may "
+        "act on; before it the blueprint answers untouched. `river` is the only arm "
+        "that tests SEARCH rather than the leaf guess -- MEASURED at max_depth 6, a "
+        "river subgame has 53 leaves and ZERO truncated, so it is the whole "
+        "remaining game solved exactly, where flop and turn leave 13 of 53 to an "
+        "assumption that is identical at depth 6 and depth 10.",
+    )
+    parser.add_argument(
         "--resolver-prior-weight",
         type=float,
         default=None,
@@ -421,6 +432,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         match_threshold_a=args.policy_threshold,
         match_threshold_b=args.vs_policy_threshold,
         match_resolver_a=args.opponent == "deployed",
+        resolver_min_street=args.resolver_min_street,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,

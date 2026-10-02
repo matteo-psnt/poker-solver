@@ -78,6 +78,7 @@ CONDITIONAL_TIER_KNOBS = (
     "resolver_max_iterations",
     "resolver_blend_alpha",
     "resolver_root_prior_weight",
+    "resolver_min_street",
     "root_prior_weight",
     "leaf_rollouts",
     "allin_runouts",
@@ -283,6 +284,7 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         knobs["resolver_max_iterations"] = results.get("resolver_max_iterations")
         knobs["root_prior_weight"] = results.get("root_prior_weight")
         knobs["resolver_blend_alpha"] = results.get("resolver_blend_alpha")
+        knobs["resolver_min_street"] = results.get("resolver_min_street")
     return knobs
 
 

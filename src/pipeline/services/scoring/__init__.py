@@ -91,6 +91,8 @@ def evaluate_and_record(
     resolver_max_iterations: int | None = None,
     resolver_root_prior_weight: float | None = None,
     resolver_blend_alpha: float | None = None,
+    # blueprint_match: the earliest street a deployed side A may resolve on.
+    resolver_min_street: str | None = None,
     resolver_leaf_rollouts: int | None = None,
     resolver_allin_runouts: int = 1,
     # settle: the EARLIER rung this one is compared against.
@@ -217,6 +219,7 @@ def evaluate_and_record(
             resolver_max_iterations=resolver_max_iterations,
             resolver_root_prior_weight=resolver_root_prior_weight,
             resolver_blend_alpha=resolver_blend_alpha,
+            resolver_min_street=resolver_min_street,
             record_source=record_source,
         )
         estimator = BLUEPRINT_MATCH_ESTIMATOR_LABEL
