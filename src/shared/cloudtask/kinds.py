@@ -284,6 +284,9 @@ class TaskKind(abc.ABC):
     # would leave a board-free run (hundreds) or a pcs run (thousands) as ONE
     # chunk -- no mid-run rung to resume from, and no ladder to score.
     default_checkpoint_every: ClassVar[int] = 5_000_000
+    # Worker count when the submitter does not name one; None leaves it to the
+    # node, which fills in every CPU but one.
+    default_workers: ClassVar[int | None] = None
 
     @abc.abstractmethod
     def validate(self, task: TaskFields) -> None:
@@ -478,6 +481,10 @@ class TrainPcsTask(TaskKind):
     unit = "iterations"
     # The trainer's own default; a pcs run is thousands of iterations.
     default_checkpoint_every = 200
+    # A QUALITY ceiling, not a throughput one: each pass plays a strategy as many
+    # iterations stale as there are workers. 14 beat 36 by +193.9 +/- 46 mbb/hand
+    # at 4,000 iterations, and matched 36's 4,000 at 1,600 -- 83% of its wall-clock.
+    default_workers = 14
     progress_file = "train-progress.json"
 
     def validate(self, task: TaskFields) -> None:

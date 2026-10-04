@@ -79,9 +79,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--workers",
         type=int,
         default=None,
-        help="Worker count on the node. Default is all CPUs but one (+15%% measured "
-        "over a fully subscribed box); worth setting further below the "
-        "core count on a big abstraction, since every worker loads its own copy.",
+        help="Worker count on the node. pcs defaults to 14: more workers train a WORSE "
+        "table (14 beat 36 by +193.9 mbb/hand at equal iterations), so 15+ cores buy "
+        "nothing. scalar defaults to all CPUs but one (+15%% over a fully subscribed box). "
+        "A continuation must repeat the count it was trained at.",
     )
     parser.add_argument(
         "--checkpoint-every",
@@ -217,7 +218,11 @@ def run(args: argparse.Namespace) -> SubmitPayload:
                 arm=_arm(args),
                 parent=args.parent,
                 sets=tuple(args.sets),
-                workers=args.workers,
+                workers=(
+                    args.workers
+                    if args.workers is not None
+                    else kinds.kind(_OPS[kernel]).default_workers
+                ),
                 checkpoint_every=(
                     args.checkpoint_every
                     if args.checkpoint_every is not None
