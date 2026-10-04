@@ -123,11 +123,14 @@ serve-ssh:
 #
 # The record's address rides along as $2: the box reads the run from Postgres
 # and has no Terraform of its own to ask.
+# The API token and public hostname ride along for the same reason: deploy.sh
+# renders Caddy's config, which holds the token door and the public play page.
 serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="" resolver="":
     ssh solver@$({{tfv}} output -raw public_ip) \
         "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} \
          RESOLVER_OFF_TREE={{offtree}} EXTRA_RUNS={{extra}} \
-         RESOLVER={{resolver}} bash -s" \
+         RESOLVER={{resolver}} API_TOKEN=$({{tfv}} output -raw api_token) \
+         PUBLIC_HOST=$({{tfv}} output -raw url | sed 's|^https://||') bash -s" \
         -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
            "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 

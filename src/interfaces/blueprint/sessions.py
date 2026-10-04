@@ -37,7 +37,9 @@ if TYPE_CHECKING:
 
     from src.engine.solver.policy.source import ScorableBlueprint
 
-DEFAULT_LIMIT = 64
+# Sized for a PUBLIC table: strangers' abandoned tabs must not evict a hand in
+# play within minutes. A hand is a few KB, so 4,096 is tens of MB at most.
+DEFAULT_LIMIT = 4096
 
 
 class UnknownSessionError(KeyError):

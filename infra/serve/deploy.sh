@@ -570,6 +570,33 @@ EOF
 # reading run metadata from the record. Same mode as `/etc/blueprint.env`.
 sudo chmod 600 /etc/chipzen-seat.env
 
+# --------------------------------------------------------------------------- #
+# caddy: the token door and the public play door
+# --------------------------------------------------------------------------- #
+# Rendered from the tree, like the units, because cloud-init's copy can only be
+# changed by replacing the machine. $API_TOKEN and $PUBLIC_HOST come from
+# `just serve-deploy` (Terraform outputs the box cannot read itself). Without
+# them the live config is left alone rather than rendered with a blank token --
+# which would match `Bearer ` and open the private surface to everyone.
+if [ -n "${API_TOKEN:-}" ] && [ -n "${PUBLIC_HOST:-}" ]; then
+    rendered=$(mktemp)
+    sed -e "s|__HOST__|$PUBLIC_HOST|" -e "s|__TOKEN__|$API_TOKEN|" \
+        "$WORK/code/infra/serve/Caddyfile" > "$rendered"
+    if grep -q '__HOST__\|__TOKEN__' "$rendered"; then
+        echo "Caddyfile placeholders survived rendering -- leaving caddy alone" >&2
+    elif sudo caddy validate --adapter caddyfile --config "$rendered" >/dev/null 2>&1; then
+        sudo install -m 0640 -o root -g caddy "$rendered" /etc/caddy/Caddyfile
+        sudo systemctl reload caddy
+        echo "==> caddy: public play at https://$PUBLIC_HOST/"
+    else
+        echo "rendered Caddyfile does not validate -- leaving caddy alone:" >&2
+        sudo caddy validate --adapter caddyfile --config "$rendered" >&2 || true
+    fi
+    rm -f "$rendered"
+else
+    echo "==> caddy: no API_TOKEN/PUBLIC_HOST passed, config left as it is"
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable blueprint
 sudo systemctl restart blueprint

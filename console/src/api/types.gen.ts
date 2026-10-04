@@ -1043,7 +1043,8 @@ export interface components {
          *
          *     `bot_hole_cards` and every `mix` are null until `over`, and that is not
          *     politeness: a client that received them could show them, and a sit-down
-         *     where you can see the opponent's cards measures nothing at all.
+         *     where you can see the opponent's cards measures nothing at all. On the PUBLIC
+         *     route they stay null for good, cards excepted at a showdown.
          */
         Hand: {
             /** Board */
@@ -1053,7 +1054,7 @@ export interface components {
             /** Bot Hole Cards */
             bot_hole_cards: string[] | null;
             /** Bot Untrained Decisions */
-            bot_untrained_decisions: number;
+            bot_untrained_decisions: number | null;
             /** Button */
             button: number;
             /** Hole Cards */
@@ -1102,7 +1103,7 @@ export interface components {
             /** Street */
             street: string;
             /** Untrained */
-            untrained: boolean;
+            untrained: boolean | null;
         };
         /**
          * Job

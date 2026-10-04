@@ -1,0 +1,31 @@
+# Rendered by deploy.sh, which substitutes __HOST__ and __TOKEN__ -- the box's
+# cloud-init writes a token-only version at first boot and the first deploy
+# replaces it, because `custom_data` carries `ignore_changes`.
+#
+# Two doors onto the one loopback server, tried IN ORDER inside `route`:
+#
+#   bearer token  everything, as before -- the console's door.
+#   public        the play page and the play API, nothing else. Caddy stamps
+#                 X-Public, and the server then withholds the mix, the untrained
+#                 marks and mucked bot cards: what a real opponent would see.
+#                 /api/node and /api/combos stay behind the token -- they ARE
+#                 the strategy the Chipzen seat fields.
+#
+# The header is stripped on the token door and set (not appended) on the public
+# one, so a client cannot claim either. A bare 404 for everything else, so a
+# scanner still learns nothing about the private surface -- though `/` itself
+# now answers, which is the point.
+__HOST__ {
+	encode gzip
+	@authorized header_regexp auth Authorization ^Bearer\s+__TOKEN__$
+	@public path / /api/run /api/play /api/play/*
+	route {
+		reverse_proxy @authorized 127.0.0.1:8790 {
+			header_up -X-Public
+		}
+		reverse_proxy @public 127.0.0.1:8790 {
+			header_up X-Public 1
+		}
+		respond 404
+	}
+}

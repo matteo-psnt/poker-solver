@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src.interfaces.blueprint.app import create_app
+from src.interfaces.blueprint.app import PUBLIC_HEADER, create_app
 from src.interfaces.blueprint.sessions import Sessions, UnknownSessionError
 from tests.test_helpers import build_trained_test_solver
 
@@ -92,6 +92,70 @@ class TestTheBotsCardsAreHidden:
         finished = play_out(client, hand)
         trained = [e for e in finished["log"] if e["actor"] == "bot" and not e["untrained"]]
         assert not trained or any(e["mix"] is not None for e in trained)
+
+
+PUBLIC = {PUBLIC_HEADER: "1"}
+
+
+def finish_passively(client, hand: dict, headers: dict) -> dict:
+    """Check or call down -- a shove is called with `A` -- so it reaches a showdown."""
+    while not hand["over"]:
+        tokens = [edge["token"] for edge in hand["legal"]]
+        token = next((t for t in ("x", "c", "A") if t in tokens), tokens[0])
+        response = client.post(
+            f"/api/play/{hand['session']}/action", json={"token": token}, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        hand = response.json()
+    return hand
+
+
+class TestThePublicTable:
+    """Strangers see what a real opponent would: the cards shown down, no more.
+
+    The mix, the untrained marks and mucked cards, gathered over enough hands,
+    map the strategy the Chipzen seat fields -- so the public route never ships
+    them, even after the hand.
+    """
+
+    def test_the_page_is_served_at_the_root(self, client):
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "/api/play" in response.text
+
+    def test_no_mix_and_no_untrained_marks_ever(self, client):
+        for seed in range(6):
+            hand = start(client, seed=seed)
+            hand = finish_passively(
+                client, client.get(f"/api/play/{hand['session']}", headers=PUBLIC).json(), PUBLIC
+            )
+
+            assert hand["bot_untrained_decisions"] is None
+            assert all(e["mix"] is None and e["untrained"] is None for e in hand["log"])
+
+    def test_bot_cards_only_at_a_showdown(self, client):
+        endings = set()
+        for seed in range(40):
+            response = client.post(
+                "/api/play", json={"human_seat": 0, "seed": seed}, headers=PUBLIC
+            )
+            hand = response.json()
+            hand = play_out(client, hand) if seed % 2 else finish_passively(client, hand, PUBLIC)
+            hand = client.get(f"/api/play/{hand['session']}", headers=PUBLIC).json()
+
+            assert (hand["bot_hole_cards"] is not None) == hand["showdown"]
+            endings.add(hand["showdown"])
+            if endings == {True, False}:
+                return
+        pytest.fail(f"40 seeds never produced both a fold and a showdown: {endings}")
+
+    def test_the_token_route_still_sees_everything(self, client):
+        hand = play_out(client, start(client))
+
+        assert hand["bot_hole_cards"] is not None
+        assert hand["bot_untrained_decisions"] is not None
 
 
 class TestPlaying:

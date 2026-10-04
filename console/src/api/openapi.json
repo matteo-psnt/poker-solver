@@ -1099,7 +1099,7 @@
         "type": "object"
       },
       "Hand": {
-        "description": "A hand in progress.\n\n`bot_hole_cards` and every `mix` are null until `over`, and that is not\npoliteness: a client that received them could show them, and a sit-down\nwhere you can see the opponent's cards measures nothing at all.",
+        "description": "A hand in progress.\n\n`bot_hole_cards` and every `mix` are null until `over`, and that is not\npoliteness: a client that received them could show them, and a sit-down\nwhere you can see the opponent's cards measures nothing at all. On the PUBLIC\nroute they stay null for good, cards excepted at a showdown.",
         "properties": {
           "board": {
             "items": {
@@ -1127,8 +1127,15 @@
             "title": "Bot Hole Cards"
           },
           "bot_untrained_decisions": {
-            "title": "Bot Untrained Decisions",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Untrained Decisions"
           },
           "button": {
             "title": "Button",
@@ -1279,8 +1286,15 @@
             "type": "string"
           },
           "untrained": {
-            "title": "Untrained",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untrained"
           }
         },
         "required": [

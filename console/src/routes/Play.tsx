@@ -46,7 +46,7 @@ export function Play() {
    * `Blueprint.tsx` mounts this tab and the chart one at a time so that leaving
    * "ends it where it lives" — which was not true of anything, because the
    * endpoint existed and nothing called it. Sessions live on the blueprint
-   * server in a store of 64 that drops the OLDEST to make room, so an abandoned
+   * server in a bounded store that drops the OLDEST to make room, so an abandoned
    * hand is not free: it evicts a hand someone is still playing.
    */
   const sessionRef = useRef<string | null>(null);
@@ -499,6 +499,8 @@ function Result({
  */
 function History({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
   const streets = groupByStreet(hand.log);
+  // Null only on the public route, which the console never takes.
+  const untrained = hand.bot_untrained_decisions ?? 0;
   return (
     <div className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
       <header className="flex flex-wrap items-center gap-3 border-b border-[var(--border)] px-3 py-2">
@@ -508,12 +510,11 @@ function History({ hand, bigBlind }: { hand: Hand; bigBlind: number }) {
         <span
           className={cn(
             "font-mono text-[11px]",
-            hand.bot_untrained_decisions > 0 ? "text-[#D9A44E]" : "text-[var(--fg-faint)]",
+            untrained > 0 ? "text-[#D9A44E]" : "text-[var(--fg-faint)]",
           )}
         >
-          {hand.bot_untrained_decisions} of {hand.bot_decisions} bot decisions were at infosets
-          training never visited
-          {hand.bot_untrained_decisions > 0 && " — those were uniform-random, not strategy"}
+          {untrained} of {hand.bot_decisions} bot decisions were at infosets training never visited
+          {untrained > 0 && " — those were uniform-random, not strategy"}
         </span>
       </header>
 

@@ -20,10 +20,11 @@ thing allowed to decide what is loaded, not a browser tab.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from src.core.game.state import Card
@@ -200,8 +201,9 @@ class HandEvent(BaseModel):
     street: str
     """Whether the bot had NO strategy here and played uniform-random. A human
     explores far off the self-play distribution, so misses are common, and one
-    must not be read as a bad blueprint."""
-    untrained: bool
+    must not be read as a bad blueprint. Null on the PUBLIC route -- see
+    :func:`hand_payload`."""
+    untrained: bool | None
     """Null until the hand is over -- see :class:`Hand`."""
     mix: list[tuple[str, float]] | None
 
@@ -211,7 +213,8 @@ class Hand(BaseModel):
 
     `bot_hole_cards` and every `mix` are null until `over`, and that is not
     politeness: a client that received them could show them, and a sit-down
-    where you can see the opponent's cards measures nothing at all.
+    where you can see the opponent's cards measures nothing at all. On the PUBLIC
+    route they stay null for good, cards excepted at a showdown.
     """
 
     session: str
@@ -229,7 +232,7 @@ class Hand(BaseModel):
     payoff: float | None
     showdown: bool
     bot_decisions: int
-    bot_untrained_decisions: int
+    bot_untrained_decisions: int | None
     log: list[HandEvent]
 
 
@@ -329,12 +332,26 @@ class SubmitAction(BaseModel):
     token: str
 
 
+# Set by Caddy on the unauthenticated route and stripped from the token-holding
+# one, so a client cannot claim either. Loopback-only binding is what makes
+# trusting a header sound: nothing but Caddy can reach this process.
+PUBLIC_HEADER = "x-public"
+
+# The page a stranger plays on. One static file beside the code, so it rides the
+# code snapshot onto the box with no node toolchain there.
+PLAY_PAGE = Path(__file__).parent / "static" / "play.html"
+
+
+def _is_public(http: Request) -> bool:
+    return http.headers.get(PUBLIC_HEADER) == "1"
+
+
 _GONE = (
     "That hand is no longer on the server — it ended, or was dropped to make room. Deal a new one."
 )
 
 
-def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
+def hand_payload(hand: HeadsUpHand, session_id: str, *, public: bool) -> Hand:
     """One hand's visible state.
 
     ``session_id`` is a PARAMETER rather than something the caller attaches
@@ -352,8 +369,14 @@ def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
     explores far off the self-play distribution, so misses are common, and a bot
     playing uniform-random because it has NO strategy there must not be read as a
     bad blueprint.
+
+    ``public`` is a stranger at the table, not us studying the bot. They get
+    what a real opponent would see -- no mix, no untrained marks, and the bot's
+    cards only if it showed them down -- because those three, collected over
+    enough hands, map the strategy the Chipzen seat plays with.
     """
     state = hand.state
+    reveal = hand.is_over and not public
     return Hand(
         session=session_id,
         over=hand.is_over,
@@ -367,7 +390,7 @@ def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
         hole_cards=[_card_text(card) for card in state.hole_cards[hand.human_seat]],
         bot_hole_cards=(
             [_card_text(card) for card in state.hole_cards[1 - hand.human_seat]]
-            if hand.is_over
+            if reveal or (public and hand.showdown)
             else None
         ),
         legal=[
@@ -377,7 +400,7 @@ def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
         payoff=hand.human_payoff() if hand.is_over else None,
         showdown=hand.showdown,
         bot_decisions=hand.bot_decisions,
-        bot_untrained_decisions=hand.bot_untrained_decisions,
+        bot_untrained_decisions=None if public else hand.bot_untrained_decisions,
         log=[
             HandEvent(
                 seat=event.seat,
@@ -385,11 +408,11 @@ def hand_payload(hand: HeadsUpHand, session_id: str) -> Hand:
                 action=event.action_type,
                 amount=event.amount,
                 street=event.street,
-                untrained=event.untrained,
+                untrained=None if public else event.untrained,
                 # Revealed only at the end: the mix is what the bot WOULD have
                 # done, and seeing it mid-hand is seeing the opponent's strategy.
                 mix=[(name, weight) for name, weight in event.mix]
-                if (hand.is_over and event.mix)
+                if (reveal and event.mix)
                 else None,
             )
             for event in hand.log
@@ -537,8 +560,12 @@ def create_app(
             ).model_dump()
         )
 
+    @app.get("/", include_in_schema=False)
+    def _page() -> FileResponse:
+        return FileResponse(PLAY_PAGE, media_type="text/html")
+
     @app.post("/api/play")
-    def _start(request: StartPlay) -> JSONResponse:
+    def _start(request: StartPlay, http: Request) -> JSONResponse:
         """Deal a hand. The button alternates unless the caller pins it."""
         try:
             session_id, hand = sessions.start(
@@ -546,17 +573,18 @@ def create_app(
             )
         except ValueError as error:
             return JSONResponse({"error": str(error)}, status_code=422)
-        return JSONResponse(hand_payload(hand, session_id).model_dump())
+        return JSONResponse(hand_payload(hand, session_id, public=_is_public(http)).model_dump())
 
     @app.get("/api/play/{session_id}")
-    def _hand(session_id: str) -> JSONResponse:
+    def _hand(session_id: str, http: Request) -> JSONResponse:
         try:
-            return JSONResponse(hand_payload(sessions.get(session_id), session_id).model_dump())
+            hand = sessions.get(session_id)
         except UnknownSessionError:
             return JSONResponse({"error": _GONE}, status_code=404)
+        return JSONResponse(hand_payload(hand, session_id, public=_is_public(http)).model_dump())
 
     @app.post("/api/play/{session_id}/action")
-    def _act(session_id: str, request: SubmitAction) -> JSONResponse:
+    def _act(session_id: str, request: SubmitAction, http: Request) -> JSONResponse:
         """Take the human's action, then auto-play to their next turn."""
         try:
             hand = sessions.get(session_id)
@@ -569,7 +597,7 @@ def create_app(
             # A refusal, not a fault: the client offered a move that is not on
             # the menu, or moved when it was not their turn.
             return JSONResponse({"error": str(error)}, status_code=422)
-        return JSONResponse(hand_payload(hand, session_id).model_dump())
+        return JSONResponse(hand_payload(hand, session_id, public=_is_public(http)).model_dump())
 
     @app.delete("/api/play/{session_id}")
     def _leave(session_id: str) -> JSONResponse:

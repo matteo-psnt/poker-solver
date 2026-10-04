@@ -50,6 +50,13 @@
 # strategy, and can open play sessions. The share is mounted read-only and the
 # session store is capped, so neither the experiment record nor the box's memory
 # is at risk. Rotate by tainting `random_password.api_token` and re-applying.
+#
+# ONE PUBLIC DOOR, on purpose: `/` (the play page), `/api/run` and `/api/play*`
+# answer without the token, so anyone with the link can sit down against the
+# bot. That route is redacted server-side (no mix, no untrained marks, no mucked
+# cards); the strategy endpoints stay behind the token. The live Caddyfile is
+# `infra/serve/Caddyfile`, rendered by deploy.sh -- the copy below is only what
+# a fresh box has until its first deploy.
 
 terraform {
   required_version = ">= 1.5"
@@ -131,6 +138,8 @@ locals {
       # doing this in the app for one reason: the app must stay runnable on a
       # laptop with no certificate and no secret, and an auth layer it could not
       # be started without would make every test carry a token.
+      #
+      # First-boot copy only: deploy.sh replaces it with infra/serve/Caddyfile.
       #
       # `header_regexp` on the Authorization header, and a bare 404 otherwise --
       # not 401. A 401 advertises that something authenticated lives here; a 404
