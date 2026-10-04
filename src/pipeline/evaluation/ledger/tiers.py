@@ -268,6 +268,12 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         "num_deals": results["num_deals"],
         "base_seed": results["seed"],
     }
+    # A blended side A is a different player; conditional, so unblended rows
+    # keep the digest they already have.
+    if results.get("mix_run_a"):
+        knobs["mix_run"] = results["mix_run_a"]
+        knobs["mix_at"] = results.get("mix_at_a")
+        knobs["mix_weight"] = results["mix_weight_a"]
     # Emitted only when a side was actually purified, so every raw-vs-raw row
     # ever written keeps the tier digest it already has.
     for side in ("a", "b"):

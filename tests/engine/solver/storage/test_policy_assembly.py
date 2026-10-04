@@ -357,7 +357,7 @@ def test_mixing_a_run_with_itself_is_the_exact_identity(tree, tmp_path):
                 )
 
 
-def test_mixing_blends_the_two_runs_by_total_mass(tree, tmp_path):
+def test_mixing_blends_the_two_runs_by_root_mass(tree, tmp_path):
     a_dir = tmp_path / "a"
     b_dir = tmp_path / "b"
     a = _run_with(tree, a_dir, seed=5)
@@ -367,8 +367,40 @@ def test_mixing_blends_the_two_runs_by_total_mass(tree, tmp_path):
     record = assemble_policy(storage, a_dir, mix_run=b_dir, mix_at=800, mix_weight=0.5)
 
     assert record == {"mix_run": "b", "mix_at": 800, "mix_weight": 0.5}
-    expected = 0.5 * a / a.sum(dtype=np.float64) + 0.5 * b / b.sum(dtype=np.float64)
+    expected = 0.5 * a / _root_mass(tree, a) + 0.5 * b / _root_mass(tree, b)
     np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-12)
+
+
+def _root_mass(tree, array):
+    return float(tree.node_action_matrix(array, 0).sum(dtype=np.float64))
+
+
+def test_a_row_one_run_reaches_more_is_weighted_by_that_reach(tree, tmp_path):
+    """The sequence-form mixture: same root, but run B reaches everything below it
+    ten times as often, so at a deep row where A plays action 0 and B action 1 the
+    blend plays B's 10/11 of the time. Dividing by TOTAL mass would call it ~1/2."""
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    a = _run_with(tree, a_dir, seed=5)
+    root_start, _ = tree.slots(0, 0)
+    root_stop = tree.slots(0, int(tree.buckets_per_node[0]) - 1)[1]
+    b = a * 10.0
+    b[root_start:root_stop] = a[root_start:root_stop]
+    deep = next(n for n in range(1, len(tree)) if int(tree.num_actions[n]) >= 2)
+    start, _ = tree.slots(deep, 0)
+    a[start : start + 2] = (1.0, 0.0)
+    b[start : start + 2] = (0.0, 10.0)
+    storage = StaticArrayStorage(tree)
+    storage.visited[:] = 1
+    for array, path in ((a, a_dir), (b, b_dir)):
+        storage.strategy_sum[:] = array
+        save_checkpoint(storage, path, 800)
+
+    storage = StaticArrayStorage(tree)
+    load_checkpoint(storage, a_dir)
+    assemble_policy(storage, a_dir, mix_run=b_dir, mix_at=800, mix_weight=0.5)
+    row = storage.strategy_sum[start : start + 2]
+    assert row[1] / row.sum() == pytest.approx(10 / 11, rel=1e-5)
 
 
 def test_mixing_across_a_different_bucket_assignment_is_refused(tree, tmp_path):
@@ -406,7 +438,7 @@ def test_mixing_runs_that_never_recorded_an_abstraction_is_allowed(tree, tmp_pat
     record = assemble_policy(storage, a_dir, mix_run=b_dir, mix_at=800, mix_weight=0.5)
 
     assert record["mix_run"] == "b"
-    expected = 0.5 * a / a.sum(dtype=np.float64) + 0.5 * b / b.sum(dtype=np.float64)
+    expected = 0.5 * a / _root_mass(tree, a) + 0.5 * b / _root_mass(tree, b)
     np.testing.assert_allclose(storage.strategy_sum, expected, rtol=1e-4, atol=1e-12)
 
 

@@ -220,6 +220,11 @@ def evaluate_and_record(
             resolver_root_prior_weight=resolver_root_prior_weight,
             resolver_blend_alpha=resolver_blend_alpha,
             resolver_min_street=resolver_min_street,
+            mix_a=(
+                (exact_br.mix_run, exact_br.mix_at, exact_br.mix_weight)
+                if exact_br is not None
+                else (None, None, 0.5)
+            ),
             record_source=record_source,
         )
         estimator = BLUEPRINT_MATCH_ESTIMATOR_LABEL

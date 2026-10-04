@@ -55,13 +55,14 @@ def _apply_mix(
     mix_at: int | None,
     weight: float,
 ) -> dict[str, Any]:
-    """Blend another run's average into this one: ``(1-w)*A/|A| + w*B/|B|``.
+    """Blend another run's average into this one: ``(1-w)*A/root(A) + w*B/root(B)``.
 
-    Each side is divided by its own total mass first, so ``w`` is a weight on
-    the STRATEGIES rather than on whichever run happened to accumulate more.
-    That also makes mixing a run with ITSELF the exact identity at every ``w``,
-    which is the guard this operation needs: rows are normalised per row at
-    read time, so a common scale factor cannot change the policy.
+    Each side is divided by its ROOT row's mass, which every hand reaches with
+    probability one, so it is that run's total iteration weight. That makes the
+    blend the sequence-form mixture: a row is weighted by how often each run
+    REACHES it. Total mass is not that -- a run that folds more reaches less of
+    its tree, so dividing by it would overweight the folder's deep rows.
+    Mixing a run with ITSELF stays the exact identity at every ``w``.
 
     The tree fingerprint is checked by the read. The bucket ASSIGNMENT is the
     one that matters -- two runs can share a tree, a layout and bucket COUNTS
@@ -85,8 +86,9 @@ def _apply_mix(
         )
     rung = other_manifest.iteration if mix_at is None else mix_at
     other = read_strategy_sum(storage, Path(mix_run), rung)
-    mine_total = float(storage.strategy_sum.sum(dtype=np.float64))
-    other_total = float(other.sum(dtype=np.float64))
+    root = storage.tree.node_action_matrix
+    mine_total = float(root(storage.strategy_sum, 0).sum(dtype=np.float64))
+    other_total = float(root(other, 0).sum(dtype=np.float64))
     if mine_total <= 0.0 or other_total <= 0.0:
         raise ValueError("a checkpoint with no accumulated strategy cannot be mixed")
     storage.strategy_sum *= np.float32((1.0 - weight) / mine_total)

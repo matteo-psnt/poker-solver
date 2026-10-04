@@ -19,6 +19,7 @@ from src.pipeline.services.scoring._shared import (
     build_blueprint_for,
     effective_abstraction_hash,
     load_blueprint,
+    verify_mixable,
 )
 
 if TYPE_CHECKING:
@@ -270,6 +271,10 @@ def evaluate_blueprint_match(
     # whole remaining game solved exactly -- while flop and turn leave 13 of 53 to
     # an assumption that is identical at depth 6 and depth 10.
     resolver_min_street: str | None = None,
+    # Side A as a BLEND of two runs, ``(run, rung, weight on it)``: the ensemble
+    # question -- do separately trained replicates leave independent errors that
+    # a mixture cancels -- asked on chips rather than on the bound.
+    mix_a: tuple[Path | None, int | None, float] = (None, None, 0.5),
     record_source: RecordSource | None = None,
 ) -> EvaluationOutput:
     """Head-to-head match between two runs' blueprints on duplicate deals.
@@ -314,11 +319,15 @@ def evaluate_blueprint_match(
         leaf_rollouts=None,
         blend_alpha=resolver_blend_alpha,
     )
+    hash_a = effective_abstraction_hash(run_dir_a, metadata_a, None)
+    if mix_a[0] is not None:
+        verify_mixable(run_dir_a, hash_a, mix_a[0], record_source)
     solver_a, storage_a, _ = build_blueprint_for(
         run_dir_a,
         dataclasses.replace(metadata_a, config=config_a),
-        effective_abstraction_hash(run_dir_a, metadata_a, None),
+        hash_a,
         at_a,
+        mix=mix_a,
         play_only=True,
     )
     solver_b, storage_b, _ = build_blueprint_for(
@@ -361,6 +370,11 @@ def evaluate_blueprint_match(
         # uninterpretable later without which rung, which abstraction and which
         # betting tree the other half brought.
         "rung_b": rung_b,
+        **(
+            {"mix_run_a": mix_a[0].name, "mix_at_a": mix_a[1], "mix_weight_a": mix_a[2]}
+            if mix_a[0] is not None
+            else {}
+        ),
         "policy_threshold_a": policy_threshold_a,
         "policy_threshold_b": policy_threshold_b,
         # How much of each table the cut actually moved. A threshold that

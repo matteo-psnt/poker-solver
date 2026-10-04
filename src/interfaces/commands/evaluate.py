@@ -319,7 +319,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--mix-run",
         default=None,
-        help="[exact_br] Blend another RUN's average into this one 50/50 and score the "
+        help="[exact_br, blueprint_match] Blend another RUN's average into this one 50/50 and score the "
         "mixture. Both runs must bucket by the same abstraction (refused otherwise). Tests "
         "whether the solver's residual error is independent ACROSS runs, not just across "
         "training spans. A separate tier.",
@@ -328,13 +328,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--mix-at",
         type=int,
         default=None,
-        help="[exact_br] Rung of --mix-run to blend (default: its published checkpoint).",
+        help="[exact_br, blueprint_match] Rung of --mix-run to blend (default: its published checkpoint).",
     )
     parser.add_argument(
         "--mix-weight",
         type=float,
         default=0.5,
-        help="[exact_br] Weight on --mix-run. 0.5 is the even blend; each side is divided "
+        help="[exact_br, blueprint_match] Weight on --mix-run. 0.5 is the even blend; each side is divided "
         "by its own total mass first, so this weights STRATEGIES, not accumulated mass.",
     )
     parser.add_argument(

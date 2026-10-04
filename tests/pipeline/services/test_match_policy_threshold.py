@@ -139,6 +139,18 @@ class TestTheTierSplits:
         assert "policy_threshold_b" not in served
         assert tiers.tier_digest(self._record(raw)) != tiers.tier_digest(self._record(served))
 
+    def test_a_blended_side_is_its_own_tier(self):
+        """An ensemble side A is a different player; its row must not pair with the
+        unblended match of the same run, and the label must say what was blended."""
+        raw = tiers.build_blueprint_match_knobs(self._results())
+        blended = tiers.build_blueprint_match_knobs(
+            self._results(mix_run_a="run-c", mix_at_a=4000, mix_weight_a=0.5)
+        )
+
+        assert blended["mix_run"] == "run-c"
+        assert tiers.tier_digest(self._record(raw)) != tiers.tier_digest(self._record(blended))
+        assert "mix_run=run-c" in tiers.tier_label(self._record(blended))
+
     def test_the_label_names_the_threshold(self):
         """`tier_label` must name every knob the digest splits on, or the operator
         sees two different tiers rendered as the same string."""
