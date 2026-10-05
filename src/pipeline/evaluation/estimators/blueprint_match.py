@@ -63,6 +63,7 @@ def play_blueprint_match(
     num_deals: int = 2000,
     seed: int = 1,
     resolver_a: bool = False,
+    resolver_b: bool = False,
 ) -> BlueprintMatchResult:
     """Play duplicate deals of A vs B and report A's chip edge.
 
@@ -99,10 +100,11 @@ def play_blueprint_match(
                 starting_stack=starting_stack,
                 a_seat=a_seat,
                 resolver_a=resolver_a,
+                resolver_b=resolver_b,
                 # Pinned per (deal, seat) like resolver_match's, so a deployed
                 # side A is reproducible rather than reading the ambient stream.
                 resolver_rng=np.random.default_rng(np.random.SeedSequence([seed, deal, a_seat]))
-                if resolver_a
+                if resolver_a or resolver_b
                 else None,
             )
             seat_payoffs.append(payoff)
@@ -135,6 +137,7 @@ def _play_game(
     starting_stack: int,
     a_seat: int,
     resolver_a: bool = False,
+    resolver_b: bool = False,
     resolver_rng: np.random.Generator | None = None,
 ) -> tuple[float, MatchTelemetry]:
     """One game off a fixed deck; returns blueprint A's payoff and its counts.
@@ -149,6 +152,9 @@ def _play_game(
     # A fresh agent per game, matching its documented contract (one resolver per
     # agent lifetime, a new agent per hand).
     agent = BlueprintAgent(solver_a, use_resolver=True, rng=resolver_rng) if resolver_a else None
+    # A deployed side B is what lets two DIFFERENT action trees meet at all: a bare
+    # side raises KeyError on any size its own tree lacks.
+    agent_b = BlueprintAgent(solver_b, use_resolver=True, rng=resolver_rng) if resolver_b else None
     state = rules.create_initial_state(
         starting_stack=starting_stack,
         hole_cards=hole_cards,
@@ -164,6 +170,9 @@ def _play_game(
         if is_a and agent is not None:
             telemetry.decisions += 1
             action = agent.act(state)
+        elif not is_a and agent_b is not None:
+            telemetry.blueprint_decisions += 1
+            action = agent_b.act(state)
         else:
             actor = solver_a if is_a else solver_b
             if is_a:
@@ -173,8 +182,9 @@ def _play_game(
             action = actor.sample_action_from_strategy(state, use_average=True)
         # Every realized action, both seats: the resolver's range inference is a
         # history replay, and B's sizes are the off-menu ones the shadow exists for.
-        if agent is not None:
-            agent.observe(state, action)
+        for observer in (agent, agent_b):
+            if observer is not None:
+                observer.observe(state, action)
         state = state.apply_action(action, rules)
         telemetry.note_action(action, state.stacks[actor_seat], is_resolver=is_a)
 

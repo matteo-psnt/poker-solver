@@ -249,6 +249,9 @@ def evaluate_blueprint_match(
     policy_threshold_a: float = 0.0,
     policy_threshold_b: float = 0.0,
     resolver_a: bool = False,
+    # Side B DEPLOYED too, under the same resolver knobs: the only way two runs
+    # with DIFFERENT action trees can meet, since a bare side cannot play off-tree.
+    resolver_b: bool = False,
     # Applied to side A's config when it plays deployed. Pinning the iteration
     # count is what makes two arms comparable at all: the resolver is otherwise
     # WALL-CLOCK budgeted, so a busier box does fewer iterations and lands on a
@@ -330,9 +333,18 @@ def evaluate_blueprint_match(
         mix=mix_a,
         play_only=True,
     )
+    config_b = _with_resolver_overrides(
+        metadata_b.config,
+        min_street=resolver_min_street,
+        leaf_continuation_fraction=None,
+        max_iterations=resolver_max_iterations,
+        root_prior_weight=resolver_root_prior_weight,
+        leaf_rollouts=None,
+        blend_alpha=resolver_blend_alpha,
+    )
     solver_b, storage_b, _ = build_blueprint_for(
         run_dir_b,
-        metadata_b,
+        dataclasses.replace(metadata_b, config=config_b),
         effective_abstraction_hash(run_dir_b, metadata_b, None),
         at_b,
         play_only=True,
@@ -351,7 +363,12 @@ def evaluate_blueprint_match(
     rung_a = at_a if at_a is not None else checkpoint_iteration_of(run_dir_a)
     rung_b = at_b if at_b is not None else checkpoint_iteration_of(run_dir_b)
     result = play_blueprint_match(
-        solver_a, solver_b, num_deals=num_deals, seed=seed, resolver_a=resolver_a
+        solver_a,
+        solver_b,
+        num_deals=num_deals,
+        seed=seed,
+        resolver_a=resolver_a,
+        resolver_b=resolver_b,
     )
     results = {
         "run_a": metadata_a.run_id,
@@ -391,6 +408,7 @@ def evaluate_blueprint_match(
         # existing vocabulary and already an unconditional tier knob, so reusing the
         # name is what makes a deployed arm refuse to pair with a bare one.
         "opponent": "deployed" if resolver_a else "blueprint",
+        "opponent_b": "deployed" if resolver_b else "blueprint",
         **(
             {
                 "resolver_max_iterations": config_a.resolver.max_iterations,

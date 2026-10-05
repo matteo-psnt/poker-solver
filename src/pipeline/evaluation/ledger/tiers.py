@@ -26,6 +26,7 @@ TIER_KNOBS = ("scorer", "opponent", "include_off_tree")
 IDENTITY_KNOBS = ("card_abstraction_hash", "action_config_hash", "eval_tree_fingerprint")
 
 CONDITIONAL_TIER_KNOBS = (
+    "opponent_b",
     "runouts",
     "resolver_iterations",
     "lookahead_depth",
@@ -298,6 +299,8 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
     # comparable to another deployed arm either. `opponent` is already a tier knob
     # (lbr's), so naming it that is what splits the tier. Conditional, so every
     # bare row keeps the digest it has.
+    if results.get("opponent_b") == "deployed":
+        knobs["opponent_b"] = "deployed"
     if results.get("opponent") == "deployed":
         knobs["opponent"] = "deployed"
         knobs["resolver_max_iterations"] = results.get("resolver_max_iterations")

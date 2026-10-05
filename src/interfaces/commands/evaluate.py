@@ -176,6 +176,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "pass this whenever one of them was continued further than the other.",
     )
     parser.add_argument(
+        "--vs-opponent",
+        choices=("blueprint", "deployed"),
+        default="blueprint",
+        help="[blueprint_match] Side B as the bare table or DEPLOYED (through the resolver's "
+        "translation, under the same resolver knobs as side A). Deployed is the only way "
+        "two different action trees can meet: a bare side raises on a size it lacks.",
+    )
+    parser.add_argument(
         "--vs-policy-threshold",
         type=float,
         default=0.0,
@@ -489,6 +497,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         match_threshold_a=args.policy_threshold,
         match_threshold_b=args.vs_policy_threshold,
         match_resolver_a=args.opponent == "deployed",
+        match_resolver_b=args.vs_opponent == "deployed",
         table_bb=args.table_bb,
         ladder_a=_ladder(args.ladder_a, args.runs_dir),
         ladder_b=_ladder(args.ladder_b, args.runs_dir),

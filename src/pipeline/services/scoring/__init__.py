@@ -116,6 +116,7 @@ def evaluate_and_record(
     # blueprint_match: whether side A plays the DEPLOYED system (blueprint routed
     # through the resolver) rather than the bare table.
     match_resolver_a: bool = False,
+    match_resolver_b: bool = False,
     # depth_duel: the table both runs play at, whatever depth each was cut for.
     table_bb: float | None = None,
     # elimination: two ladders of (run, rung, threshold), and the match schedule.
@@ -235,6 +236,7 @@ def evaluate_and_record(
             policy_threshold_a=match_threshold_a,
             policy_threshold_b=match_threshold_b,
             resolver_a=match_resolver_a,
+            resolver_b=match_resolver_b,
             resolver_max_iterations=resolver_max_iterations,
             resolver_root_prior_weight=resolver_root_prior_weight,
             resolver_blend_alpha=resolver_blend_alpha,

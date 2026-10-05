@@ -139,6 +139,15 @@ class TestTheTierSplits:
         assert "policy_threshold_b" not in served
         assert tiers.tier_digest(self._record(raw)) != tiers.tier_digest(self._record(served))
 
+    def test_a_deployed_side_b_is_its_own_tier(self):
+        """Two DIFFERENT action trees can only meet with B translating; that row
+        must not pair with a bare-B match of the same runs."""
+        raw = tiers.build_blueprint_match_knobs(self._results())
+        translated = tiers.build_blueprint_match_knobs(self._results(opponent_b="deployed"))
+
+        assert translated["opponent_b"] == "deployed"
+        assert tiers.tier_digest(self._record(raw)) != tiers.tier_digest(self._record(translated))
+
     def test_a_blended_side_is_its_own_tier(self):
         """An ensemble side A is a different player; its row must not pair with the
         unblended match of the same run, and the label must say what was blended."""
