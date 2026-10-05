@@ -21,6 +21,7 @@ from src.shared.cloudtask.node import archive, blobstore, profile, progress
 from src.shared.cloudtask.node.paths import NodePaths
 from src.shared.cloudtask.node.plan import TaskPlan
 from src.shared.cloudtask.node.process import TaskLogger, run_guarded
+from src.shared.cloudtask.rung_spec import parse_ladder
 
 # The second element is the OUTCOME an exit code cannot carry: an evaluation that
 # scored some rungs and failed others exits 0 for Batch's retry economics.
@@ -246,6 +247,38 @@ def _fetch_partner_runs(plan: TaskPlan, paths: NodePaths, log: TaskLogger) -> bo
             log(f"FATAL could not fetch {flag} partner {other}")
             return False
         log(f"{flag} {other} at rung {wanted[0] if wanted else 'current'}")
+    return _fetch_ladders(plan, paths, log, options)
+
+
+def _fetch_ladders(
+    plan: TaskPlan, paths: NodePaths, log: TaskLogger, options: dict[str, str]
+) -> bool:
+    """Every rung of an elimination's two ladders, each run at the rung it plays.
+
+    The scored run was fetched already at its own rung; anything else the ladders
+    name is a different run, absent here until this pulls it down.
+    """
+    have = {(plan.run_id, rung or None) for rung in plan.eval_rungs or ("",)}
+    wanted = {
+        (spec.run, None if spec.at is None else str(spec.at))
+        for flag in ("--ladder-a", "--ladder-b")
+        if options.get(flag)
+        for spec in parse_ladder(options[flag])
+    }
+    for run, rung in sorted(wanted - have, key=str):
+        if not archive.is_published(run, plan.checkpoint_sas):
+            log(f"FATAL a ladder names no published run: {run}")
+            return False
+        destination = paths.runs / run
+        fetched = (
+            archive.fetch_for_evaluation(run, destination, [rung], plan.checkpoint_sas, log)
+            if rung
+            else archive.fetch_current_rung(run, destination, plan.checkpoint_sas, log)
+        )
+        if not fetched:
+            log(f"FATAL could not fetch ladder rung {run}:{rung or 'current'}")
+            return False
+        log(f"ladder {run} at rung {rung or 'current'}")
     return True
 
 

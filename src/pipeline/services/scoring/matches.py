@@ -221,7 +221,7 @@ def _resolver_fields(telemetry: Any | None) -> dict[str, Any]:
     }
 
 
-def _threshold_side(
+def threshold_side(
     storage: StaticArrayStorage, solver: StaticTreeSolver, threshold: float, side: str
 ) -> int:
     """Purify one side of a match in place, as the seat does at load. Rows changed."""
@@ -345,8 +345,8 @@ def evaluate_blueprint_match(
             "The two blueprints share one strategy table, so a per-side policy "
             "threshold would apply to both and the match would measure nothing."
         )
-    changed_a = _threshold_side(storage_a, solver_a, policy_threshold_a, "A")
-    changed_b = _threshold_side(storage_b, solver_b, policy_threshold_b, "B")
+    changed_a = threshold_side(storage_a, solver_a, policy_threshold_a, "A")
+    changed_b = threshold_side(storage_b, solver_b, policy_threshold_b, "B")
 
     rung_a = at_a if at_a is not None else checkpoint_iteration_of(run_dir_a)
     rung_b = at_b if at_b is not None else checkpoint_iteration_of(run_dir_b)

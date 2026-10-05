@@ -38,19 +38,19 @@ class TestSelection:
     @pytest.mark.parametrize(
         ("table", "expected"),
         [
-            (39.9, 40.0),  # all but on the deep rung
-            (10.1, 10.0),  # all but on the middle one
-            (4.5, 4.0),  # nearer 4 than 10 either way you measure
-            (6.4, 10.0),  # sqrt(4 x 10) = 6.32, so just above it is the DEEP side
-            (6.2, 4.0),  # and just below it is the shallow one
-            (20.1, 40.0),  # sqrt(10 x 40) = 20, so the deep side
-            (19.9, 10.0),  # and the shallow side
+            (39.9, 40.0),  # the next rung up, well within 2x
+            (6.2, 10.0),  # 10 is within 2x of 6.2: snap UP, not to the nearer 4
+            (20.1, 40.0),  # 40 is just within 2x of 20.1
+            (19.9, 10.0),  # 40 is beyond 2x of 19.9: log-nearest, the 10
+            (10.1, 10.0),  # and 10.1 is nearer 10 than 40 in log space
+            (4.5, 4.0),  # 10 is beyond 2x of 4.5: log-nearest again
         ],
     )
-    def test_the_nearest_rung_in_log_space_answers(self, ladder, table, expected):
-        # The boundary is the GEOMETRIC mean of the neighbouring rungs. Snapping
-        # down instead answered an 80 bb table with a 25 bb blueprint, measured
-        # at -140 mbb/hand against the 100 bb one.
+    def test_it_snaps_up_within_twice_the_table_and_is_log_nearest_beyond(
+        self, ladder, table, expected
+    ):
+        # MEASURED 10-05: inside every gap of the fielded ladder (<= 2x) the deeper
+        # rung wins; across a 4x gap the shallower one did (-99.5 at 30 bb, 08-31).
         assert ladder.select(table).depth == expected
 
     def test_a_table_in_a_wide_gap_is_not_stranded_on_the_far_rung(self, ladder):

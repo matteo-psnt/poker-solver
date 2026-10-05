@@ -14,6 +14,7 @@ node.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from typing import Literal
 
 from pydantic import Field
@@ -22,6 +23,7 @@ from src.interfaces.cloud.tasks import dispatch, spec
 from src.interfaces.commands._base import Command, CommandError, eval_index_rows
 from src.interfaces.commands.evaluate import EVAL_METHODS
 from src.shared.cloudtask.kinds import TaskName
+from src.shared.cloudtask.rung_spec import format_ladder, parse_ladder
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -45,16 +47,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--vs",
         default=None,
-        help="[blueprint_match] The OTHER arm, as a published run id or a fragment of "
+        help="[blueprint_match, depth_duel] The OTHER arm, as a published run id or a fragment of "
         "one. Resolved and verified HERE, like --run: the node has no fragment matcher "
         "and finds out only after a snapshot upload and three retries.",
     )
     parser.add_argument(
         "--vs-at",
         default="",
-        help="[blueprint_match] Rung of --vs to play (empty = its latest checkpoint). "
+        help="[blueprint_match, depth_duel] Rung of --vs to play (empty = its latest checkpoint). "
         "One rung, not a list: the ladder --at fans over is run A's.",
     )
+    parser.add_argument(
+        "--ladder-a",
+        default="",
+        help="[elimination] Comma-separated `run[:at[:threshold]]` rungs, deploy.sh's "
+        "spelling; runs may be fragments. Must include --run, which files the row and "
+        "takes its rung from here when --at is empty.",
+    )
+    parser.add_argument("--ladder-b", default="", help="[elimination] The opposing ladder.")
     parser.add_argument(
         "--timeout",
         default=spec.DEFAULT_TIMEOUT,
@@ -106,14 +116,53 @@ def _opponent_flags(method: str, vs: str | None, vs_at: str) -> tuple[str, ...]:
         verify_published_rungs,
     )
 
-    if method == "blueprint_match" and not vs:
-        raise CommandError("`--method blueprint_match` needs an opponent: pass `--vs <run>`.")
+    if method in ("blueprint_match", "depth_duel") and not vs:
+        raise CommandError(f"`--method {method}` needs an opponent: pass `--vs <run>`.")
     if not vs:
         return ()
     vs_id = resolve_published_run(vs)
     rung = _rungs(vs_at)[0]
     verify_published_rungs(vs_id, [rung])
     return ("--vs-run", vs_id) + (("--vs-at", rung) if rung else ())
+
+
+def _ladder_flags(
+    method: str, run_id: str, ladder_a: str, ladder_b: str, rungs: list[str]
+) -> tuple[tuple[str, ...], list[str]]:
+    """Both ladders, every run resolved and every rung verified, as node flags.
+
+    Also the rung of ``run_id`` to score: the row is filed under it, so it must be
+    one of ladder A's rungs, and an empty ``--at`` takes that rung's.
+    """
+    from src.interfaces.cloud.store.workspace import (  # noqa: PLC0415 -- Azure SDK off `--help`
+        resolve_published_run,
+        verify_published_rungs,
+    )
+
+    if method != "elimination":
+        if ladder_a or ladder_b:
+            raise CommandError("--ladder-a/--ladder-b are for `--method elimination` only.")
+        return (), rungs
+    if not ladder_a or not ladder_b:
+        raise CommandError("`--method elimination` needs --ladder-a and --ladder-b.")
+    try:
+        ladders = [parse_ladder(ladder_a), parse_ladder(ladder_b)]
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    resolved = [
+        [replace(rung, run=resolve_published_run(rung.run)) for rung in ladder]
+        for ladder in ladders
+    ]
+    for rung in {rung for ladder in resolved for rung in ladder}:
+        verify_published_rungs(rung.run, [str(rung.at) if rung.at is not None else ""])
+    anchor = [rung for rung in resolved[0] if rung.run == run_id]
+    if not anchor:
+        raise CommandError(f"--run {run_id} is not a rung of --ladder-a; file the row under one.")
+    own = str(anchor[0].at) if anchor[0].at is not None else ""
+    if rungs != [""] and rungs != [own]:
+        raise CommandError(f"--at {','.join(rungs)} disagrees with ladder A's {anchor[0]}.")
+    flags = ("--ladder-a", format_ladder(resolved[0]), "--ladder-b", format_ladder(resolved[1]))
+    return flags, [own]
 
 
 def _passthrough(flags: list[str]) -> tuple[str, ...]:
@@ -160,6 +209,8 @@ def run(args: argparse.Namespace) -> ScorePayload:
     # pruned off the share, and the node only finds out after `uv sync`.
     verify_published_rungs(run_id, rungs)
     opponent = _opponent_flags(args.method, args.vs, args.vs_at)
+    ladders, rungs = _ladder_flags(args.method, run_id, args.ladder_a, args.ladder_b, rungs)
+    opponent += ladders
     payload = dispatch.stage_and_queue(
         lambda snapshot: [
             spec.TaskSpec(

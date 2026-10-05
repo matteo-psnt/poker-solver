@@ -195,6 +195,44 @@ class TestEvaluateFetch:
         assert handlers._evaluate(task, paths, log) == (0, None)
         assert (paths.runs / "run-b" / "static-800.ckpt.zst").exists()
 
+    def test_an_elimination_fetches_every_ladder_rung_once(
+        self, paths, log, monkeypatch, container
+    ):
+        """The node only fetches flags it knows; a ladder names runs nothing else does."""
+        self._published(container)
+        for run, rung in (("run-b", "800"), ("run-c", "1200")):
+            self._published(container, run=run, rung=f"static-{rung}")
+            container[f"{run}/STATIC_CHECKPOINT.json"] = (
+                f'{{"zarr": "static-{rung}.zarr", "iteration": {rung}, "retained": []}}'.encode()
+            )
+        fetched: list[tuple[str, list[str]]] = []
+        real = handlers.archive.fetch_for_evaluation
+        monkeypatch.setattr(
+            handlers.archive,
+            "fetch_for_evaluation",
+            lambda run, *a, **k: fetched.append((run, list(a[1]))) or real(run, *a, **k),
+        )
+        monkeypatch.setattr(handlers, "run_guarded", lambda *a, **k: 0)
+        task = node_plan.TaskPlan(
+            op=TaskName.EVALUATE,
+            run_id="run-a",
+            eval_rungs=("2000",),
+            eval_method="elimination",
+            eval_flags=(
+                "--ladder-a",
+                "run-a:2000:0.35,run-c:1200:0.2",
+                "--ladder-b",
+                "run-b:800:0.35,run-c:1200:0.2",
+            ),
+            checkpoint_sas=SAS,
+        )
+
+        assert handlers._evaluate(task, paths, log) == (0, None)
+        assert (paths.runs / "run-b" / "static-800.ckpt.zst").exists()
+        assert (paths.runs / "run-c" / "static-1200.ckpt.zst").exists()
+        # The scored run is already down at its rung, and a shared rung comes once.
+        assert sorted(fetched) == [("run-a", ["2000"]), ("run-b", ["800"]), ("run-c", ["1200"])]
+
     def test_settling_fetches_the_rung_it_measures_drift_from(
         self, paths, log, monkeypatch, container
     ):

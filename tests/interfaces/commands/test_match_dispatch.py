@@ -9,6 +9,8 @@ once.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from src.interfaces.commands import score
@@ -68,3 +70,47 @@ class TestTheOpponentIsResolvedBeforeDispatch:
     def test_another_estimator_needs_none(self, published):
         published({"run-b": ["4000"]})
         assert score._opponent_flags("exact_br", None, "") == ()
+
+    def test_a_depth_duel_needs_an_opponent_too(self, published):
+        published({"run-b": ["4000"]})
+        with pytest.raises(CommandError, match="needs an opponent"):
+            score._opponent_flags("depth_duel", None, "")
+
+
+class TestLaddersAreResolvedBeforeDispatch:
+    """An elimination names many runs; the node fetches only what the flags carry."""
+
+    RUNS: ClassVar = {
+        "run-d75-5790": ["4000"],
+        "run-nobr-26596": ["8000"],
+        "run-d50-26625": ["12000"],
+    }
+
+    def test_every_fragment_is_resolved_and_the_anchor_takes_its_rung(self, published):
+        seen = published(self.RUNS)
+        flags, rungs = score._ladder_flags(
+            "elimination", "run-d75-5790", "5790:4000,26596:8000:0.35", "26596:8000:0.35", [""]
+        )
+        assert flags == (
+            "--ladder-a",
+            "run-d75-5790:4000:0,run-nobr-26596:8000:0.35",
+            "--ladder-b",
+            "run-nobr-26596:8000:0.35",
+        )
+        assert rungs == ["4000"]
+        assert seen["run-nobr-26596"] == ["8000"]
+
+    def test_the_scored_run_must_be_in_ladder_a(self, published):
+        published(self.RUNS)
+        with pytest.raises(CommandError, match="not a rung of --ladder-a"):
+            score._ladder_flags("elimination", "run-d50-26625", "5790:4000", "26596:8000", [""])
+
+    def test_a_conflicting_at_is_refused(self, published):
+        published(self.RUNS)
+        with pytest.raises(CommandError, match="disagrees"):
+            score._ladder_flags("elimination", "run-d75-5790", "5790:4000", "26596:8000", ["2000"])
+
+    def test_a_ladder_on_another_method_is_refused(self, published):
+        published(self.RUNS)
+        with pytest.raises(CommandError, match="elimination"):
+            score._ladder_flags("exact_br", "run-d75-5790", "5790:4000", "", [""])

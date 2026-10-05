@@ -8,6 +8,7 @@ they are not interchangeable:
 | How far from optimal, exactly? | `public_tree_br.py` | zero variance, on-tree, board-restricted |
 | How far from optimal, from below? | `lbr/` | Monte Carlo lower bound, off-tree and deployed play |
 | Does A win chips off B? | `blueprint_match.py`, `resolver_match.py` | the only abstraction-crossing gate |
+| ...when they were cut for different depths? | `depth_duel.py`, `elimination.py` (via `cross_depth.py`) | one table depth; or whole escalating matches, ladder vs ladder |
 
 ## Layout
 
@@ -16,6 +17,9 @@ they are not interchangeable:
       public_tree_br.py  deterministic exact BR (the default checkpoint gate)
       blueprint_match.py duplicate-deal head-to-head
       resolver_match.py  resolver-in-eval machinery
+      cross_depth.py     a blueprint playing a table of another depth, as the seat does
+      depth_duel.py      duplicate-deal head-to-head at one table depth
+      elimination.py     whole elimination matches between two depth ladders
     reference/       exact answers for SMALL games -- the harness, not a scorer
     ledger/          eval records: tiers, queries, the derived index
     statistics.py    paired-sample comparison

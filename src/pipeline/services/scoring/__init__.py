@@ -9,6 +9,7 @@ number whose instrument is only identified as "lbr" is a number nobody can audit
 two months later."""
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +23,13 @@ from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.services.scoring._shared import (
     EvaluationOutput,
     build_blueprint_for,
+)
+from src.pipeline.services.scoring.depth import (
+    DEPTH_DUEL_ESTIMATOR_LABEL,
+    ELIMINATION_ESTIMATOR_LABEL,
+    Rung,
+    evaluate_depth_duel,
+    evaluate_elimination,
 )
 from src.pipeline.services.scoring.exact_br import (
     EXACT_BR_ESTIMATOR_LABEL,
@@ -108,6 +116,17 @@ def evaluate_and_record(
     # blueprint_match: whether side A plays the DEPLOYED system (blueprint routed
     # through the resolver) rather than the bare table.
     match_resolver_a: bool = False,
+    # depth_duel: the table both runs play at, whatever depth each was cut for.
+    table_bb: float | None = None,
+    # elimination: two ladders of (run, rung, threshold), and the match schedule.
+    ladder_a: Sequence[Rung] = (),
+    ladder_b: Sequence[Rung] = (),
+    elimination_pairs: int = 500,
+    starting_bb: float = 100.0,
+    escalate_every: int = 10,
+    escalate_by: float = 1.5,
+    select_a: str = "up",
+    select_b: str = "up",
     abstraction_hash: str | None = None,
     at_iteration: int | None = None,
     progress_file: Path | None = None,
@@ -229,6 +248,44 @@ def evaluate_and_record(
         )
         estimator = BLUEPRINT_MATCH_ESTIMATOR_LABEL
         knobs = eval_ledger.build_blueprint_match_knobs(out.results)
+    elif method == "depth_duel":
+        # `blueprint_match` with the stacks allowed to differ: the runs are
+        # ranked at ONE table depth, which neither need have been cut for.
+        if vs_run_dir is None or table_bb is None:
+            raise ValueError("depth_duel needs an opponent and a table: --vs-run and --table-bb.")
+        out = evaluate_depth_duel(
+            run_dir,
+            vs_run_dir,
+            table_bb=table_bb,
+            num_deals=match_deals,
+            seed=match_seed,
+            at_a=at_iteration,
+            at_b=vs_at,
+            policy_threshold_a=match_threshold_a,
+            policy_threshold_b=match_threshold_b,
+            record_source=record_source,
+        )
+        estimator = DEPTH_DUEL_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_depth_duel_knobs(out.results)
+    elif method == "elimination":
+        if not ladder_a or not ladder_b:
+            raise ValueError("elimination needs two ladders: --ladder-a and --ladder-b.")
+        out = evaluate_elimination(
+            run_dir,
+            ladder_a=ladder_a,
+            ladder_b=ladder_b,
+            num_pairs=elimination_pairs,
+            starting_bb=starting_bb,
+            escalate_every=escalate_every,
+            escalate_by=escalate_by,
+            select_a=select_a,
+            select_b=select_b,
+            seed=match_seed,
+            at_iteration=at_iteration,
+            record_source=record_source,
+        )
+        estimator = ELIMINATION_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_elimination_knobs(out.results)
     else:  # "lbr" (default, trustworthy)
         config = lbr or LBRConfig()
         out = evaluate_run_lbr(
@@ -293,6 +350,8 @@ def evaluate_and_record(
 
 __all__ = (
     "BLUEPRINT_MATCH_ESTIMATOR_LABEL",
+    "DEPTH_DUEL_ESTIMATOR_LABEL",
+    "ELIMINATION_ESTIMATOR_LABEL",
     "EXACT_BR_ESTIMATOR_LABEL",
     "LBR_ESTIMATOR_LABEL",
     "RESOLVER_GATE_ESTIMATOR_LABEL",

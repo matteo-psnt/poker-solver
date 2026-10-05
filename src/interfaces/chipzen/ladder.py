@@ -25,6 +25,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# How far above the table a rung may be cut and still be preferred to a shallower
+# one: measured to hold across the fielded ladder's widest gap, 50 -> 100 bb.
+SNAP_UP_SPAN = 2.0
+
 
 @dataclass(frozen=True)
 class Rung:
@@ -42,18 +46,12 @@ class Rung:
 class DepthLadder:
     """Picks the blueprint to answer a hand of a given effective depth.
 
-    NEAREST IN LOG SPACE, because depth error is proportional: a 25 bb blueprint
-    is as wrong at 50 bb as a 50 bb one is at 100. MEASURED across the 25-100 bb
-    gap, the 100 bb rung against the 25 bb rung at each table:
-
-        30 bb  -99.5 +/- 14.8   40 bb  -82.9 +/- 18.7   (the 25 bb rung wins)
-        60 bb  +42.6 +/- 28.2   80 bb +140.5 +/- 37.4   (the 100 bb rung wins)
-
-    The crossover is near sqrt(25 x 100) = 50, and log-nearest calls all four
-    correctly. Snapping DOWN would have answered an 80 bb table with the 25 bb
-    rung and given up 140 mbb/hand; between ADJACENT rungs 1.67x apart the choice
-    measures as nothing, so this only matters where the ladder has a gap -- which
-    is exactly when it is easy to get wrong.
+    SNAP UP: the shallowest rung cut at least this deep, when it is within
+    ``SNAP_UP_SPAN`` of the table -- MEASURED 10-05 in every adjacent pair of the
+    fielded ladder, the deeper rung wins at every table between them (up to ~90
+    mbb/hand), and over whole elimination matches up beats log-nearest 50.6% and
+    50.9% (3.7 and 6.2 sigma). Across a WIDER gap the deeper rung loses (100 vs 25
+    bb at a 30 bb table: -99.5), so there it falls back to nearest in log space.
     """
 
     def __init__(self, blueprints: Sequence[ScorableBlueprint]) -> None:
@@ -77,5 +75,8 @@ class DepthLadder:
         """
         if depth <= 0:
             return self.rungs[0]
+        above = [rung for rung in self.rungs if rung.depth >= depth * (1 - 1e-9)]
+        if above and above[0].depth <= SNAP_UP_SPAN * depth:
+            return above[0]
         target = math.log(depth)
         return min(self.rungs, key=lambda rung: abs(math.log(rung.depth) - target))

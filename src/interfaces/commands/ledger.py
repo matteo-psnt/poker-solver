@@ -21,10 +21,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--method",
         default=None,
-        choices=["lbr", "exact_br", "resolver_match", "blueprint_match"],
-        help="Filter by method. The two match estimators report a signed chip EDGE in "
-        "mbb/hand, not an exploitability in mbb/g -- they are different units and "
-        "only one of them can be won by folding.",
+        choices=[
+            "lbr",
+            "exact_br",
+            "resolver_match",
+            "blueprint_match",
+            "depth_duel",
+            "elimination",
+        ],
+        help="Filter by method. The match estimators report a signed chip EDGE in "
+        "mbb/hand (an elimination, a match WIN RATE), not an exploitability in mbb/g "
+        "-- they are different units and only one of them can be won by folding.",
     )
     parser.add_argument(
         "--since", default=None, metavar="ISO8601", help="Only rows at or after this timestamp."
@@ -109,6 +116,9 @@ def _score(results: dict) -> str:
     edge, edge_se = results.get("edge_mbb_per_hand"), results.get("edge_se_mbb")
     if isinstance(edge, (int, float)) and edge_se is not None:
         return f"{edge:+.1f}±{edge_se:.0f}"
+    rate, rate_se = results.get("a_win_rate"), results.get("win_rate_se")
+    if isinstance(rate, (int, float)) and rate_se is not None:
+        return f"{rate:.1%}±{rate_se:.1%}"
     return "—"
 
 

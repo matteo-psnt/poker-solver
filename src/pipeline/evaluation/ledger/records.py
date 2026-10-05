@@ -227,6 +227,10 @@ def ledger_row(document: dict[str, Any]) -> dict[str, Any]:
         "edge_mbb_per_hand": results.get("a_mbb_per_hand", results.get("resolver_mbb_per_hand")),
         "edge_se_mbb": results.get("se_mbb"),
     }
+    # An elimination's number is a match WIN RATE, in neither unit above.
+    if "a_win_rate" in results:
+        row["results"]["a_win_rate"] = results["a_win_rate"]
+        row["results"]["win_rate_se"] = results.get("se")
     # The resolver gate's DECIDING numbers. Its chip edge cannot resolve at any
     # deal count this project runs (se ~170 at 1,000 deals), while the stack-off
     # rate -- what `--no-resolver` was actually fielded for -- carries a fraction

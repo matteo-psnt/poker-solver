@@ -180,6 +180,8 @@ class ScoreBody(BaseModel):
     pool: str | None = None
     vs: str | None = None
     vs_at: str | None = None
+    ladder_a: str | None = None
+    ladder_b: str | None = None
     # `score`'s REMAINDER passthrough, already split. The `--` separator is a
     # command-line artefact -- argparse's way of being told the rest is not its
     # business -- so it has no meaning here and `_passthrough` tolerates its

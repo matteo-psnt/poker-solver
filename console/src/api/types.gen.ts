@@ -1919,6 +1919,10 @@ export interface components {
             at?: string | null;
             /** Flags */
             flags?: string[] | null;
+            /** Ladder A */
+            ladder_a?: string | null;
+            /** Ladder B */
+            ladder_b?: string | null;
             /** Method */
             method?: string | null;
             /** Pool */

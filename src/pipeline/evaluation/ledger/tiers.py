@@ -60,6 +60,19 @@ CONDITIONAL_TIER_KNOBS = (
     # pair exactly as they did.
     "policy_threshold_a",
     "policy_threshold_b",
+    # depth_duel: the table's depth IS the game played; an edge at 75 bb says
+    # nothing about one at 80.
+    "table_bb",
+    # elimination: both ladders, and the schedule the match was modelled under --
+    # a win rate moves with the escalation model, so it is the instrument too.
+    "ladder_a",
+    "ladder_b",
+    "starting_bb",
+    "escalate_every",
+    "escalate_by",
+    "select_a",
+    "select_b",
+    "num_pairs",
     # settling: the rung gap the drift was measured over IS the instrument.
     "from_iteration",
     "rung_gap",
@@ -292,6 +305,34 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         knobs["resolver_blend_alpha"] = results.get("resolver_blend_alpha")
         knobs["resolver_min_street"] = results.get("resolver_min_street")
     return knobs
+
+
+def build_depth_duel_knobs(results: dict[str, Any]) -> dict[str, Any]:
+    """Canonical depth-duel knob tier: `blueprint_match`'s, plus the table depth."""
+    return build_blueprint_match_knobs(results) | {"table_bb": results["table_bb"]}
+
+
+def build_elimination_knobs(results: dict[str, Any]) -> dict[str, Any]:
+    """Canonical elimination knob tier: both ladders AS PLAYED, and the schedule.
+
+    Each ladder carries its rungs resolved, so two rows that both said "latest"
+    but played different checkpoints cannot pair.
+    """
+    return {
+        "ladder_a": ",".join(results["ladder_a"]),
+        "ladder_b": ",".join(results["ladder_b"]),
+        "num_pairs": results["num_pairs"],
+        "starting_bb": results["starting_bb"],
+        "escalate_every": results["escalate_every"],
+        "escalate_by": results["escalate_by"],
+        "base_seed": results["seed"],
+        # Conditional, so every log-nearest row keeps the digest it already has.
+        **{
+            f"select_{side}": results[f"select_{side}"]
+            for side in ("a", "b")
+            if results.get(f"select_{side}", "nearest") != "nearest"
+        },
+    }
 
 
 def build_settling_knobs(results: dict[str, Any]) -> dict[str, Any]:

@@ -3208,6 +3208,28 @@
             ],
             "title": "Flags"
           },
+          "ladder_a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ladder A"
+          },
+          "ladder_b": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ladder B"
+          },
           "method": {
             "anyOf": [
               {

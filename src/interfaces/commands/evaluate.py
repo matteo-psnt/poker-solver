@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING, Any
 from src.adapters.postgres import connect
 from src.interfaces.commands._base import (
     Command,
+    CommandError,
     resolve_run_dir,
 )
 from src.pipeline import services
+from src.pipeline.evaluation.estimators.elimination import SELECTION_RULES
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
+from src.shared.cloudtask.rung_spec import parse_ladder
 from src.shared.config import DEFAULT_RUNS_DIR
 
 if TYPE_CHECKING:
@@ -22,7 +25,15 @@ if TYPE_CHECKING:
 # repeating it: a value the submitter accepts but `evaluate` rejects is not
 # caught until the node has already been allocated, and the task then retries
 # twice on the way to failing.
-EVAL_METHODS = ("lbr", "exact_br", "resolver_match", "blueprint_match", "settle")
+EVAL_METHODS = (
+    "lbr",
+    "exact_br",
+    "resolver_match",
+    "blueprint_match",
+    "depth_duel",
+    "elimination",
+    "settle",
+)
 
 # Above this the SB is refusing to play rather than playing badly, and no
 # exploitability reading about it means anything. `.claude/rules/
@@ -58,7 +69,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "matched board tier); resolver_match = duplicate-deal chip edge of "
         "blueprint+resolver over the bare blueprint (NOT an exploitability bound); "
         "blueprint_match = duplicate-deal chip edge over ANOTHER run (--vs-run), the "
-        "one gate folding cannot win; settle = per-street drift of the average "
+        "one gate folding cannot win; depth_duel = the same against a run cut for "
+        "ANOTHER depth, both played at --table-bb; elimination = whole escalating "
+        "matches, --ladder-a against --ladder-b, scored as a match win rate; "
+        "settle = per-street drift of the average "
         "strategy since --settle-from, which says whether training has stopped "
         "changing anything (NOT whether what it settled on is good).",
     )
@@ -67,7 +81,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--deals",
         type=int,
         default=None,
-        help="[resolver_match, blueprint_match] Duplicate deals (each played twice, "
+        help="[resolver_match, blueprint_match, depth_duel] Duplicate deals (each played twice, "
         "seats swapped). Defaults differ because the estimators do: 1,000 for the "
         "resolver gate, whose two sides differ only where the resolver fires, and "
         "2,000 for a match of two different blueprints, which disagree far more often.",
@@ -150,14 +164,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--vs-run",
         default=None,
-        help="[blueprint_match] The OTHER arm, as a published run id. The chip edge "
+        help="[blueprint_match, depth_duel] The OTHER arm, as a published run id. The chip edge "
         "is reported for --run over this one.",
     )
     parser.add_argument(
         "--vs-at",
         type=int,
         default=None,
-        help="[blueprint_match] Rung of --vs-run to play (default: its published "
+        help="[blueprint_match, depth_duel] Rung of --vs-run to play (default: its published "
         "checkpoint). Two arms are only comparable at a matched training budget, so "
         "pass this whenever one of them was continued further than the other.",
     )
@@ -165,12 +179,55 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--vs-policy-threshold",
         type=float,
         default=0.0,
-        help="[blueprint_match] Purify the OPPONENT's table at this probability, the "
+        help="[blueprint_match, depth_duel] Purify the OPPONENT's table at this probability, the "
         "way the seat purifies what it serves. With --policy-threshold on the same "
         "run and rung this makes a self-match a single-knob A/B over SERVING: the "
         "sampling streams are shared, so the pairs that are not zero are exactly "
         "the decisions the cut changed.",
     )
+    # depth_duel options; --vs-run, --vs-at, --deals and both thresholds as above.
+    parser.add_argument(
+        "--table-bb",
+        type=float,
+        default=None,
+        help="[depth_duel] Table depth in big blinds. Each run plays it through its "
+        "OWN tree, rebuilt at the depth it was cut for, as the seat does.",
+    )
+    # elimination options (--method elimination).
+    parser.add_argument(
+        "--ladder-a",
+        default="",
+        help="[elimination] Comma-separated `run[:at[:threshold]]` rungs, deploy.sh's "
+        "spelling; a missing threshold plays the table raw. Must include --run.",
+    )
+    parser.add_argument("--ladder-b", default="", help="[elimination] The opposing ladder.")
+    parser.add_argument(
+        "--matches",
+        type=int,
+        default=500,
+        help="[elimination] Duplicate match PAIRS: one card sequence played twice, the "
+        "ladders swapping seats, so seat and card luck cancel within a pair.",
+    )
+    parser.add_argument(
+        "--starting-bb", type=float, default=100.0, help="[elimination] Opening depth."
+    )
+    parser.add_argument(
+        "--escalate-every",
+        type=int,
+        default=10,
+        help="[elimination] Hands between blind steps, modelled as both stacks "
+        "shrinking by --escalate-by. A MODEL of Chipzen's schedule: hold it fixed "
+        "across arms, since the win rate moves with it.",
+    )
+    parser.add_argument("--escalate-by", type=float, default=1.5, help="[elimination] Step.")
+    for side in ("a", "b"):
+        parser.add_argument(
+            f"--select-{side}",
+            choices=SELECTION_RULES,
+            default="up",
+            help=f"[elimination] How ladder {side.upper()} picks a rung: `up` (what the seat "
+            "fields: the next rung up within 2x, else log-nearest) or `nearest` in log depth.",
+        )
     # LBR options (--method lbr).
     parser.add_argument("--hands", type=int, default=1000, help="[lbr] Number of hands.")
     parser.add_argument("--runouts", type=int, default=12, help="[lbr] Equity runouts per node.")
@@ -266,7 +323,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--policy-threshold",
         type=float,
         default=0.0,
-        help="[exact_br, blueprint_match] Eval-time thresholding of the blueprint: zero "
+        help="[exact_br, blueprint_match, depth_duel] Eval-time thresholding of the blueprint: zero "
         "actions below this probability and renormalise. A separate tier. Under "
         "blueprint_match it purifies side A, which is what the SEAT does to every "
         "rung it serves; see --vs-policy-threshold for the control.",
@@ -432,12 +489,32 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         match_threshold_a=args.policy_threshold,
         match_threshold_b=args.vs_policy_threshold,
         match_resolver_a=args.opponent == "deployed",
+        table_bb=args.table_bb,
+        ladder_a=_ladder(args.ladder_a, args.runs_dir),
+        ladder_b=_ladder(args.ladder_b, args.runs_dir),
+        elimination_pairs=args.matches,
+        starting_bb=args.starting_bb,
+        escalate_every=args.escalate_every,
+        escalate_by=args.escalate_by,
+        select_a=args.select_a,
+        select_b=args.select_b,
         resolver_min_street=args.resolver_min_street,
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,
         policy_profile=args.policy_profile,
     )
+
+
+def _ladder(text: str, runs_dir: str) -> list[tuple[Path, int | None, float]]:
+    """``--ladder-a``/``-b`` as (run dir, rung, threshold); empty when not given."""
+    if not text:
+        return []
+    try:
+        specs = parse_ladder(text)
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
+    return [(resolve_run_dir(spec.run, runs_dir), spec.at, spec.threshold) for spec in specs]
 
 
 def _print_resolver_telemetry(results: dict[str, Any]) -> None:
@@ -510,6 +587,12 @@ def render(payload: services.EvaluationPayload) -> None:
         print("  reach-wtd is the TV below which half the TRAFFIC sits; a PURE row's")
         print("  drift is exactly 0, so read `pure` beside the drift, and read both")
         print("  beside the exploitability of the same rungs.")
+        return
+    if payload.method == "depth_duel":
+        _render_depth_duel(payload.run_id, results)
+        return
+    if payload.method == "elimination":
+        _render_elimination(results)
         return
     if payload.method == "blueprint_match":
         edge, se = results["a_mbb_per_hand"], results["se_mbb"]
@@ -619,6 +702,55 @@ def render(payload: services.EvaluationPayload) -> None:
         _render_decomposition(decomposition)
     if profile := results.get("policy_profile"):
         _render_profile(profile)
+
+
+def _render_depth_duel(run_id: str, results: dict[str, Any]) -> None:
+    edge, se = results["a_mbb_per_hand"], results["se_mbb"]
+    sigma = abs(edge) / se if se else 0.0
+    winner = run_id if edge > 0 else results["run_b"]
+    print(f"  vs:            {results['run_b']} @ {results.get('rung_b') or 'latest'}")
+    print(
+        f"  Table:         {results['table_bb']:g} bb; A cut for "
+        f"{results['depth_a_bb']:g} bb, B for {results['depth_b_bb']:g} bb"
+    )
+    print(
+        f"  Served at:     A {results['policy_threshold_a']:.2f} "
+        f"({results['rows_thresholded_a']:,} rows cut)  B {results['policy_threshold_b']:.2f} "
+        f"({results['rows_thresholded_b']:,} rows cut)"
+    )
+    # What the depth fiction cost each side: a truncated replay is a forced
+    # check/fold, so a high rate is the player's depth failing, not its strategy.
+    for side in ("a", "b"):
+        print(
+            f"  Fiction {side.upper()}:     {results[f'{side}_truncation_rate']:.2%} truncated, "
+            f"{results[f'{side}_snap_rate']:.2%} snapped, "
+            f"{results[f'{side}_untrained_rate']:.2%} untrained "
+            f"of {results[f'{side}_decisions']:,} decisions"
+        )
+    print(f"  Diverged on:   {results['divergent_pairs']:,} of {results['num_deals']:,} pairs")
+    print(f"  Edge (A over B): {edge:+.2f} mbb/hand (± {se:.2f})  {sigma:.1f}σ")
+    print(f"  Reading:       {'inconclusive' if sigma < 2 else f'{winner} wins'}")
+
+
+def _render_elimination(results: dict[str, Any]) -> None:
+    rate, se = results["a_win_rate"], results["se"]
+    sigma = abs(rate - 0.5) / se if se else 0.0
+    print(f"  Ladder A:      {', '.join(results['ladder_a'])}")
+    print(f"  Ladder B:      {', '.join(results['ladder_b'])}")
+    print(
+        f"  Schedule:      {results['starting_bb']:g} bb, stacks / {results['escalate_by']:g} "
+        f"every {results['escalate_every']} hands"
+    )
+    print(
+        f"  Matches:       {results['num_matches']:,} ({results['num_pairs']:,} duplicate "
+        f"pairs), {results['mean_hands']:.1f} hands each on average"
+    )
+    print(
+        f"  Truncation:    A {results['truncation_rate_a']:.2%}  B "
+        f"{results['truncation_rate_b']:.2%}; rung switches A {results['switches_a']:,} "
+        f"B {results['switches_b']:,}"
+    )
+    print(f"  A wins:        {rate:.1%} of matches (± {se:.1%})  {sigma:.1f}σ from even")
 
 
 def _render_decomposition(decomposition: dict) -> None:

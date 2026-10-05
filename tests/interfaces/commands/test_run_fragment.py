@@ -179,6 +179,8 @@ class TestDispatchResolvesTheFragmentToo:
                 at="",
                 vs=None,
                 vs_at="",
+                ladder_a="",
+                ladder_b="",
                 timeout=0,
                 pool="train",
                 flags=[],
