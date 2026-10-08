@@ -568,3 +568,38 @@ class TestTheRealTable:
         turn, spot = real
         frame = wire_action(Action(ActionType.ALL_IN, 194), turn, spot)
         assert frame["params"]["amount"] == turn.max_raise
+
+
+class TestARaiseOverALimpIsNotAShove:
+    """MEASURED in the 09-29..10-08 journal: a big blind raising over a limp was
+    replayed as ALL-IN, because our tree types that action a BET (nothing to
+    call) and the replay built a RAISE off the posted blind, found none, and fell
+    back to the most aggressive legal action. 1,634 of 1,700 truncations (96%),
+    and 1,984 decisions answered against a fake shove."""
+
+    LIMP = simple_entry(0, "call", SB)  # the wire's call amount is the INCREMENT
+
+    def test_their_raise_over_our_limp_leaves_us_facing_a_raise(self, blueprint, scale):
+        payload = turn_payload(
+            action_history=[SMALL_BLIND_ENTRY, BIG_BLIND_ENTRY, self.LIMP, raise_entry(1, 3 * BB)]
+        )
+        spot = reconstruct(blueprint, TurnState.parse(payload), seat=0, scale=scale)
+        assert not spot.truncated, spot.truncated_reason
+        assert spot.off_tree == 0, "a raise to 3 bb is the tree's own BET over a limp"
+        assert 0 < spot.state.to_call < spot.state.stacks[0], "a min-raise is not a shove"
+
+    def test_a_call_of_that_raise_reaches_the_flop(self, blueprint, scale):
+        payload = turn_payload(
+            phase="flop",
+            board=["2c", "7d", "9h"],
+            action_history=[
+                SMALL_BLIND_ENTRY,
+                BIG_BLIND_ENTRY,
+                self.LIMP,
+                raise_entry(1, 3 * BB),
+                simple_entry(0, "call", 2 * BB),
+            ],
+        )
+        spot = reconstruct(blueprint, TurnState.parse(payload), seat=1, scale=scale)
+        assert not spot.truncated, spot.truncated_reason
+        assert spot.state.street is Street.FLOP

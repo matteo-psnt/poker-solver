@@ -204,7 +204,11 @@ def reconstruct(
         chosen = _on_tree(observed, state, action_model, rules, legal)
         off_tree += int(snapped or chosen != observed)
         state = state.apply_action(chosen, rules)
-        wagers[entry.seat] = max(wagers[entry.seat], entry.amount)
+        # A call's `amount` is the INCREMENT on the live wire (SB limp: 50 at 50/100),
+        # not the total its docstring promises; a call always matches the high bet.
+        wagers[entry.seat] = (
+            max(wagers) if entry.action == CALL else max(wagers[entry.seat], entry.amount)
+        )
         replayed += 1
 
     state, consumed = advance_chance(state, board, consumed)
@@ -265,8 +269,12 @@ def _observed_action(
         # Their raise rounds to no increment in our coarser chips: it is a call
         # as far as our tree can tell.
         return Action(ActionType.CALL), True
-    kind = ActionType.BET if high == 0 else ActionType.RAISE
-    amount = increment if kind is ActionType.RAISE else scale.to_ours(entry.amount)
+    # OUR state names the shape, not their wire: a big blind raising over a limp
+    # owes nothing, so our tree offers it BETs. Typing it a RAISE off the posted
+    # blind found no RAISE, fell back to all-in, and ended our replay at the next
+    # call -- 1,634 of 1,700 truncations (96%) in the 09-29..10-08 journal.
+    kind = ActionType.RAISE if state.to_call > 0 else ActionType.BET
+    amount = increment
     # What the actor must actually part with: a RAISE's amount sits ON TOP of the
     # call, so comparing the bare amount to the stack would miss a shove by
     # exactly `to_call` and hand the translator an action nobody can afford.
