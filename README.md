@@ -17,9 +17,7 @@ on an autoscaling Azure Batch pool. It plays live.**
   <img src="docs/img/play.jpg" alt="The public play page: you against Blueprint on a 9♣ J♣ 8♠ flop" width="860">
 </a>
 
-<sub>**[Play it in your browser →](https://poker-blueprint.swedencentral.cloudapp.azure.com/)**
-No sign-up. 100 bb stacks, the button alternates, and stacks reset every hand.
-Keys: <kbd>F</kbd> fold · <kbd>C</kbd> check/call · <kbd>R</kbd> bet/raise · <kbd>←</kbd><kbd>→</kbd> size · <kbd>Space</kbd> deal.</sub>
+**[Play it in your browser →](https://poker-blueprint.swedencentral.cloudapp.azure.com/)**
 
 </div>
 
@@ -68,9 +66,9 @@ flowchart LR
 
 ## The console
 
-<img src="docs/img/console-blueprint.jpg" alt="Console Blueprint page: the 100 bb button's preflop strategy as a 13x13 hand grid">
+<img src="docs/img/console-blueprint.jpg" alt="Console Blueprint page: the button's response to a 3-bet at 100 bb, as a 13x13 hand grid">
 
-<sub><b>Blueprint</b>: the button's preflop strategy at 100 bb. Each cell is one starting hand, split into fold, call and raise in proportion to how often the blueprint plays each.</sub>
+<sub><b>Blueprint</b>: the button opens to 2bb, the big blind 3-bets to 7bb, and the grid shows how the button answers with each starting hand: fold, call, 4-bet or all-in.</sub>
 
 <table>
 <tr>
