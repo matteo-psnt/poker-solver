@@ -13,14 +13,16 @@ import pytest
 
 from src.core.game.actions import Action, ActionType
 from src.interfaces.gtowizard.adapter import (
-    AdapterError,
-    opponent_hole_cards,
     reconstruct,
     round_wagers,
-    table_scale,
     wire_amount,
 )
 from src.interfaces.gtowizard.protocol import Frame
+from src.interfaces.table import (
+    AdapterError,
+    opponent_hole_cards,
+    table_scale,
+)
 from tests.test_helpers import build_trained_test_solver
 
 # The test blueprint plays 50/100 with 400 behind -- 4 big blinds. A table at
@@ -268,3 +270,16 @@ class TestTheirRealTable:
         scale = table_scale(theirs.game, self._blueprint(200))
         assert scale.our_depth == 100
         assert not scale.depth_matches
+
+
+class TestARaiseOverALimpIsNotAShove:
+    """The chipzen journal's measured failure (1,634 of 1,700 truncations), in the
+    copy of the replay this adapter kept: their raise over our limp was typed a
+    RAISE off the posted blind, our tree offers only BETs there, and the replay
+    fell back to all-in."""
+
+    def test_their_raise_over_our_limp_leaves_us_facing_a_raise(self, blueprint, scale) -> None:
+        spot = reconstruct(blueprint, frame(history=["c", "b600"]), scale)
+        assert not spot.truncated
+        assert spot.state.current_player == HERO
+        assert 0 < spot.state.to_call < spot.state.stacks[HERO], "a 3 bb raise is not a shove"

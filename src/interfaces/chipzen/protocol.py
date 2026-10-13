@@ -9,7 +9,7 @@ restating because getting either wrong is silent:
 - ``TurnState.min_raise`` / ``max_raise`` are likewise totals.
 
 Amounts are integers in the table's own chips; converting them into the units our
-tree was trained in belongs to :class:`~src.interfaces.chipzen.adapter.TableScale`.
+tree was trained in belongs to :class:`~src.interfaces.table.TableScale`.
 """
 
 from __future__ import annotations

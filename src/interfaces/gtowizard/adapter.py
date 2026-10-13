@@ -28,96 +28,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.core.game.actions import Action, ActionType
-from src.core.game.state import FULL_DECK, Card, GameState
-from src.engine.search.action_translation import translate_action_distribution
 from src.interfaces.gtowizard.protocol import BET, CALL, CHECK, FOLD, ProtocolError, Turn
+from src.interfaces.table import (
+    AdapterError,
+    TableScale,
+    on_tree,
+    opponent_hole_cards,
+    their_raise,
+)
 from src.pipeline.blueprint.paths import advance_chance
 
 if TYPE_CHECKING:
     from src.core.actions.action_model import ActionModel
     from src.core.game.rules import GameRules
+    from src.core.game.state import GameState
     from src.engine.solver.policy.source import ScorableBlueprint
     from src.interfaces.gtowizard.protocol import Frame, Game
-
-
-class AdapterError(ValueError):
-    """A frame cannot be mapped onto this blueprint's game.
-
-    Distinct from :class:`~src.interfaces.gtowizard.protocol.ProtocolError`: the
-    payload was well formed, but it describes a table this blueprint was not
-    trained for. The caller's only sane response is a safe default, so the
-    reason has to survive as a sentence rather than as a None.
-    """
-
-
-@dataclass(frozen=True)
-class TableScale:
-    """Chips at their table per one chip of ours, fixed for a game.
-
-    Our tree is cut for a stack depth in big blinds, not for a chip
-    denomination, so a table is playable exactly when its blinds are a whole
-    multiple of ours and its stack is then our stack. ``factor`` is that
-    multiple -- 50 for their 50/100 against our 1/2.
-    """
-
-    factor: int
-    their_depth: float
-    our_depth: float
-
-    @property
-    def depth_matches(self) -> bool:
-        """True when their starting stack is our trained depth, to the chip."""
-        return abs(self.their_depth - self.our_depth) < 1e-9
-
-    def to_ours(self, chips: int) -> int:
-        """Their chips into ours, rounded to nearest -- a label, never a wager."""
-        return (chips + self.factor // 2) // self.factor
-
-    def to_theirs(self, chips: int) -> int:
-        """Our chips into theirs. Exact; ``factor`` is an integer by construction."""
-        return chips * self.factor
-
-
-def table_scale(game: Game, blueprint: ScorableBlueprint) -> TableScale:
-    """How their chips map onto the blueprint's, or why they do not.
-
-    Refuses rather than approximates. A blind ratio that is not a whole number
-    would put every bet size between two of our tree's rungs, and a depth we did
-    not train is a different game -- both are worth a forfeited run far less
-    than they are worth a line saying which one happened. Their game is 200 bb, so
-    a 100 bb arm is refused here and a 200 bb one passes to the chip.
-    """
-    ours = blueprint.config.game
-    if game.big_blind % ours.big_blind or game.small_blind % ours.small_blind:
-        raise AdapterError(
-            f"Table blinds {game.small_blind}/{game.big_blind} are not a whole "
-            f"multiple of the blueprint's {ours.small_blind}/{ours.big_blind}."
-        )
-    factor = game.big_blind // ours.big_blind
-    if game.small_blind // ours.small_blind != factor:
-        raise AdapterError(
-            f"Table blinds {game.small_blind}/{game.big_blind} scale unevenly "
-            f"against the blueprint's {ours.small_blind}/{ours.big_blind}."
-        )
-    return TableScale(
-        factor=factor,
-        their_depth=game.depth_in_blinds,
-        our_depth=ours.starting_stack / ours.big_blind,
-    )
-
-
-def opponent_hole_cards(dead: tuple[Card, ...]) -> tuple[Card, Card]:
-    """Two cards outside ``dead``, standing in for a holding we cannot see.
-
-    The opponent's cards do not enter our own bucket or our infoset key, so any
-    two will do -- but a collision with the board or our hand would build a
-    state that cannot exist, and bucketing would then be asked about it.
-    """
-    masks = {card.mask for card in dead}
-    free = [card for card in FULL_DECK if card.mask not in masks]
-    if len(free) < 2:
-        raise AdapterError("Too few cards left to stand in for the opponent's hand.")
-    return (free[0], free[1])
 
 
 @dataclass(frozen=True)
@@ -191,7 +117,7 @@ def reconstruct(blueprint: ScorableBlueprint, frame: Frame, scale: TableScale) -
                 truncated = True
                 break
             observed, snapped = _observed_action(token, wagers, state, scale, legal)
-            chosen = _on_tree(observed, state, action_model, rules, legal)
+            chosen = on_tree(observed, state, action_model, rules, legal)
             off_tree += int(snapped or chosen != observed)
             state = state.apply_action(chosen, rules)
             wagers[actor] = _wager_after(token, wagers, actor)
@@ -251,54 +177,7 @@ def _observed_action(
     if not token.startswith(BET) or not token[1:].isdigit():
         raise ProtocolError(f"'{token}' is not an action a seat can take.")
 
-    high = max(wagers)
-    increment = scale.to_ours(int(token[1:])) - scale.to_ours(high)
-    if increment <= 0:
-        # Their raise rounds to no increment in our coarser chips: it is a call
-        # as far as our tree can tell.
-        return Action(ActionType.CALL), True
-    kind = ActionType.BET if high == 0 else ActionType.RAISE
-    amount = increment if kind is ActionType.RAISE else scale.to_ours(int(token[1:]))
-    # What the actor must actually part with: a RAISE's amount sits ON TOP of
-    # the call, so comparing the bare amount to the stack would miss a shove by
-    # exactly `to_call` and hand the translator an action nobody can afford.
-    stack = state.stacks[state.current_player]
-    committed = state.to_call + amount if kind is ActionType.RAISE else amount
-    if committed >= stack:
-        return Action(ActionType.ALL_IN, stack), True
-    if not any(action.type is kind for action in legal):
-        # The tree does not offer this shape here (a raise cap, typically). Fall
-        # back to the most aggressive thing it does offer.
-        return _most_aggressive(legal), True
-    return Action(kind, amount), False
-
-
-def _on_tree(
-    observed: Action,
-    state: GameState,
-    action_model: ActionModel,
-    rules: GameRules,
-    legal: tuple[Action, ...],
-) -> Action:
-    """``observed`` if the tree offers it, else the likeliest legal stand-in."""
-    if observed in legal:
-        return observed
-    distribution = translate_action_distribution(state, observed, action_model, rules)
-    if not distribution:
-        return _most_aggressive(legal)
-    return max(distribution, key=lambda pair: pair[1])[0]
-
-
-def _most_aggressive(legal: tuple[Action, ...]) -> Action:
-    """The biggest commitment on offer -- the last resort when a size is unreachable."""
-    aggressive = [action for action in legal if action.is_aggressive()]
-    if aggressive:
-        return max(aggressive, key=lambda action: action.amount)
-    for kind in (ActionType.CALL, ActionType.CHECK, ActionType.FOLD):
-        for action in legal:
-            if action.type is kind:
-                return action
-    return legal[0]
+    return their_raise(int(token[1:]), max(wagers), state, scale, legal)
 
 
 def round_wagers(turn: Turn, game: Game) -> list[int]:

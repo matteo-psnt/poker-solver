@@ -17,13 +17,15 @@ import pytest
 from src.core.game.actions import Action, ActionType
 from src.core.game.state import Street
 from src.interfaces.chipzen.adapter import (
-    AdapterError,
-    opponent_hole_cards,
     reconstruct,
-    table_scale,
     wire_action,
 )
 from src.interfaces.chipzen.protocol import GameConfig, ProtocolError, TurnState
+from src.interfaces.table import (
+    AdapterError,
+    opponent_hole_cards,
+    table_scale,
+)
 from tests.test_helpers import build_test_solver, build_trained_test_solver, make_test_config
 
 # The test blueprint plays 50/100 with 400 behind -- 4 big blinds. A Chipzen

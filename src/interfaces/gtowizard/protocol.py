@@ -10,7 +10,7 @@ worth restating because getting either wrong is silent:
   Roman_SL at +0.51 where the leaderboard has them at -9.76.
 
 Amounts are their chips throughout; converting to the units our tree was
-trained in belongs to :class:`~src.interfaces.gtowizard.adapter.TableScale`.
+trained in belongs to :class:`~src.interfaces.table.TableScale`.
 """
 
 from __future__ import annotations

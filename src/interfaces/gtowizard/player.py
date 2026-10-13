@@ -18,13 +18,15 @@ from typing import TYPE_CHECKING
 from src.core.game.actions import ActionType
 from src.interfaces.gtowizard.adapter import (
     Spot,
-    TableScale,
     reconstruct,
-    table_scale,
     wire_amount,
 )
 from src.interfaces.gtowizard.agents import Move
 from src.interfaces.gtowizard.protocol import BET, CALL, CHECK, FOLD
+from src.interfaces.table import (
+    TableScale,
+    table_scale,
+)
 
 if TYPE_CHECKING:
     from src.engine.solver.policy.source import ScorableBlueprint

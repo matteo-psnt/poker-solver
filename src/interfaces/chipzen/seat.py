@@ -36,14 +36,16 @@ from urllib.parse import urlsplit
 from src.interfaces.chipzen.adapter import (
     RAISE,
     Spot,
-    TableScale,
     reconstruct,
-    table_scale,
     wire_action,
 )
 from src.interfaces.chipzen.ladder import DepthLadder
 from src.interfaces.chipzen.protocol import GameConfig, ProtocolError, TurnState
 from src.interfaces.errors import CommandError
+from src.interfaces.table import (
+    TableScale,
+    table_scale,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
