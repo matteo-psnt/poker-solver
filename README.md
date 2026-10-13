@@ -5,7 +5,7 @@
 **A heads-up No-Limit Hold'em bot trained by counterfactual regret minimisation,<br>
 on an autoscaling Azure Batch pool. It plays live.**
 
-[![Play it](https://img.shields.io/badge/▶_play_the_bot-live-d42a2a?style=for-the-badge)](https://poker-blueprint.swedencentral.cloudapp.azure.com/)
+[![Play it](https://img.shields.io/badge/▶_play_the_bot-live-d42a2a?style=for-the-badge)](https://poker.matteopsnt.dev/)
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed_by-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
@@ -13,11 +13,11 @@ on an autoscaling Azure Batch pool. It plays live.**
 [![Azure Batch](https://img.shields.io/badge/runs_on-Azure_Batch-0078d4.svg?logo=microsoftazure&logoColor=white)](infra/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-<a href="https://poker-blueprint.swedencentral.cloudapp.azure.com/">
+<a href="https://poker.matteopsnt.dev/">
   <img src="docs/img/play.jpg" alt="The public play page: you against Blueprint on a 9♣ J♣ 8♠ flop" width="860">
 </a>
 
-**[Play it in your browser →](https://poker-blueprint.swedencentral.cloudapp.azure.com/)**
+**[Play it in your browser →](https://poker.matteopsnt.dev/)**
 
 </div>
 
@@ -27,7 +27,7 @@ on an autoscaling Azure Batch pool. It plays live.**
 
 | | Where | What is behind it |
 |---|---|---|
-| 🃏 **Play the bot** | [poker-blueprint.swedencentral.cloudapp.azure.com](https://poker-blueprint.swedencentral.cloudapp.azure.com/) | The deepest blueprint (100 bb), served by `blueprint-serve` behind Caddy. The public route redacts the strategy mix and the bot's mucked cards. |
+| 🃏 **Play the bot** | [poker.matteopsnt.dev](https://poker.matteopsnt.dev/) | The deepest blueprint (100 bb), served by `blueprint-serve` behind Caddy. The public route redacts the strategy mix and the bot's mucked cards. |
 | 🤖 **Ranked seat** | [chipzen.ai](https://chipzen.ai) | `chipzen-seat` plays a ladder of **eight blueprints trained at different stack depths (3 → 100 bb)**, around the clock on a systemd unit with a watchdog. |
 | 📊 **Console** | `just console` → `localhost:8765` | The operator's view of the pool, runs, tasks, blueprints and spend. It reads the record and is not public. |
 
