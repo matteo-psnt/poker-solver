@@ -6,7 +6,6 @@
 on an autoscaling Azure Batch pool. It plays live.**
 
 [![Play it](https://img.shields.io/badge/▶_play_the_bot-live-d42a2a?style=for-the-badge)](https://poker-blueprint.swedencentral.cloudapp.azure.com/)
-[![Chipzen](https://img.shields.io/badge/seated_on-chipzen.ai-1f9d6b?style=for-the-badge)](https://chipzen.ai)
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed_by-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
@@ -67,24 +66,11 @@ flowchart LR
   longer selects anything, because it rewards folding.
   [Methodology →](src/pipeline/evaluation/README.md)
 
-## What the experiments found
-
-Each result is a paired head-to-head chip match on duplicate deals, in
-milli-big-blinds per hand (mbb/hand, ± one standard error). It is measured
-against a control that differs in that one change only.
-
-| Change | Result | vs |
-|---|---|---|
-| Retrain the depth ladder on the current recipe | **+9.5 → +152.4** mbb/hand, monotone over 7 depths (3 → 50 bb) | the previously fielded ladder |
-| New 100 bb rung (12,000 iterations, 14 workers) | **+26.0 ± 9.2** over 13 deal seeds | the previous 100 bb champion |
-| Purify the policy at serve time | **+57.6 to +91.4** at 100 bb, **+65 to +87** at 50 bb | the raw mixed strategy |
-| Train on 14 workers instead of 36 | **+193.9 ± 46** (4.2σ) | the same recipe on 36 workers |
-| Drop the best-response opponent (CFR-BR) | won **11 of 12** arm-seed matches (sign test p = 0.0063) | CFR-BR arms that scored *better* on exploitability |
-
-Most of these went *against* the exploitability bound, which is why the bound
-was retired as a selection metric.
-
 ## The console
+
+<img src="docs/img/console-blueprint.jpg" alt="Console Blueprint page: the 100 bb button's preflop strategy as a 13x13 hand grid">
+
+<sub><b>Blueprint</b>: the button's preflop strategy at 100 bb. Each cell is one starting hand, split into fold, call and raise in proportion to how often the blueprint plays each.</sub>
 
 <table>
 <tr>
@@ -97,55 +83,17 @@ was retired as a selection metric.
 </tr>
 </table>
 
-The console is a Vite + React app over a thin server. Each endpoint makes one
-`Command.invoke` call into the same commands as the CLI, so the two surfaces
-can never disagree.
-
 ## Quick start
 
 ```bash
 git clone https://github.com/matteo-psnt/poker-solver.git
 cd poker-solver
 uv sync --group dev
-uv run poker-solver --help
+just console        # build the web console and serve it on localhost:8765
 ```
 
-There are **two surfaces, split by who is asking.** `poker-solver` is the
-scriptable one: a cloud job, a shell or an agent drives it, and everything the
-project can do is one of its flag-driven subcommands. The web console is the
-one a human reads.
-
-```bash
-uv run poker-solver submit --config production --to 12000   # queue training on the pool
-uv run poker-solver jobs                                    # what is running
-uv run poker-solver score --run <id> --at 12000 \
-    --method blueprint_match --vs <champion> -- --deals 20000  # head-to-head gate
-uv run poker-solver ledger                                  # every evaluation, from the record
-
-just console        # build the console and serve it on :8765
-just console-dev    # Vite on :5173 with hot reload
-```
-
-**Real work runs in the cloud.** Training, precompute and evaluation all go to
-an Azure Batch pool that scales to zero (`just create` provisions it with
-Terraform). The laptop submits and reads. Iteration targets are **absolute**,
-so re-submitting the same target is a no-op, and
-`submit --run <id> --to <more>` continues a run on its recorded config.
-
-<details>
-<summary><b>Where things live</b></summary>
-
-There is no `data/` directory, and nothing recreates one.
-
-| What | Where |
-|---|---|
-| Checkpoint rungs and manifest | the `checkpoints` blob container |
-| Run, task and evaluation record | Postgres (`src/adapters/`) |
-| Logs and profiles | the `diagnostics` blob container |
-| Regenerable caches | `$POKER_SOLVER_CACHE`, else `$XDG_CACHE_HOME`, else `~/.cache/poker-solver` |
-| Training recipes | `config/training/*.yaml`, sparse overrides on `src/shared/config/schema.py` |
-
-</details>
+Training, precompute and evaluation run on an Azure Batch pool that scales to
+zero; `uv run poker-solver --help` lists everything the CLI can do.
 
 ## Architecture
 
@@ -164,17 +112,8 @@ config/           training and abstraction presets
 tests/            mirrors src/
 ```
 
-`interfaces → pipeline → engine → core` is a strict one-way layering.
-[import-linter](https://github.com/seddonym/import-linter) enforces it with
-eleven contracts, and [`.importlinter`](.importlinter) is the documentation.
-
-## Development
-
-```bash
-uv run pytest -m "not slow"           # fast gate (parallel via -n auto)
-uv run pytest                         # full suite
-uv run pre-commit run --all-files     # ruff, ty, import-linter, deptry, vulture
-```
+`interfaces → pipeline → engine → core` is a strict one-way layering, enforced
+by [import-linter](.importlinter).
 
 ## License
 
