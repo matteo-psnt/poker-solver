@@ -15,7 +15,10 @@
 # one, so a client cannot claim either. A bare 404 for everything else, so a
 # scanner still learns nothing about the private surface -- though `/` itself
 # now answers, which is the point.
-__HOST__ {
+#
+# poker.matteopsnt.dev is a CNAME to the Azure name: the link that gets posted.
+# Caddy fetches its certificate itself, so the CNAME must resolve before a reload.
+__HOST__, poker.matteopsnt.dev {
 	encode gzip
 	@authorized header_regexp auth Authorization ^Bearer\s+__TOKEN__$
 	@public path / /api/run /api/play /api/play/*
