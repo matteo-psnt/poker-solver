@@ -1,0 +1,69 @@
+# The production recipe: what `submit --config production` trains, and what the
+# blueprint box fields. Every value here is a MEASURED choice; the defaults for
+# everything else live in `src/shared/config/schema.py`.
+#
+# Trainer: public chance sampling, NO best-response opponent, over four runouts
+# sharing a flop and a turn. R=8 is worse than R=4.
+#
+# `cfr_br` WAS `river`, because a river-legal responder won the exact-BR gate
+# (748.6 mbb thresholded). That gate was measuring folding. Measured 09-21/24:
+#
+#  - CFR-BR causes the abdication. It folds the SB first-in 65-80%; off, the same
+#    recipe folds 10.1%, and real heads-up folds 10-20%.
+#  - The 2.51x exploitability advantage is a REACH ARTEFACT. At matched rung
+#    4,000 the preflop loss is FLAT (694 vs 757 mbb) and the entire difference is
+#    postflop (106 vs 1,252), because a strategy that folds never reaches its own
+#    postflop. The postflop was never solved; it was hidden.
+#  - On CHIPS, which folding cannot win, the playing arms beat the CFR-BR arms in
+#    11 of 12 arm-seed matches over 20,000 duplicate deals (sign test p=0.0063).
+#  - Exploitability is INVERTED on this ladder: rung 4,000 beats rung 1,200 of one
+#    run by +81.9 ± 27.5 mbb/hand (2.98σ) while scoring 20% WORSE on the bound.
+#
+# So the bound is retired as a selection criterion here. Gate a change on
+# `score --method blueprint_match` against the fielded champion, and read the SB
+# first-in fold rate as a shape check. `.claude/rules/solver-and-evaluation.md`
+# carries the three-gate rule.
+
+solver:
+  iteration_weighting: dcfr
+
+pcs:
+  # Quoted: bare `off` is a BOOLEAN in YAML and this field is a string literal.
+  cfr_br: "off"
+  runout_mode: turn
+  runouts_per_flop: 4
+
+action_model:
+  preflop_templates:
+    # 1.5 / 2.0 are opens to 2bb / 2.5bb: 20k of the 37k opponent actions the
+    # live seat had to snap (09-29..10-08 journal) were these two opens.
+    sb_first_in: ["fold", "call", 1.5, 2.0, 2.5, 3.5, 5.0]
+    # Sizes are chips committed by this action in bb: the BB's 2.0 / 3.0 over
+    # a limp are raises to 3bb / 4bb total.
+    bb_vs_limp: ["check", 2.0, 3.0]
+    sb_vs_limp_raise: ["fold", "call", "2.3x_last", "jam"]
+    bb_vs_open: ["fold", "call", "3.5x_open", "4.5x_open"]
+    sb_vs_3bet: ["fold", "call", "2.3x_last", "jam"]
+  postflop_templates:
+    first_aggressive: [0.33, 0.66, 1.25]
+    facing_bet: ["min_raise", "pot_raise", "jam"]
+    after_one_raise: ["pot_raise", "jam"]
+    after_two_raises: ["jam"]
+
+resolver:
+  max_raises_per_street: 5
+
+card_abstraction:
+  config: production
+
+training:
+  num_iterations: 1000000
+
+storage:
+  # Spare one checkpoint per 10M iterations from pruning, so a run ends holding a
+  # ladder (10M, 20M, ...) instead of only its final snapshot -- this is what makes
+  # a within-run exploitability-vs-iterations curve possible (`evaluate --at N`).
+  checkpoint_retain_every: 10000000
+
+system:
+  config_name: "production_opens"

@@ -305,48 +305,30 @@ fi
 # A DEFAULT rather than a refusal on purpose: a deploy that fails is noticed, but
 # a deploy that half-works is what actually happened, and the safe half is the
 # ladder staying up.
-# REPLACED 09-29. The 08-31 ladder was trained to the config of the 940.1-mbb
-# exact-BR gate arm -- cfr_br=river + linplus + runouts_per_flop=1 -- i.e. chosen by
-# the instrument since shown to be a fold-meter. Its 50 bb rung folds the SB first-in
-# **61.7%**, which `--policy-profile` itself calls ">50% NOT A CANDIDATE", and carries
-# only 68.1 mbb of postflop against 566.5 preflop because it rarely reaches its own
-# postflop. chipzen sat EVEN for a month with it: 48.5% over 99 matches.
+# REPLACED 10-14 by the `production_opens` ladder: the same recipe with SB opens to
+# 1.5/2.0bb on the first-in menu (sb_first_in fold, call, 1.5, 2.0, 2.5, 3.5, 5.0),
+# because live opponents open to 2-2.5bb most and the old tree read each as a 3bb
+# open. Each rung played the one it replaces, the old side TRANSLATING as the seat
+# does, 20,000 deals x 3 seeds (6 at d100), edge for the opens rung:
 #
-# These are the same depths on the CURRENT recipe (cfr_br off, dcfr beta=0,
-# runouts_per_flop=4) at 14 workers, 12,000 rungs, seed 7. Each beat the rung it
-# replaces on CHIPS over 20,000 duplicate deals, and the edge is MONOTONE in depth --
-# which is why this is a result and not seven coin flips against a ~+53 null:
+#   d100 +115.8+/-17   d50 +97+/-14   d35 +81+/-18   d25 +45+/-10
+#   d15 +9+/-6   d10 +3+/-4   d06 0+/-2   d03 +70+/-3   (mbb/hand)
 #
-#   d03 +9.5+/-3   d06 +25.3+/-7   d10 +59.0+/-13   d15 +104.2+/-18
-#   d25 +109.0+/-22   d35 +115.4+/-25   d50 +152.4+/-31   (mbb/hand)
+# The whole ladder against the old one in elimination, 25,000 duplicate pairs: 50.9%
+# at x1.5 blinds and 51.4% at x1.25 (each +/-0.2%); d100 swapped alone, 50.3%/50.6%.
+# Thresholds are the old rungs', unchanged.
 #
-# The four deepest are matched 12,000-vs-12,000, single-knob on the recipe. 69% of
-# hands are played at 45+ bb, so d50/d35 carry the gain and d03 is a rounding error.
-#
-# TO REVERT: the 08-31 ladder was
-#   d50 run-pcs-production-to12k-d50-long-s7-161947-15074:12000:0.20
-#   d35 run-pcs-production-to12k-d35-long-s7-161938-11549:12000:0.20
-#   d25 run-pcs-production-to12k-d25-long-s7-102205-23109:12000:0.20
-#   d15 run-pcs-production-to4k-d15-cfrbr-s7-082749-388:4000:0.20
-#   d10 run-pcs-production-to4k-d10-cfrbr-s7-082804-23297:4000:0.20
-#   d06 run-pcs-production-to4k-d06-cfrbr-s7-082811-16288:4000:0.20
-#   d03 run-pcs-production-to4k-d03-cfrbr-s7-095309-24766:4000:0.20
-#
-# Serving thresholds, MEASURED 09-29 (the 08-31 values were tuned against strategies
-# that fold 62%, so they had to be re-read on ranges that actually PLAY). Purification
-# wins at every depth -- ten of ten self-match arms positive, and confirmed against a
-# DIFFERENT opponent at three depths with the raw-vs-raw pairing as the control -- and
-# the optimum RISES WITH DEPTH: the peak is 0.20 at 25 bb, 0.35 at 50 bb and 0.50 at
-# 100 bb. d50 takes 0.35 (+86.5 mbb/hand over the raw control against the old rung,
-# against +68.3 at 0.20); the shallower rungs keep the 0.20 that every arm confirmed.
-# 0.35 and 0.50 are UNMEASURED below 50 bb, which is the next sweep.
-DEFAULT_RUNGS="run-pcs-production-to12k-d50-040438-26625:12000:0.35,\
-run-pcs-production-to12k-d35-040443-23758:12000:0.20,\
-run-pcs-production-to12k-d25-040447-19378:12000:0.20,\
-run-pcs-production-to12k-d15-041035-5670:12000:0.20,\
-run-pcs-production-to12k-d10-041039-12284:12000:0.20,\
-run-pcs-production-to12k-d06-041042-19674:12000:0.20,\
-run-pcs-production-to12k-d03-041046-2454:12000:0.20"
+# TO REVERT: the 10-08 ladder was the base run-pcs-production-to12k-d100-041050-3512
+# (12000, 0.35) and run-pcs-production-to12k-{d50-040438-26625 (0.35),
+# d35-040443-23758, d25-040447-19378, d15-041035-5670, d10-041039-12284,
+# d06-041042-19674, d03-041046-2454}:12000:0.20.
+DEFAULT_RUNGS="run-pcs-production_opens-to12k-d50-145211-17367:12000:0.35,\
+run-pcs-production_opens-to12k-d35-145220-21331:12000:0.20,\
+run-pcs-production_opens-to12k-d25-145224-6826:12000:0.20,\
+run-pcs-production_opens-to12k-d15-145228-12723:12000:0.20,\
+run-pcs-production_opens-to12k-d10-145232-1181:12000:0.20,\
+run-pcs-production_opens-to12k-d06-145235-565:12000:0.20,\
+run-pcs-production_opens-to12k-d03-145240-32111:12000:0.20"
 if [ -z "${RUNGS:-}" ]; then
     RUNGS="$DEFAULT_RUNGS"
     echo "==> no rungs given; fielding the default 8-rung ladder"
