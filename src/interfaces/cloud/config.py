@@ -47,6 +47,12 @@ RECORD_DSN_ENV = "POKER_SOLVER_RECORD_DSN"
 BLUEPRINT_URL_ENV = "POKER_SOLVER_BLUEPRINT_URL"
 BLUEPRINT_TOKEN_ENV = "POKER_SOLVER_BLUEPRINT_TOKEN"
 
+# Where a machine with no Terraform finds the outputs instead: one
+# `<root>.json` per state, `/` spelled `-` (`infra-store.json`), in the shape
+# `terraform output -json` prints. The serving box's read-only console is that
+# machine; `deploy.sh` writes the files, without the store's access key.
+OUTPUTS_DIR_ENV = "POKER_SOLVER_OUTPUTS_DIR"
+
 # Guards the cold-cache computation in `_outputs`, not the cache itself.
 _OUTPUTS_LOCK = threading.Lock()
 
@@ -97,12 +103,26 @@ def _outputs(chdir: str) -> dict[str, Any]:
 def _read_outputs(chdir: str) -> dict[str, Any]:
     """The per-process read: the on-disk copy if it is fresh, else terraform.
     Keyed by ``str`` rather than ``Path`` so the cache is hashable and stable."""
+    rendered = os.environ.get(OUTPUTS_DIR_ENV, "").strip()
+    if rendered:
+        return _rendered_outputs(Path(rendered), chdir)
     stored = cache.cached_json(OUTPUTS_CACHE, chdir, OUTPUTS_TTL_SECONDS)
     if stored is not None:
         return stored
     parsed = _terraform_output(chdir)
     cache.store_json(OUTPUTS_CACHE, chdir, parsed)
     return parsed
+
+
+def _rendered_outputs(directory: Path, chdir: str) -> dict[str, Any]:
+    """The outputs a deploy wrote down, for a machine that cannot ask Terraform."""
+    path = directory / f"{chdir.replace('/', '-')}.json"
+    if not path.is_file():
+        raise CloudConfigError(
+            f"No rendered outputs at {path}. ${OUTPUTS_DIR_ENV} points here, so "
+            "Terraform is not consulted; `just serve-deploy` writes these files."
+        )
+    return cast("dict[str, Any]", json.loads(path.read_text()))
 
 
 def _terraform_output(chdir: str) -> dict[str, Any]:
@@ -249,7 +269,7 @@ class CloudConfig:
             pool_mem_id=_optional_value(str(INFRA_DIR), "pool_mem_id"),
             storage_account=_value(str(STORE_DIR), "storage_account"),
             share_name=_value(str(STORE_DIR), "share_name"),
-            share_key=_value(str(STORE_DIR), "access_key"),
+            share_key=_optional_value(str(STORE_DIR), "access_key"),
             code_container=_value(str(STORE_DIR), "code_container_name"),
             hourly_cost=_value(str(INFRA_DIR), "hourly_cost"),
             pool_big_hourly_cost=_optional_value(str(INFRA_DIR), "pool_big_hourly_cost"),
@@ -257,3 +277,14 @@ class CloudConfig:
             pool_mem_hourly_cost=_optional_value(str(INFRA_DIR), "pool_mem_hourly_cost"),
             subscription_id=_value(str(INFRA_DIR), "subscription_id"),
         )
+
+    @property
+    def blob_credential(self) -> Any:
+        """What a READ of the store authenticates with: the account key where
+        one is known, else the caller's own identity -- the serving box, which
+        holds only Storage Blob Data Reader. Signing a SAS still needs the key."""
+        if self.share_key:
+            return self.share_key
+        from src.interfaces.cloud import credential  # noqa: PLC0415 -- only on the box
+
+        return credential.shared()

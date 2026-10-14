@@ -579,9 +579,58 @@ else
     echo "==> caddy: no API_TOKEN/PUBLIC_HOST passed, config left as it is"
 fi
 
+# --------------------------------------------------------------------------- #
+# the read-only console, on the tailnet
+# --------------------------------------------------------------------------- #
+# `poker-solver serve --read-only` on loopback, published to the tailnet ONLY by
+# `tailscale serve` -- no Caddy route, no NSG rule. It reads as this box's
+# identity (Batch and Cost Management Reader, Storage Blob Data Reader; see
+# main.tf) and from Terraform outputs rendered on the laptop WITHOUT the store's
+# access key or the DSN, which reaches it through its environment instead.
+if [ -n "${OUTPUTS_INFRA:-}" ] && [ -n "${OUTPUTS_STORE:-}" ]; then
+    outputs="$WORK/console/outputs"
+    mkdir -p "$outputs"
+    echo "$OUTPUTS_INFRA" | base64 -d > "$outputs/infra.json"
+    echo "$OUTPUTS_STORE" | base64 -d > "$outputs/infra-store.json"
+    env_file=$(mktemp)
+    {
+        echo "POKER_SOLVER_OUTPUTS_DIR=$outputs"
+        echo "POKER_SOLVER_RECORD_DSN=$RECORD_DSN"
+        echo "POKER_SOLVER_BLUEPRINT_URL=http://127.0.0.1:8790"
+        echo "POKER_SOLVER_BLUEPRINT_TOKEN=${API_TOKEN:-}"
+    } > "$env_file"
+    sudo install -m 0600 -o solver -g solver "$env_file" /etc/console.env
+    rm -f "$env_file"
+    sudo cp "$WORK/code/infra/serve/console.service" /etc/systemd/system/
+    if ! command -v tailscale >/dev/null 2>&1; then
+        echo "==> installing tailscale"
+        curl -fsSL https://tailscale.com/install.sh | sudo sh >/dev/null
+    fi
+    # `serve` does not build the page and this box has no npm: the snapshot
+    # carries `console/dist` only if it was pushed from a tree that built it.
+    [ -f "$WORK/code/console/dist/index.html" ] || echo "==> console: this snapshot" \
+        "has no console/dist -- push one built with \`just console-build\`"
+    CONSOLE=1
+else
+    echo "==> console: no OUTPUTS_INFRA/OUTPUTS_STORE passed, left as it is"
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable blueprint
 sudo systemctl restart blueprint
+if [ -n "${CONSOLE:-}" ]; then
+    sudo systemctl enable console
+    sudo systemctl restart console
+    # Joining the tailnet is a login, so it is done once by hand; until then the
+    # console runs on loopback and nothing can reach it.
+    if sudo tailscale status >/dev/null 2>&1; then
+        sudo tailscale serve --bg --https=443 http://127.0.0.1:8765 >/dev/null
+        echo "==> console: https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')/ (tailnet only, read-only)"
+    else
+        echo "==> console: running on loopback; join the tailnet once with" \
+             "\`sudo tailscale up --hostname poker-console\` and re-deploy"
+    fi
+fi
 
 # A running seat imported the code it started with, so after the tree underneath
 # it is replaced its behaviour no longer matches what is on disk -- and checking

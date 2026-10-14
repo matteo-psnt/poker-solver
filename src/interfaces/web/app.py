@@ -287,8 +287,11 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
 
 
-def create_app() -> FastAPI:
+def create_app(*, read_only: bool = False) -> FastAPI:
     """Build the application, with a memo of its own.
+
+    ``read_only`` leaves out every write (:func:`_mount_writes`) and says so on
+    the Now view, for the copy served off the laptop.
 
     A function rather than a module-level app, so a test gets a genuinely fresh
     one: the cache is built here and closed over, so nothing survives between
@@ -357,10 +360,6 @@ def create_app() -> FastAPI:
     def _profiles() -> JSONResponse:
         return answer(cache, profile.COMMAND, list=True)
 
-    @app.post("/api/tasks/{task_id}/profile", response_model=contract.Profile, responses=ERRORS)
-    def _profile(task_id: str, seconds: int = 30) -> JSONResponse:
-        return uncached(profile.COMMAND, task=task_id, seconds=seconds, no_wait=True)
-
     # A local directory read, and the only endpoint here that touches neither
     # Azure nor the share. It is what makes the dispatch form offerable at all:
     # `submit --config` names a stem, and a surface that cannot enumerate them
@@ -373,44 +372,8 @@ def create_app() -> FastAPI:
     def _autoscale() -> JSONResponse:
         return answer(cache, autoscale_check.COMMAND)
 
-    # THE FIRST WRITE THAT IS NOT ABOUT THE CONSOLE'S OWN BOX.
-    #
-    # Still one `Command.invoke`, and that rule matters MORE for a write than a
-    # read: the moment a button does something `poker-solver` cannot, the console
-    # has behaviour that is neither scriptable nor reproducible, which is exactly
-    # what the previous browser UI died of. So there is no "cancel all", no
-    # retry-then-cancel -- if a composite is wanted, it becomes a command first
-    # and a button second.
-    @app.post(
-        "/api/tasks/{job_id}/{task_id}/cancel", response_model=contract.Cancelled, responses=ERRORS
-    )
-    def _cancel(job_id: str, task_id: str) -> JSONResponse:
-        return uncached(cancel.COMMAND, job=job_id, task=task_id)
-
-    # `uncached`, every one: see its docstring for why a dispatch must not be
-    # made to look idempotent.
-
-    @app.post("/api/submit", response_model=contract.SubmitPayload, responses=ERRORS)
-    def _submit(body: SubmitBody) -> JSONResponse:
-        return uncached(submit.COMMAND, **given(body))
-
-    @app.post("/api/score", response_model=contract.ScorePayload, responses=ERRORS)
-    def _score(body: ScoreBody) -> JSONResponse:
-        return uncached(score.COMMAND, **given(body))
-
-    @app.post(
-        "/api/precompute", response_model=contract.PrecomputeDispatchPayload, responses=ERRORS
-    )
-    def _precompute(body: PrecomputeBody) -> JSONResponse:
-        return uncached(submit_precompute.COMMAND, **given(body))
-
-    # `push-code` reads a tree on the machine RUNNING THIS SERVER, which is the
-    # one fact about it a browser hides. `--root` defaults to this checkout, so
-    # a console served from a different worktree publishes that worktree -- and
-    # the payload names what it sealed, which is what the page shows back.
-    @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
-    def _push_code(body: PushCodeBody) -> JSONResponse:
-        return uncached(push_code.COMMAND, **given(body))
+    if not read_only:
+        _mount_writes(app)
 
     # These three ARE commands, so they go through the same seam as the rest -- the
     # button and `poker-solver serve-box` are then the same code path, which is
@@ -471,9 +434,12 @@ def create_app() -> FastAPI:
             )
         )
 
+    def now(*, invoke: Invoke) -> dict[str, Any]:
+        return {**views.now(invoke=invoke), "read_only": read_only}
+
     @app.get("/api/view/now", response_model=contract.NowView, responses=ERRORS)
     def _view_now(fresh: bool = False) -> JSONResponse:
-        return view(views.now, fresh=fresh)
+        return view(now, fresh=fresh)
 
     @app.get("/api/view/runs", response_model=contract.RunsView, responses=ERRORS)
     def _view_runs(fresh: bool = False) -> JSONResponse:
@@ -490,6 +456,61 @@ def create_app() -> FastAPI:
 
     _mount_console(app)
     return app
+
+
+def create_read_only_app() -> FastAPI:
+    """The factory `serve --read-only` hands uvicorn, which passes no arguments."""
+    return create_app(read_only=True)
+
+
+def _mount_writes(app: FastAPI) -> None:
+    """Every endpoint that changes something: a dispatch, a cancel, a code push,
+    a profile request. Absent, not refused, from a read-only console -- a route
+    that is not registered cannot be reached by a bug in a guard.
+    """
+
+    @app.post("/api/tasks/{task_id}/profile", response_model=contract.Profile, responses=ERRORS)
+    def _profile(task_id: str, seconds: int = 30) -> JSONResponse:
+        return uncached(profile.COMMAND, task=task_id, seconds=seconds, no_wait=True)
+
+    # THE FIRST WRITE THAT IS NOT ABOUT THE CONSOLE'S OWN BOX.
+    #
+    # Still one `Command.invoke`, and that rule matters MORE for a write than a
+    # read: the moment a button does something `poker-solver` cannot, the console
+    # has behaviour that is neither scriptable nor reproducible, which is exactly
+    # what the previous browser UI died of. So there is no "cancel all", no
+    # retry-then-cancel -- if a composite is wanted, it becomes a command first
+    # and a button second.
+    @app.post(
+        "/api/tasks/{job_id}/{task_id}/cancel", response_model=contract.Cancelled, responses=ERRORS
+    )
+    def _cancel(job_id: str, task_id: str) -> JSONResponse:
+        return uncached(cancel.COMMAND, job=job_id, task=task_id)
+
+    # `uncached`, every one: see its docstring for why a dispatch must not be
+    # made to look idempotent.
+
+    @app.post("/api/submit", response_model=contract.SubmitPayload, responses=ERRORS)
+    def _submit(body: SubmitBody) -> JSONResponse:
+        return uncached(submit.COMMAND, **given(body))
+
+    @app.post("/api/score", response_model=contract.ScorePayload, responses=ERRORS)
+    def _score(body: ScoreBody) -> JSONResponse:
+        return uncached(score.COMMAND, **given(body))
+
+    @app.post(
+        "/api/precompute", response_model=contract.PrecomputeDispatchPayload, responses=ERRORS
+    )
+    def _precompute(body: PrecomputeBody) -> JSONResponse:
+        return uncached(submit_precompute.COMMAND, **given(body))
+
+    # `push-code` reads a tree on the machine RUNNING THIS SERVER, which is the
+    # one fact about it a browser hides. `--root` defaults to this checkout, so
+    # a console served from a different worktree publishes that worktree -- and
+    # the payload names what it sealed, which is what the page shows back.
+    @app.post("/api/push-code", response_model=contract.PushedCode, responses=ERRORS)
+    def _push_code(body: PushCodeBody) -> JSONResponse:
+        return uncached(push_code.COMMAND, **given(body))
 
 
 def _warn_if_stale(index: Path) -> None:

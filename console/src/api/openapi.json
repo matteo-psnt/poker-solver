@@ -1746,6 +1746,11 @@
           },
           "parts": {
             "$ref": "#/components/schemas/NowParts"
+          },
+          "read_only": {
+            "default": false,
+            "title": "Read Only",
+            "type": "boolean"
           }
         },
         "required": [

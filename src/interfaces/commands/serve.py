@@ -1,12 +1,11 @@
-"""The `serve` subcommand: run the console locally.
+"""The `serve` subcommand: run the console.
 
-Bound to the loopback interface and NOT configurable, because where this can run
-is already pinned by what it needs: a live ``az login`` for
-``AzureCliCredential``, ``terraform`` on PATH, and both state directories -- one
-of which holds the share's access key. There is no authentication here, so
-binding it anywhere reachable would publish an unauthenticated read interface to
-the experiment record. Making that a flag would make it a mistake someone can
-make.
+Bound to the loopback interface and NOT configurable. There is no
+authentication here, so binding it anywhere reachable would publish an
+unauthenticated interface to the experiment record; making that a flag would
+make it a mistake someone can make. The serving box runs a ``--read-only`` copy
+on loopback too, and `tailscale serve` is its only door: the tailnet is the
+authentication.
 """
 
 from __future__ import annotations
@@ -38,6 +37,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Reload on source changes. For working on the server itself; the "
         "console's own hot reload comes from `just console-dev`.",
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Leave out every endpoint that dispatches, cancels, pushes code or "
+        "profiles: the copy served off the laptop, to the tailnet.",
+    )
 
 
 class ServePayload(BaseModel):
@@ -56,12 +61,17 @@ class ServePayload(BaseModel):
     host: str
     port: int
     reload: bool = False
+    read_only: bool = False
 
 
 def run(args: argparse.Namespace) -> ServePayload:
     """Describe where the server WILL listen; :func:`render` starts it."""
     return ServePayload(
-        url=f"http://{HOST}:{args.port}", host=HOST, port=args.port, reload=args.reload
+        url=f"http://{HOST}:{args.port}",
+        host=HOST,
+        port=args.port,
+        reload=args.reload,
+        read_only=args.read_only,
     )
 
 
@@ -70,10 +80,13 @@ def render(payload: ServePayload) -> None:
     # would otherwise pay to import uvicorn and the whole FastAPI stack.
     import uvicorn  # noqa: PLC0415 -- see above
 
-    print(f"Console on {payload.url}   (Ctrl-C to stop)")
+    factory = "create_read_only_app" if payload.read_only else "create_app"
+    print(
+        f"Console on {payload.url}{'  read-only' if payload.read_only else ''}   (Ctrl-C to stop)"
+    )
     try:
         uvicorn.run(
-            "src.interfaces.web.app:create_app",
+            f"src.interfaces.web.app:{factory}",
             factory=True,
             host=payload.host,
             port=payload.port,

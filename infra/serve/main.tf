@@ -446,6 +446,29 @@ resource "azurerm_role_assignment" "read_code_snapshots" {
   principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
 }
 
+# The read-only console on this box (`console.service`, reached over the
+# tailnet) reads Batch, the store and the bill as this identity -- read roles
+# only, so the console's own read-only switch is not the only thing between a
+# browser and a dispatch.
+data "azurerm_batch_account" "main" {
+  name                = var.batch_account_name
+  resource_group_name = var.batch_resource_group
+}
+
+data "azurerm_subscription" "current" {}
+
+resource "azurerm_role_assignment" "console_reads_batch" {
+  scope                = data.azurerm_batch_account.main.id
+  role_definition_name = "Azure Batch Account Reader"
+  principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "console_reads_cost" {
+  scope                = data.azurerm_subscription.current.id
+  role_definition_name = "Cost Management Reader"
+  principal_id         = azurerm_linux_virtual_machine.serve.identity[0].principal_id
+}
+
 resource "azurerm_managed_disk" "work" {
   name                 = "serve-work"
   location             = azurerm_resource_group.serve.location

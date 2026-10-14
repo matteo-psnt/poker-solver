@@ -280,7 +280,7 @@ def read_task_log(config: Any, task_id: str) -> str | None:
 
     service = BlobServiceClient(
         account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
+        credential=config.blob_credential,
     )
     try:
         blob = service.get_blob_client(DIAGNOSTICS, f"{task_id}.log")
@@ -301,7 +301,7 @@ def task_log_names(config: Any) -> list[str]:
 
     service = BlobServiceClient(
         account_url=f"https://{config.storage_account}.blob.core.windows.net",
-        credential=config.share_key,
+        credential=config.blob_credential,
     )
     return sorted(x.name for x in service.get_container_client(DIAGNOSTICS).list_blobs())
 
@@ -402,7 +402,7 @@ def _container(config: Any, name: str) -> Any:
 
         _CONTAINERS[key] = BlobServiceClient(
             account_url=f"https://{config.storage_account}.blob.core.windows.net",
-            credential=config.share_key,
+            credential=config.blob_credential,
         ).get_container_client(name)
     return _CONTAINERS[key]
 

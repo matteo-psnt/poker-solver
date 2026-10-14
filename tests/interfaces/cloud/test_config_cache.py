@@ -81,3 +81,25 @@ def test_a_failed_read_is_not_cached(terraform, monkeypatch):
 
 def terraform_run_ok(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(command, 0, stdout='{"pool_id": {"value": "ok"}}')
+
+
+def test_a_rendered_directory_replaces_terraform(terraform, monkeypatch, tmp_path):
+    """The serving box has no Terraform: a deploy writes the outputs down instead."""
+    rendered = tmp_path / "outputs"
+    rendered.mkdir()
+    (rendered / "infra-store.json").write_text(json.dumps({"share_name": {"value": "s"}}))
+    monkeypatch.setenv(cloud_config.OUTPUTS_DIR_ENV, str(rendered))
+    assert cloud_config._value("infra/store", "share_name") == "s"
+    with pytest.raises(cloud_config.CloudConfigError, match=r"infra\.json"):
+        cloud_config._value("infra", "pool_id")
+    assert terraform == []
+
+
+def test_a_store_read_without_the_key_is_the_callers_identity(monkeypatch):
+    from src.interfaces.cloud import credential
+
+    marker = object()
+    monkeypatch.setattr(credential, "shared", lambda: marker)
+    fields = dict.fromkeys(cloud_config.CloudConfig.__dataclass_fields__, "")
+    assert cloud_config.CloudConfig(**fields).blob_credential is marker
+    assert cloud_config.CloudConfig(**{**fields, "share_key": "k"}).blob_credential == "k"

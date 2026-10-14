@@ -1,0 +1,22 @@
+[Unit]
+Description=Read-only console (the laptop's `poker-solver serve`, reached over the tailnet)
+After=network-online.target mnt-work.mount blueprint.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=solver
+# Written by deploy.sh: the rendered Terraform outputs (no storage key), the
+# record DSN, and the local blueprint server's address and token.
+EnvironmentFile=/etc/console.env
+Environment=POKER_SOLVER_CACHE=/mnt/work/cache
+WorkingDirectory=/mnt/work/code
+# Loopback only, as on the laptop. `tailscale serve` is the one door in, so
+# nothing outside the tailnet can reach it; the public Caddy site never routes here.
+ExecStart=/home/solver/.local/bin/uv run poker-solver serve --read-only
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

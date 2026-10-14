@@ -1336,6 +1336,11 @@ export interface components {
             /** Op */
             op: string;
             parts: components["schemas"]["NowParts"];
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only: boolean;
         } & {
             [key: string]: unknown;
         };

@@ -163,6 +163,9 @@ class NowView(View):
     """What is happening right now, and did anything die."""
 
     parts: NowParts
+    read_only: bool = False
+    """The server carries no write endpoint, so the page offers none. On this
+    view because the shell polls it on every page."""
 
 
 class RunsParts(Payload):

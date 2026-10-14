@@ -358,3 +358,57 @@ class TestThePayloadEncodesLikeTheCLI:
         monkeypatch.setattr(Command, "invoke", _invoke)
         with pytest.raises(ValueError, match="Out of range float"):
             client.get("/api/pool")
+
+
+def _routes(app: Any) -> set[tuple[str, str]]:
+    return {
+        (method, route.path)
+        for route in app.routes
+        for method in getattr(route, "methods", None) or ()
+        if method != "HEAD"
+    }
+
+
+class TestTheReadOnlyConsole:
+    """The copy served to the tailnet carries the reads and nothing that acts."""
+
+    WRITES = frozenset(
+        {
+            ("POST", "/api/tasks/{task_id}/profile"),
+            ("POST", "/api/tasks/{job_id}/{task_id}/cancel"),
+            ("POST", "/api/submit"),
+            ("POST", "/api/score"),
+            ("POST", "/api/precompute"),
+            ("POST", "/api/push-code"),
+        }
+    )
+    # Play is a hand against the served blueprint -- the public play page's own
+    # surface -- and changes nothing in the record or the cloud.
+    PLAY = frozenset(
+        {
+            ("POST", "/api/blueprint/play"),
+            ("POST", "/api/blueprint/play/{session_id}/action"),
+            ("DELETE", "/api/blueprint/play/{session_id}"),
+        }
+    )
+
+    def test_it_lacks_exactly_the_writes(self) -> None:
+        full = _routes(web_app.create_app())
+        read_only = _routes(web_app.create_read_only_app())
+        assert full - read_only == self.WRITES
+
+    def test_nothing_but_play_answers_a_non_get(self) -> None:
+        read_only = _routes(web_app.create_read_only_app())
+        assert {route for route in read_only if route[0] != "GET"} == self.PLAY
+
+    def test_a_write_is_not_found_rather_than_served_the_page(self) -> None:
+        client = TestClient(web_app.create_read_only_app())
+        assert client.post("/api/submit", json={}).status_code in {404, 405}
+
+    def test_the_now_view_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(web_app.views, "now", lambda *, invoke: {"op": "view-now"})
+        for app, expected in (
+            (web_app.create_app(), False),
+            (web_app.create_read_only_app(), True),
+        ):
+            assert TestClient(app).get("/api/view/now").json()["read_only"] is expected

@@ -1,6 +1,6 @@
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { useCancelTask, useTasks } from "@/api/queries";
+import { useCancelTask, useNow, useTasks } from "@/api/queries";
 import type { TaskRow } from "@/api/types";
 import { Confirm } from "@/components/Confirm";
 import { Panel } from "@/components/Panel";
@@ -46,6 +46,9 @@ export function Tasks() {
 
   const hidden = tasks.data?.hidden_rows ?? 0;
   const cancel = useCancelTask();
+  // The tailnet copy has no cancel endpoint. Hidden until the view says
+  // otherwise, so a button never shows for a click that cannot land.
+  const readOnly = useNow().data?.read_only ?? true;
   const rows = useMemo(() => {
     const all = [...(tasks.data?.rows ?? [])].reverse();
     return cause ? all.filter((r) => r.cause === cause) : all;
@@ -196,7 +199,7 @@ export function Tasks() {
                       to cancel, and a button that is present-but-useless on
                       every historical row makes the live ones harder to find. */}
                   <Td right>
-                    {inFlight(row) && (
+                    {inFlight(row) && !readOnly && (
                       <Confirm
                         label="cancel"
                         confirmLabel="really?"

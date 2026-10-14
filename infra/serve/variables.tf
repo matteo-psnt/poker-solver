@@ -127,3 +127,14 @@ variable "share_name" {
   type    = string
   default = "poker-data"
 }
+
+variable "batch_account_name" {
+  description = "The Batch account the console reads. Must match infra/'s output."
+  type        = string
+  default     = "pokerbatchus31321"
+}
+
+variable "batch_resource_group" {
+  type    = string
+  default = "poker-batch-rg"
+}

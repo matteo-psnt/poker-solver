@@ -130,7 +130,10 @@ serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="" resolver="
         "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} \
          RESOLVER_OFF_TREE={{offtree}} EXTRA_RUNS={{extra}} \
          RESOLVER={{resolver}} API_TOKEN=$({{tfv}} output -raw api_token) \
-         PUBLIC_HOST=$({{tfv}} output -raw url | sed 's|^https://||') bash -s" \
+         PUBLIC_HOST=$({{tfv}} output -raw url | sed 's|^https://||') \
+         OUTPUTS_INFRA=$(terraform -chdir=infra output -json | base64 | tr -d '\n') \
+         OUTPUTS_STORE=$({{tfs}} output -json | jq -c 'del(.access_key, .postgres_dsn)' | base64 | tr -d '\n') \
+         bash -s" \
         -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
            "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 
