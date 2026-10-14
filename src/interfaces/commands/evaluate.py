@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -596,6 +597,10 @@ def render(payload: services.EvaluationPayload) -> None:
         print("  reach-wtd is the TV below which half the TRAFFIC sits; a PURE row's")
         print("  drift is exactly 0, so read `pure` beside the drift, and read both")
         print("  beside the exploitability of the same rungs.")
+        if opening := results.get("opening"):
+            # One machine-readable line: a node's log is where a ladder of these
+            # is collected from, and the ledger keeps only the headline fields.
+            print(f"  opening: {json.dumps(opening, separators=(',', ':'))}")
         return
     if payload.method == "depth_duel":
         _render_depth_duel(payload.run_id, results)

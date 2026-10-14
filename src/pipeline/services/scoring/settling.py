@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.pipeline.blueprint.preflop import preflop_chart
 from src.pipeline.evaluation.estimators.settling import SettlingResult, measure_settling
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.services.scoring._shared import (
@@ -58,7 +59,7 @@ def evaluate_run_settling(
     _early_solver, early, _ = build_blueprint_for(
         run_dir, metadata, effective, from_iteration, play_only=True
     )
-    _late_solver, late, _ = build_blueprint_for(
+    late_solver, late, _ = build_blueprint_for(
         run_dir, metadata, effective, at_iteration, play_only=True
     )
     measured: SettlingResult = measure_settling(
@@ -71,6 +72,13 @@ def evaluate_run_settling(
     # The GAP is the tier: drift over 400 rungs and drift over 2,000 rungs are
     # not two readings of one thing, and the pair is what a curve is plotted on.
     results["rung_gap"] = at_iteration - from_iteration if at_iteration is not None else None
+    # The opening spot class by class, so a ladder of settle rows is also the
+    # trajectory of the one node a person reads -- 169 rows against 45M.
+    opening = preflop_chart(late_solver)
+    results["opening"] = {
+        "actions": list(opening.actions),
+        "classes": {label: list(row.strategy) for label, row in sorted(opening.classes.items())},
+    }
     return EvaluationOutput(
         infosets=late.num_infosets(),
         results=results,
