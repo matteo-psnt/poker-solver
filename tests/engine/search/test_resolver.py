@@ -567,6 +567,12 @@ class TestTheStreetGate:
 
         assert resolver._may_resolve(state) is True
 
+    def test_a_zero_blend_weight_never_resolves(self):
+        resolver, state = self._resolver("preflop")
+        resolver.config = resolver.config.model_copy(update={"policy_blend_alpha": 0.0})
+
+        assert resolver._may_resolve(state) is False
+
     def test_a_gated_act_still_returns_a_legal_action(self):
         """The blueprint answers below the gate, so play must not break there."""
         resolver, state = self._resolver("river")

@@ -315,7 +315,13 @@ class HUResolver:
         return actions[int(self.rng.choice(len(actions), p=distribution))]
 
     def _may_resolve(self, state: GameState) -> bool:
-        """Whether the resolver may act on this street at all."""
+        """Whether the resolver may act on this street at all.
+
+        A zero blend weight never resolves: the solve would be discarded, and at
+        ~1 s a decision it pushed a 20,000-deal translated match past 6 hours.
+        """
+        if self.config.policy_blend_alpha <= 0:
+            return False
         order = ("preflop", "flop", "turn", "river")
         return order.index(state.street.name.lower()) >= order.index(self.config.min_street)
 

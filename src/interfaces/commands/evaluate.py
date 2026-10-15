@@ -130,9 +130,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--resolver-blend-alpha",
         type=float,
         default=None,
-        help="[lbr] Override resolver.policy_blend_alpha: the weight the DEPLOYED row "
+        help="[lbr, blueprint_match] Override resolver.policy_blend_alpha: the weight the DEPLOYED row "
         "puts on the resolver, the rest going to the blueprint. 0 makes deployed play "
-        "exactly the blueprint, which is the control that attributes any gap to the "
+        "exactly the blueprint, with no solve run, which is the control that attributes any gap to the "
         "resolver row rather than to the lookup path around it.",
     )
     parser.add_argument(
