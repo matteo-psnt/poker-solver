@@ -59,7 +59,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--pool",
         choices=("train", "big", "huge", "mem"),
         default="train",
-        help="Which pool runs it: train (D16als, 32 GB), big (D32als, 64 GB), huge "
+        help="Which pool runs it: train (D16als, 32 GB), big (D32as, 128 GB), huge "
         "(D64als, 128 GB) or mem (E64ds, 512 GB). SCALAR is settled and BIGGER WINS: "
         "~60k it/s at D16/15w, ~115k at D32/31w, ~152k at D64/63w, a ratio that RISES "
         "with run length, at 0.88 efficiency per billed vCPU. PCS IS CLAMPED BY RAM, "

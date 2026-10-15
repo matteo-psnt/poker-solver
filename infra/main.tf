@@ -332,7 +332,7 @@ resource "azurerm_batch_account" "main" {
 # id as an argument -- a full stop must be run against ALL FOUR.
 #
 #   train       D16als_v6   the default; scoring and throwaway work
-#   train_big   D32als_v6   16 physical cores, ~2x a D16 per the worker curve
+#   train_big   D32as_v6    32 vCPU / 128 GB: seats PCS's 14 workers at half a D64's price
 #   train_huge  D64als_v6   32 physical cores; the DRAM-latency-bound kernel
 #                           projects ~3x a D16 here, and the critical path lives on it
 #   train_mem   E64ds_v6    512 GB. The als_v6 pools are 2 GiB/vCPU, right for

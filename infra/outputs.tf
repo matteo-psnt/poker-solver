@@ -7,6 +7,7 @@ locals {
     "standard_d8als_v6"  = "$0.344/hr/node"
     "standard_d16als_v6" = "$0.688/hr/node"
     "standard_d32als_v6" = "$1.376/hr/node"
+    "standard_d32as_v6"  = "$1.552/hr/node"
     # 64 x the $0.043/vCPU-hr line the three measured SKUs all land on;
     # re-measure with `poker-solver cost` once the pool has billing history.
     "standard_d64als_v6" = "$2.752/hr/node"

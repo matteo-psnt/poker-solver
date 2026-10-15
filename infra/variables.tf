@@ -48,14 +48,14 @@ variable "pool_vm_size" {
 
 variable "pool_big_vm_size" {
   description = <<-EOT
-    SKU of the `train-big` pool. D32als_v6 = 16 physical cores x SMT at
-    $1.376/hr (the measured $0.043/vCPU-hr line). The worker curve on a D16
-    is linear per PHYSICAL core (08-23), so this box should ~2x a D16;
-    that claim is what the pool exists to test. D48/D64 additionally need
-    `allowed_vm_skus` extended.
+    SKU of the `train-big` pool. D32as_v6 = 32 vCPU / 128 GB at $1.552/hr:
+    PCS is clamped by RAM (~5 GB a worker on the opens tree), and 14 workers
+    is where it stops paying, so this is the smallest box that seats them --
+    a D32als (64 GB) seated 11. Measured 10-15: PCS time per rung tracks the
+    WORKER count, not the box (11 x 4.4 s = 14 x 3.5 s on the D64).
   EOT
   type        = string
-  default     = "Standard_D32als_v6"
+  default     = "Standard_D32as_v6"
 }
 
 variable "pool_big_max_nodes" {
@@ -256,6 +256,7 @@ variable "allowed_vm_skus" {
     "Standard_D8als_v6",
     "Standard_D16als_v6",
     "Standard_D32als_v6",
+    "Standard_D32as_v6",
     "Standard_D64als_v6",
     "Standard_E64ds_v6",
     "Standard_D16_v5",
