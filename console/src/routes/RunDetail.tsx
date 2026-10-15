@@ -99,6 +99,12 @@ export function RunDetail() {
 
       <div className="grid gap-3 xl:grid-cols-2">
         <ProgressPanel view={view} />
+        <RungGrid view={view} runId={runId} />
+      </div>
+
+      {/* Exploitability is retired as the criterion, but a run scored with it
+          still shows the curve. A run never scored that way shows nothing. */}
+      {curveData && curveData.points.length > 0 && (
         <Panel
           title="Exploitability"
           updatedAt={view.dataUpdatedAt}
@@ -140,7 +146,7 @@ export function RunDetail() {
             </Chart>
           )}
         </Panel>
-      </div>
+      )}
 
       <RunEvals view={view} />
       <RunTasks view={view} />
@@ -306,20 +312,18 @@ const num = (value: unknown) => (typeof value === "number" ? value : null);
  */
 function RunEvals({ view }: { view: RunViewQuery }) {
   const evals = view.data?.parts?.evals;
-  const rows = evals?.payload?.rows ?? [];
+  // Newest first: the ledger pages oldest-first, and the question on this
+  // page is what was measured lately.
+  const rows = [...(evals?.payload?.rows ?? [])].reverse();
 
   return (
     <Panel
-      title="Evaluations"
+      title={`Evaluations — ${rows.length}`}
       updatedAt={view.dataUpdatedAt}
       staleAfterMs={120_000}
       error={evals?.error ?? null}
       loading={view.isLoading}
-      empty={
-        evals?.payload && rows.length === 0
-          ? "Never scored. Older evaluations may be legacy files on the share that the rebuild skips."
-          : null
-      }
+      empty={evals?.payload && rows.length === 0 ? "Never scored." : null}
       onRefresh={() => view.refresh()}
       refreshing={view.isFetching}
     >
@@ -327,33 +331,185 @@ function RunEvals({ view }: { view: RunViewQuery }) {
         <Table>
           <thead>
             <tr>
-              <Th>scorer</Th>
-              <Th>opponent</Th>
+              <Th right>rung</Th>
+              <Th>method</Th>
+              <Th>against</Th>
               <Th right>seed</Th>
-              <Th right>hands</Th>
-              <Th right>mbb/g</Th>
-              <Th>commit</Th>
+              <Th right>result</Th>
+              <Th right>deals / hands</Th>
+              <Th right>when</Th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.run_id}-${index}`}>
-                <Td>{str(row.knobs?.scorer)}</Td>
-                <Td>{str(row.knobs?.opponent)}</Td>
-                <Td right className="text-[var(--fg-muted)]">
-                  {str(row.knobs?.base_seed)}
-                </Td>
-                <Td right>{str(row.results?.num_hands)}</Td>
-                <Td right>
-                  {mbb(num(row.results?.exploitability_mbb), num(row.results?.std_error_mbb))}
-                </Td>
-                <Td mono className="text-[var(--fg-faint)]">
-                  {row.eval_git_commit?.slice(0, 7) ?? "—"}
-                </Td>
-              </tr>
-            ))}
+            {rows.map((row, index) => {
+              const knobs = row.knobs ?? {};
+              const results = row.results ?? {};
+              const at = num(row.checkpoint_iteration);
+              return (
+                <tr key={`${str(row.task_id)}-${index}`}>
+                  <Td right className="tnum">
+                    {at == null ? "—" : count(at)}
+                  </Td>
+                  <Td>{str(row.method)}</Td>
+                  <Td mono className="text-[var(--fg-muted)]">
+                    {against(row.method, knobs)}
+                  </Td>
+                  <Td right className="text-[var(--fg-muted)]">
+                    {knobs.base_seed == null ? "—" : str(knobs.base_seed)}
+                  </Td>
+                  <Td right className="tnum">
+                    {result(results)}
+                  </Td>
+                  <Td right className="tnum text-[var(--fg-muted)]">
+                    {count(num(knobs.num_deals) ?? num(results.num_hands))}
+                  </Td>
+                  <Td right className="text-[var(--fg-faint)]" title={str(row.timestamp)}>
+                    {typeof row.timestamp === "string" ? since(row.timestamp) : "—"}
+                  </Td>
+                </tr>
+              );
+            })}
           </tbody>
         </Table>
+      )}
+    </Panel>
+  );
+}
+
+/** What a row was measured against: the other side of a match, the rung a settle read drifts from, the scorer of a bound. */
+function against(method: unknown, knobs: Record<string, unknown>): string {
+  if (typeof knobs.run_b === "string") {
+    const rung = num(knobs.rung_b);
+    return `${runLabel(knobs.run_b)}@${rung == null ? "?" : count(rung)}`;
+  }
+  if (method === "settle" && num(knobs.from_iteration) != null) {
+    return `drift from ${count(num(knobs.from_iteration))}`;
+  }
+  return knobs.scorer != null ? str(knobs.scorer) : "—";
+}
+
+/**
+ * The row's number in its own unit: a match's signed chip edge (mbb/hand), an
+ * elimination's win rate, or an exploitability (mbb/g). A settle row's drift
+ * lives in its payload, which the ledger does not carry.
+ */
+function result(results: Record<string, unknown>): string {
+  const edge = num(results.edge_mbb_per_hand);
+  if (edge != null) {
+    const se = num(results.edge_se_mbb);
+    return `${edge >= 0 ? "+" : "−"}${Math.abs(edge).toFixed(1)}${se == null ? "" : ` ± ${se.toFixed(1)}`} mbb/hand`;
+  }
+  const rate = num(results.a_win_rate);
+  if (rate != null) return `${percent(rate)} wins`;
+  const exploit = num(results.exploitability_mbb);
+  if (exploit != null) return `${mbb(exploit, num(results.std_error_mbb))} mbb/g`;
+  return "—";
+}
+
+/**
+ * The run's own rungs against each other, from the `gates` part: row rung A,
+ * column rung B, the cell A's pooled chip edge over B. This is what replaced the
+ * exploitability curve as the answer to "is more training still buying
+ * anything" -- green when A wins by more than two standard errors.
+ */
+function RungGrid({ view, runId }: { view: RunViewQuery; runId: string }) {
+  const part = view.data?.parts?.gates;
+  const own = (part?.payload?.gates ?? []).filter(
+    (g) => g.run_b === runId && g.b_side !== "deployed",
+  );
+  const rowsAt = [...new Set(own.map((g) => g.at ?? 0))].sort((a, b) => b - a);
+  const colsAt = [...new Set(own.map((g) => g.at_b ?? 0))].sort((a, b) => a - b);
+  const cell = (a: number, b: number) => own.find((g) => (g.at ?? 0) === a && (g.at_b ?? 0) === b);
+  const others = (part?.payload?.gates ?? []).filter((g) => !own.includes(g));
+
+  return (
+    <Panel
+      title="Rung against rung"
+      updatedAt={view.dataUpdatedAt}
+      staleAfterMs={120_000}
+      error={part?.error ?? null}
+      loading={view.isLoading}
+      empty={
+        part?.payload && own.length === 0 && others.length === 0
+          ? "No head-to-head matches recorded."
+          : null
+      }
+    >
+      {own.length > 0 && (
+        <div className="overflow-x-auto p-3">
+          <table className="text-[12px]">
+            <thead>
+              <tr>
+                <th className="px-2 py-1 text-left font-normal text-[11px] text-[var(--fg-faint)]">
+                  A ↓ vs B →
+                </th>
+                {colsAt.map((b) => (
+                  <th
+                    key={b}
+                    className="px-2 py-1 text-right font-normal font-mono text-[var(--fg-muted)]"
+                  >
+                    {count(b)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rowsAt.map((a) => (
+                <tr key={a}>
+                  <td className="px-2 py-1 font-mono text-[var(--fg-muted)]">{count(a)}</td>
+                  {colsAt.map((b) => {
+                    const g = cell(a, b);
+                    if (!g) return <td key={b} className="px-2 py-1" />;
+                    const win = g.edge_mbb - 2 * g.se_mbb > 0;
+                    const loss = g.edge_mbb + 2 * g.se_mbb < 0;
+                    return (
+                      <td
+                        key={b}
+                        className={cn(
+                          "tnum px-2 py-1 text-right",
+                          win
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : loss
+                              ? "bg-red-500/15 text-red-300"
+                              : "text-[var(--fg)]",
+                        )}
+                        title={`${count(a)} vs ${count(b)}: ${g.edge_mbb.toFixed(1)} ± ${g.se_mbb.toFixed(1)} mbb/hand over ${(g.seeds ?? []).length} seeds`}
+                      >
+                        {g.edge_mbb >= 0 ? "+" : "−"}
+                        {Math.abs(g.edge_mbb).toFixed(1)}
+                        <span className="ml-1 text-[10px] text-[var(--fg-faint)]">
+                          ±{g.se_mbb.toFixed(0)}·{(g.seeds ?? []).length}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 px-2 text-[11px] text-[var(--fg-faint)]">
+            mbb/hand for the row rung against the column rung, pooled over seeds (±SE · seeds).
+            Green or red: decided at 2 SE.
+          </p>
+        </div>
+      )}
+      {others.length > 0 && (
+        <div className="border-t border-[var(--border)] px-3 py-2 text-[12px]">
+          {others.map((g) => (
+            <div key={`${g.at}-${g.run_b}-${g.at_b}-${g.b_side}`} className="flex gap-3 py-0.5">
+              <span className="font-mono text-[var(--fg-muted)]">@{count(g.at)}</span>
+              <span className="font-mono">
+                vs {g.run_b ? runLabel(g.run_b) : "?"}@{count(g.at_b)}
+                {g.b_side === "deployed" ? " as deployed" : ""}
+              </span>
+              <span className={cn("tnum", g.edge_mbb >= 0 ? "text-emerald-400" : "text-[#E0655C]")}>
+                {g.edge_mbb >= 0 ? "+" : "−"}
+                {Math.abs(g.edge_mbb).toFixed(1)} ± {g.se_mbb.toFixed(1)}
+              </span>
+              <span className="text-[var(--fg-faint)]">{(g.seeds ?? []).length} seeds</span>
+            </div>
+          ))}
+        </div>
       )}
     </Panel>
   );

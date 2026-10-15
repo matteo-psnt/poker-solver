@@ -18,6 +18,7 @@ import {
   summarise,
 } from "@/lib/range";
 import { cn } from "@/lib/utils";
+import { DepthCompare } from "@/routes/DepthCompare";
 
 const route = getRouteApi("/blueprint");
 
@@ -206,6 +207,25 @@ export function Charts() {
           </div>
         ) : undefined}
       </Panel>
+
+      {grid && !pending && !node.data?.terminal && (
+        <DepthCompare
+          path={path}
+          board={board}
+          average={average}
+          depths={run.data?.depths ?? []}
+          bigBlind={bigBlind || 2}
+          combos={combos.data?.combos ?? null}
+          stack={stack}
+          hand={pinned?.label ?? "AA"}
+          onStack={(next) => set({ stack: next })}
+          onHand={(label) => {
+            for (const line of cells ?? []) {
+              for (const cell of line) if (cell.label === label) setHeld({ spot, cell });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

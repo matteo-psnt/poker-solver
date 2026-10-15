@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the six destinations", () => {
-  it.each(["/", "/runs", "/experiments", "/tasks", "/blueprint", "/cost"])(
+  it.each(["/", "/runs", "/results", "/experiments", "/tasks", "/blueprint", "/cost"])(
     "%s resolves to itself",
     async (path) => {
       expect((await at(path)).pathname).toBe(path);
@@ -70,10 +70,10 @@ describe("the paths that moved", () => {
     expect(await at("/operate")).toMatchObject({ pathname: "/cost" });
   });
 
-  it("sends the old evals list to the run list", async () => {
-    // The evaluations still exist; they are filed under the run that earned
-    // them, which is where the question "is THIS run any good" is asked.
-    expect((await at("/evals")).pathname).toBe("/runs");
+  it("sends the old evals list to the results page", async () => {
+    // Head-to-head gates are pooled on their own page now; a run's raw
+    // evaluations are still filed under the run that earned them.
+    expect((await at("/evals")).pathname).toBe("/results");
   });
 });
 

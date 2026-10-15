@@ -1090,6 +1090,242 @@
         "title": "Edge",
         "type": "object"
       },
+      "Gate": {
+        "description": "One pooled comparison. `edge_mbb` is A's chips per hand against B.",
+        "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arm"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "at_b": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At B"
+          },
+          "b_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B Side"
+          },
+          "deals_per_seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deals Per Seed"
+          },
+          "duplicates": {
+            "default": 0,
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "edge_mbb": {
+            "title": "Edge Mbb",
+            "type": "number"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "last": {
+            "title": "Last",
+            "type": "string"
+          },
+          "run_b": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run B"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "se_mbb": {
+            "title": "Se Mbb",
+            "type": "number"
+          },
+          "seeds": {
+            "items": {
+              "$ref": "#/components/schemas/GateSeed"
+            },
+            "title": "Seeds",
+            "type": "array"
+          },
+          "sigma": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigma"
+          },
+          "thresholds": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Thresholds",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "at",
+          "run_b",
+          "at_b",
+          "thresholds",
+          "b_side",
+          "edge_mbb",
+          "se_mbb",
+          "sigma",
+          "deals_per_seed",
+          "last"
+        ],
+        "title": "Gate",
+        "type": "object"
+      },
+      "GateSeed": {
+        "description": "One deal seed's result inside a gate.",
+        "properties": {
+          "edge_mbb": {
+            "title": "Edge Mbb",
+            "type": "number"
+          },
+          "se_mbb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Se Mbb"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "timestamp": {
+            "default": "",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seed",
+          "edge_mbb",
+          "se_mbb"
+        ],
+        "title": "GateSeed",
+        "type": "object"
+      },
+      "GatesPayload": {
+        "description": "Pooled head-to-head gates, newest first. `rows` counts the match rows read.",
+        "properties": {
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/Gate"
+            },
+            "title": "Gates",
+            "type": "array"
+          },
+          "op": {
+            "const": "gates",
+            "default": "gates",
+            "title": "Op",
+            "type": "string"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rows",
+          "duplicates"
+        ],
+        "title": "GatesPayload",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1814,6 +2050,39 @@
           }
         },
         "title": "Part[CurvePayload]",
+        "type": "object"
+      },
+      "Part_GatesPayload_": {
+        "additionalProperties": true,
+        "properties": {
+          "elapsed_seconds": {
+            "default": 0.0,
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatesPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "Part[GatesPayload]",
         "type": "object"
       },
       "Part_JobsPayload_": {
@@ -2920,6 +3189,9 @@
           "evals": {
             "$ref": "#/components/schemas/Part_LedgerPayload_"
           },
+          "gates": {
+            "$ref": "#/components/schemas/Part_GatesPayload_"
+          },
           "progress": {
             "$ref": "#/components/schemas/Part_ProgressPayload_"
           },
@@ -2935,6 +3207,7 @@
           "progress",
           "curve",
           "evals",
+          "gates",
           "tasks"
         ],
         "title": "RunParts",
@@ -4630,6 +4903,76 @@
           }
         },
         "summary": " Arms"
+      }
+    },
+    "/api/gates": {
+      "get": {
+        "operationId": "_gates_api_gates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Run",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experiment",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Experiment",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatesPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Understood, and the answer is no."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Azure did not answer."
+          }
+        },
+        "summary": " Gates"
       }
     },
     "/api/jobs": {

@@ -180,6 +180,9 @@ GROUPS: tuple[CommandGroup, ...] = (
             ),
             CommandRef("ledger", "List recorded evaluations from the eval ledger."),
             CommandRef(
+                "gates", "Head-to-head matches pooled over their deal seeds: edge, error, sigma."
+            ),
+            CommandRef(
                 "curve",
                 "Within-run exploitability vs iteration, from the retained checkpoint ladder.",
             ),

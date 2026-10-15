@@ -51,6 +51,7 @@ from src.interfaces.commands import (
     configs,
     cost,
     curve,
+    gates,
     jobs,
     ledger,
     logs,
@@ -342,6 +343,13 @@ def create_app(*, read_only: bool = False) -> FastAPI:
     @app.get("/api/cost", response_model=contract.Cost, responses=ERRORS)
     def _cost(hours: float = 0.0) -> JSONResponse:
         return answer(cache, cost.COMMAND, hours=hours)
+
+    @app.get("/api/gates", response_model=contract.Gates, responses=ERRORS)
+    def _gates(run: str = "", experiment: str = "", limit: int = 0) -> JSONResponse:
+        # Empty strings mean "omitted", so the command's own defaults apply.
+        return answer(
+            cache, gates.COMMAND, run=run or None, experiment=experiment or None, limit=limit
+        )
 
     @app.get("/api/evals", response_model=contract.Ledger, responses=ERRORS)
     def _evals(limit: int = 50) -> JSONResponse:

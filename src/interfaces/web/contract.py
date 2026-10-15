@@ -50,6 +50,7 @@ from src.interfaces.commands.configs import ConfigsPayload as Configs
 from src.interfaces.commands.cost import CostPayload as Cost
 from src.interfaces.commands.curve import CurvePayload as Curve
 from src.interfaces.commands.curve import CurvePoint
+from src.interfaces.commands.gates import GatesPayload as Gates
 from src.interfaces.commands.jobs import JobsPayload as Jobs
 from src.interfaces.commands.ledger import LedgerPayload as Ledger
 from src.interfaces.commands.logs import LogsPayload as LogLines
@@ -87,6 +88,7 @@ __all__ = [
     "CurvePoint",
     "Dispatched",
     "Edge",
+    "Gates",
     "Hand",
     "HandEvent",
     "Job",
@@ -190,6 +192,8 @@ class RunParts(Payload):
     progress: Part[Progress]
     curve: Part[Curve]
     evals: Part[Ledger]
+    gates: Part[Gates]
+    """The run's head-to-head matches pooled per gate, with this run as side A."""
     tasks: Part[TasksSummary]
     """Answered, then trimmed: the rows reach the client as `run_tasks`."""
 

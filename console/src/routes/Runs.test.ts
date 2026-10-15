@@ -38,6 +38,14 @@ describe("a run is only running if Batch says a task is live", () => {
     expect(verdict?.tone).toBe("muted");
   });
 
+  it("says running when a continuation of a settled run is live", () => {
+    // `submit --run` continues a completed run without rewriting its status:
+    // pcs-6584 read "completed, 12,000" while training to 30k.
+    const verdict = verdictFor("completed", "run-live", LIVE, HAS_TASKS);
+    expect(verdict?.label).toBe("running");
+    expect(verdict?.tone).toBe("live");
+  });
+
   it("leaves a settled status alone", () => {
     for (const status of ["completed", "failed", null]) {
       expect(verdictFor(status, "run-dead", LIVE, HAS_TASKS)).toBeNull();

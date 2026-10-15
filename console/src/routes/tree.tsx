@@ -13,6 +13,7 @@ import { Shell } from "@/components/Shell";
 import { Blueprint } from "@/routes/Blueprint";
 import { Cost } from "@/routes/Cost";
 import { Overview } from "@/routes/Overview";
+import { Results } from "@/routes/Results";
 import { RunDetail } from "@/routes/RunDetail";
 import { Runs } from "@/routes/Runs";
 import { TaskLog } from "@/routes/TaskLog";
@@ -53,6 +54,8 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/tasks/$taskId", component: TaskLog }),
 
   createRoute({ getParentRoute: () => rootRoute, path: "/runs", component: Runs }),
+  /** Head-to-head gates, pooled: did the change win. A place you GO to compare runs. */
+  createRoute({ getParentRoute: () => rootRoute, path: "/results", component: Results }),
   createRoute({ getParentRoute: () => rootRoute, path: "/runs/$runId", component: RunDetail }),
 
   /**
@@ -102,7 +105,7 @@ const MOVED: Record<string, { to: string; search?: Record<string, unknown> }> = 
   "/charts": { to: "/blueprint", search: { tab: "chart" } },
   "/play": { to: "/blueprint", search: { tab: "play" } },
   "/operate": { to: "/cost" },
-  "/evals": { to: "/runs" },
+  "/evals": { to: "/results" },
 };
 
 const redirects = Object.entries(MOVED).map(([from, target]) =>

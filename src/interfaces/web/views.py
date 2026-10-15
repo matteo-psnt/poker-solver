@@ -17,6 +17,7 @@ from typing import Any
 
 from src.interfaces.commands import (
     curve,
+    gates,
     jobs,
     ledger,
     pool_status,
@@ -31,12 +32,16 @@ from src.interfaces.commands._compose import Invoke, Part, compose, payloads
 # them is the point: `tasks` is the slowest read in the console.
 LIVE_LIMIT = 10
 
+# The finished attempts the Now page groups. Sixty, not ten: a gate is 13 seed
+# tasks ending within a minute, so ten rows showed one gate and nothing else.
+RECENT_TASKS = 60
+
 # How far back the live screen reads. `tasks` turns this into a bound on the
 # QUERY, so it is the difference between 16,895 legs and ~350: 2.51s against
 # 0.12s, on the one view the status bar polls from every page every 5 seconds.
 #
 # Generously above what the screen draws. It has to cover every task holding a
-# node -- the pool ceiling is 36 -- plus `LIVE_LIMIT` deaths, and a task is
+# node -- the pool ceiling is 36 -- plus `RECENT_TASKS` endings, and a task is
 # written about every 60s while it runs, so a live one is always among the most
 # recently touched. 200 is two orders of margin on the first and still cheap.
 LIVE_WINDOW = 200
@@ -74,11 +79,11 @@ def now(*, invoke: Invoke | None = None) -> dict[str, Any]:
 
 def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
     """A copy of the tasks part holding every row holding a node, plus the last
-    `LIVE_LIMIT`.
+    `RECENT_TASKS`.
 
     `--limit 10` was the wrong cut: with twenty-one tasks running, eleven of
     them had no row to draw a progress bar from. A running task is live by
-    definition and there are never many; the recent ten are the deaths.
+    definition and there are never many; the recent rows are what ended.
 
     Live is the ROW's own `phase`, which is `OCCUPIES_A_NODE` in the share's
     vocabulary. It was a missing `ended_at`, which is a different question and
@@ -97,7 +102,7 @@ def _live_and_recent(part: dict[str, Any]) -> dict[str, Any]:
     # "Recent" is a POSITION, so ask for the position. The membership test this
     # replaced compared each of 15,684 rows against the last ten -- and against
     # models rather than dicts that would be a field-by-field compare each time.
-    cut = len(rows) - LIVE_LIMIT if LIVE_LIMIT > 0 else 0
+    cut = len(rows) - RECENT_TASKS
     kept = [row for index, row in enumerate(rows) if row.holds_a_node or index >= cut]
     # ADDED to what the command already hid, not recomputed from `rows`: the
     # part arrives bounded by `LIVE_WINDOW`, so `len(rows)` is the size of the
@@ -132,6 +137,7 @@ def run(run_id: str, *, invoke: Invoke | None = None) -> dict[str, Any]:
                 ledger.COMMAND,
                 {"run": run_id, "limit": 0},
             ),
+            Part("gates", gates.COMMAND, {"run": run_id, "limit": 0}),
             Part("tasks", tasks.COMMAND, {"run": run_id}),
         ],
         join=lambda parts: {"run_tasks": _tasks_for(parts)},

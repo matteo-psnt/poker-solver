@@ -192,6 +192,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/gates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Gates */
+        get: operations["_gates_api_gates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -1034,6 +1051,82 @@ export interface components {
             /** Type */
             type: string;
         };
+        /**
+         * Gate
+         * @description One pooled comparison. `edge_mbb` is A's chips per hand against B.
+         */
+        Gate: {
+            /** Arm */
+            arm?: string | null;
+            /** At */
+            at: number | null;
+            /** At B */
+            at_b: number | null;
+            /** B Side */
+            b_side: string | null;
+            /** Deals Per Seed */
+            deals_per_seed: number | null;
+            /**
+             * Duplicates
+             * @default 0
+             */
+            duplicates: number;
+            /** Edge Mbb */
+            edge_mbb: number;
+            /** Experiment Id */
+            experiment_id?: string | null;
+            /** Last */
+            last: string;
+            /** Run B */
+            run_b: string | null;
+            /** Run Id */
+            run_id: string;
+            /** Se Mbb */
+            se_mbb: number;
+            /** Seeds */
+            seeds?: components["schemas"]["GateSeed"][];
+            /** Sigma */
+            sigma: number | null;
+            /** Thresholds */
+            thresholds: (number | null)[];
+        };
+        /**
+         * GateSeed
+         * @description One deal seed's result inside a gate.
+         */
+        GateSeed: {
+            /** Edge Mbb */
+            edge_mbb: number;
+            /** Se Mbb */
+            se_mbb: number | null;
+            /** Seed */
+            seed: number | null;
+            /** Task Id */
+            task_id?: string | null;
+            /**
+             * Timestamp
+             * @default
+             */
+            timestamp: string;
+        };
+        /**
+         * GatesPayload
+         * @description Pooled head-to-head gates, newest first. `rows` counts the match rows read.
+         */
+        GatesPayload: {
+            /** Duplicates */
+            duplicates: number;
+            /** Gates */
+            gates?: components["schemas"]["Gate"][];
+            /**
+             * Op
+             * @default gates
+             * @constant
+             */
+            op: "gates";
+            /** Rows */
+            rows: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1367,6 +1460,19 @@ export interface components {
             /** Error */
             error?: string | null;
             payload?: components["schemas"]["CurvePayload"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** Part[GatesPayload] */
+        Part_GatesPayload_: {
+            /**
+             * Elapsed Seconds
+             * @default 0
+             */
+            elapsed_seconds: number;
+            /** Error */
+            error?: string | null;
+            payload?: components["schemas"]["GatesPayload"] | null;
         } & {
             [key: string]: unknown;
         };
@@ -1795,6 +1901,7 @@ export interface components {
         RunParts: {
             curve: components["schemas"]["Part_CurvePayload_"];
             evals: components["schemas"]["Part_LedgerPayload_"];
+            gates: components["schemas"]["Part_GatesPayload_"];
             progress: components["schemas"]["Part_ProgressPayload_"];
             run: components["schemas"]["Part_RunInfoPayload_"];
             tasks: components["schemas"]["Part_TasksSummary_"];
@@ -2752,6 +2859,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArmsPayload"];
+                };
+            };
+            /** @description Understood, and the answer is no. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Azure did not answer. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    _gates_api_gates_get: {
+        parameters: {
+            query?: {
+                run?: string;
+                experiment?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatesPayload"];
                 };
             };
             /** @description Understood, and the answer is no. */

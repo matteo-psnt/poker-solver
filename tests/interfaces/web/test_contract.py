@@ -74,6 +74,7 @@ MODELS: dict[str, type[BaseModel]] = {
     "arms": contract.Arms,
     "curve": contract.Curve,
     "ledger": contract.Ledger,
+    "gates": contract.Gates,
     "logs": contract.LogLines,
     "profile": contract.Profile,
     "cost": contract.Cost,
@@ -211,6 +212,7 @@ class TestTheViewEnvelopes:
                     "progress": self._part("progress"),
                     "curve": self._part("curve"),
                     "evals": self._part("ledger"),
+                    "gates": self._part("gates"),
                     # A `TasksSummary`, which is a DIFFERENT model from `Tasks`
                     # and carries no rows -- see `views._summarised`.
                     "tasks": {

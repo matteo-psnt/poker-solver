@@ -118,12 +118,13 @@ class TestOneScreenIsOneRequest:
         assert sorted(name for name, _ in answers) == ["jobs", "pool-status", "tasks"]
         assert set(composed["parts"]) == {"pool", "jobs", "tasks"}
 
-    def test_now_keeps_every_running_task_and_the_recent_ten(self, monkeypatch):
+    def test_now_keeps_every_running_task_and_the_recent_endings(self, monkeypatch):
         """Eleven of twenty-one running tasks had no progress bar: the part was
         cut to the last ten rows, and a running task is not necessarily recent."""
+        recent = views.RECENT_TASKS
         rows = [_task(f"old-{i}", ended_at="2026-08-01") for i in range(30)]
         rows += [_task(f"live-{i}", cause="running") for i in range(21)]
-        rows += [_task(f"done-{i}", ended_at="2026-08-22") for i in range(10)]
+        rows += [_task(f"done-{i}", ended_at="2026-08-22") for i in range(recent)]
         payload = tasks_command.TasksPayload(rows=rows)
 
         def _invoke(self: Command, **kwargs: Any) -> Any:
@@ -132,9 +133,9 @@ class TestOneScreenIsOneRequest:
         monkeypatch.setattr(Command, "invoke", _invoke)
         kept = [row.task_id for row in views.now()["parts"]["tasks"]["payload"].rows]
         assert [t for t in kept if t.startswith("live-")] == [f"live-{i}" for i in range(21)]
-        assert [t for t in kept if t.startswith("done-")] == [f"done-{i}" for i in range(10)]
+        assert [t for t in kept if t.startswith("done-")] == [f"done-{i}" for i in range(recent)]
         assert not any(t.startswith("old-") for t in kept)
-        assert len(payload.rows) == 61, "the memoised payload was trimmed in place"
+        assert len(payload.rows) == 51 + recent, "the memoised payload was trimmed in place"
 
     def test_an_attempt_that_died_without_stamping_an_end_is_not_live(self, monkeypatch):
         """MEASURED: 1,296 of 6,031 rows had no `ended_at` and 1,293 of them were
@@ -143,7 +144,10 @@ class TestOneScreenIsOneRequest:
         forever -- 1.1 MB per five-second poll, on every page, to draw two bars.
         """
         rows = [_task(f"zombie-{i}", cause="unresolved") for i in range(50)]
-        rows += [_task(f"done-{i}", cause="completed", ended_at="2026-08-22") for i in range(10)]
+        recent = views.RECENT_TASKS
+        rows += [
+            _task(f"done-{i}", cause="completed", ended_at="2026-08-22") for i in range(recent)
+        ]
         payload = tasks_command.TasksPayload(rows=rows)
 
         def _invoke(self: Command, **kwargs: Any) -> Any:
@@ -155,19 +159,20 @@ class TestOneScreenIsOneRequest:
         assert not any(t.startswith("zombie-") for t in kept), (
             "an unresolved attempt has no end stamp and is not therefore running"
         )
-        assert kept == [f"done-{i}" for i in range(10)]
+        assert kept == [f"done-{i}" for i in range(recent)]
         assert part.hidden_rows == 50
 
-    def test_a_run_page_is_five_questions_in_one(self, answers):
+    def test_a_run_page_is_six_questions_in_one(self, answers):
         composed = views.run("run-a")
         assert sorted(name for name, _ in answers) == [
             "curve",
+            "gates",
             "ledger",
             "progress",
             "runinfo",
             "tasks",
         ]
-        assert set(composed["parts"]) == {"run", "progress", "curve", "evals", "tasks"}
+        assert set(composed["parts"]) == {"run", "progress", "curve", "evals", "gates", "tasks"}
 
     def test_the_run_id_reaches_every_part_that_takes_one(self, answers):
         views.run("run-a")

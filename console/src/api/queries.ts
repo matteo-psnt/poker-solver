@@ -6,13 +6,14 @@
  * own age badge for free. A failing query keeps its last good data while
  * exposing `error`, which IS the per-panel isolation the design calls for.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, send } from "./client";
 import type {
   BlueprintRun,
   Cancelled,
   Combos,
   Cost,
+  Gates,
   Hand,
   LeftSession,
   LogLines,
@@ -94,6 +95,14 @@ export const useRuns = () =>
   useQuery<Runs>({
     queryKey: ["runs"],
     queryFn: () => get("/api/runs"),
+    refetchInterval: SLOW,
+  });
+
+/** Every head-to-head gate, pooled per seed by the `gates` command. */
+export const useGates = () =>
+  useQuery<Gates>({
+    queryKey: ["gates"],
+    queryFn: () => get("/api/gates"),
     refetchInterval: SLOW,
   });
 
@@ -181,6 +190,31 @@ export const useSolverNode = (
  * Play. Mutations rather than queries: a hand advances because you acted, so
  * there is nothing to poll and a refetch would replay a move.
  */
+/**
+ * One spot at every depth the box serves, for comparing depths side by side.
+ *
+ * Same key as `useSolverNode`, so the depth already on screen is served from
+ * the cache rather than fetched twice.
+ */
+export const useSolverNodes = (
+  path: string,
+  board: string,
+  average: boolean,
+  stacks: readonly number[],
+  enabled: boolean,
+) =>
+  useQueries({
+    queries: stacks.map((stack) => ({
+      queryKey: ["blueprint", "node", path, board, average, stack],
+      queryFn: () =>
+        get<SolverNode>(
+          `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}&stack=${stack}`,
+        ),
+      enabled,
+      staleTime: 60_000,
+    })),
+  });
+
 export const useDealHand = () =>
   useMutation<Hand, Error, { human_seat: number; seed?: number | null }>({
     mutationFn: (body) => send("/api/blueprint/play", body),
