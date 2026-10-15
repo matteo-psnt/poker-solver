@@ -32,8 +32,8 @@ const PENDING = {
       pot: 3,
       stack: 199,
       options: [
-        { token: "f", type: "fold", amount: 0 },
-        { token: "c", type: "call", amount: 1 },
+        { token: "f", type: "fold", amount: 0, to: 1 },
+        { token: "c", type: "call", amount: 1, to: 2 },
       ],
     },
     {
@@ -44,8 +44,8 @@ const PENDING = {
       pot: 4,
       stack: 198,
       options: [
-        { token: "x", type: "check", amount: 0 },
-        { token: "b4", type: "bet", amount: 4 },
+        { token: "x", type: "check", amount: 0, to: 2 },
+        { token: "b4", type: "bet", amount: 4, to: 6 },
       ],
     },
   ],
@@ -87,8 +87,10 @@ const NODE = {
     },
   },
   children: [
-    { token: "f", type: "fold", amount: 0 },
-    { token: "c", type: "call", amount: 2 },
+    { token: "f", type: "fold", amount: 0, to: 0 },
+    { token: "c", type: "call", amount: 2, to: 2 },
+    // A raise's amount is the chips OVER the call: r6 facing 2 is a raise to 8.
+    { token: "r6", type: "raise", amount: 6, to: 8 },
   ],
   button: 0,
   pot: 4,
@@ -292,8 +294,8 @@ describe("the chart, drawn", () => {
   it("labels the menu in blinds, so the rail reads as poker", async () => {
     mountAt(SPOT);
     await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
-    // `r6` at a big blind of 2, the same words the play table's buttons use.
-    expect(screen.getByText("raise to 3bb")).toBeTruthy();
+    // `r6` over a call of 2 is a raise TO 8 chips -- in the legend and on the rail.
+    expect(screen.getAllByText("raise to 4bb")).toHaveLength(2);
   });
 
   it("says how finely the spot can be answered at all", async () => {

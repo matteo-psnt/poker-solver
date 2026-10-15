@@ -383,7 +383,7 @@ function Did({
         backgroundColor: `color-mix(in srgb, ${colour} ${stale ? 12 : 26}%, transparent)`,
       }}
     >
-      {label(event.action, event.amount, bigBlind)}
+      {label(event.action, event.to, bigBlind)}
       {stale && (
         // Named, and dimmed, so a move that is still the last one taken cannot
         // be misread as a move taken on the street now showing.
@@ -435,7 +435,7 @@ function Actions({
             backgroundColor: `color-mix(in srgb, ${colours[index]} 22%, transparent)`,
           }}
         >
-          {describeAction(action.token, bigBlind).text}
+          {describeAction(action, bigBlind).text}
           <Key label={String(index + 1)} />
         </button>
       ))}
@@ -551,7 +551,7 @@ function Event({ event, bigBlind }: { event: HandEvent; bigBlind: number }) {
         >
           {event.actor === "bot" ? "bot" : "you"}
         </span>
-        <span className="text-[var(--fg)]">{label(event.action, event.amount, bigBlind)}</span>
+        <span className="text-[var(--fg)]">{label(event.action, event.to, bigBlind)}</span>
         {event.untrained && (
           <span className="rounded border border-[#D9A44E] px-1 text-[10px] text-[#D9A44E]">
             untrained
@@ -712,14 +712,14 @@ function inBlinds(chips: number, bigBlind: number): string {
  * cannot use `describeAction` directly — but it must read the same way, or the
  * same bet is "raise to 2bb" on a button and "raise 4" one panel below.
  */
-function label(type: string, amount: number, bigBlind: number): string {
+function label(type: string, to: number, bigBlind: number): string {
   if (type === "fold" || type === "check") return type;
   if (type === "call") return "call";
   if (type === "all_in") return ALL_IN_LABEL;
   const size =
-    bigBlind && Number.isInteger(amount / bigBlind)
-      ? String(amount / bigBlind)
-      : (amount / (bigBlind || 1)).toFixed(1);
+    bigBlind && Number.isInteger(to / bigBlind)
+      ? String(to / bigBlind)
+      : (to / (bigBlind || 1)).toFixed(1);
   if (type === "raise") return `raise to ${size}bb`;
   if (type === "bet") return `bet ${size}bb`;
   return `${type} ${size}bb`;

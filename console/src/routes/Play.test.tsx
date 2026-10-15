@@ -38,13 +38,13 @@ const HAND = {
   hole_cards: ["Ah", "Kd"],
   bot_hole_cards: null,
   legal: [
-    { token: "f", type: "fold", amount: 0 },
-    { token: "c", type: "call", amount: 2 },
-    { token: "r6", type: "raise", amount: 6 },
+    { token: "f", type: "fold", amount: 0, to: 1 },
+    { token: "c", type: "call", amount: 2, to: 2 },
+    { token: "r6", type: "raise", amount: 6, to: 8 },
     // The wire spelling is `all_in` (`str(ActionType.ALL_IN)` is `name.lower()`).
     // No fixture carried one, which is why three lookups keyed on the DISPLAY
     // spelling `all-in` went unnoticed.
-    { token: "A", type: "all_in", amount: 198 },
+    { token: "A", type: "all_in", amount: 198, to: 200 },
   ],
   payoff: null,
   showdown: false,
@@ -56,6 +56,7 @@ const HAND = {
       actor: "bot",
       action: "raise",
       amount: 6,
+      to: 8,
       street: "Preflop",
       untrained: true,
       mix: null,
@@ -69,6 +70,7 @@ const HAND = {
       actor: "human",
       action: "all_in",
       amount: 198,
+      to: 200,
       street: "Preflop",
       untrained: false,
       mix: null,
@@ -153,7 +155,7 @@ describe("the table", () => {
     expect(menu).toContain("call2");
     // `r6` at a big blind of 2. The log below says the same words for the same
     // bet, which is the point of `describeAction` and `label` agreeing.
-    expect(menu).toContain("raise to 3bb3");
+    expect(menu).toContain("raise to 4bb3");
   });
 });
 
@@ -175,7 +177,7 @@ describe("what just happened", () => {
     // it one way now; this is the fixture that would have caught it.
     await deal();
     const chips = screen.getAllByTestId("did").map((chip) => chip.textContent);
-    expect(chips).toEqual(["raise to 3bbuntrained", "all-in"]);
+    expect(chips).toEqual(["raise to 4bbuntrained", "all-in"]);
   });
 
   it("names the street, which the board only implies — and preflop not at all", async () => {
@@ -203,7 +205,7 @@ describe("what just happened", () => {
     const chips = screen.getAllByTestId("did").map((chip) => chip.textContent);
     // Carried, but labelled with the street it was taken on, so it cannot read
     // as something the bot did on the flop now showing.
-    expect(chips).toEqual(["raise to 3bbPreflopuntrained", "all-inPreflop"]);
+    expect(chips).toEqual(["raise to 4bbPreflopuntrained", "all-inPreflop"]);
   });
 });
 

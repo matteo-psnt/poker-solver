@@ -69,6 +69,7 @@ class HandEvent:
     actor: str  # "human" or "bot"
     action_type: str
     amount: int
+    raised_to: int  # the actor's chips in on the street after acting
     street: str
     untrained: bool
     mix: tuple[tuple[str, float], ...] | None = None
@@ -242,6 +243,7 @@ class HeadsUpHand:
                 actor=actor,
                 action_type=_action_type_name(action.type),
                 amount=action.amount,
+                raised_to=self.rules.raised_to(self.state, action),
                 street=str(self.state.street),
                 untrained=untrained,
                 mix=mix,

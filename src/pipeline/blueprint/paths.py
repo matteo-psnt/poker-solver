@@ -74,6 +74,8 @@ class Decision:
     actor: int
     chosen: str
     options: tuple[Action, ...]
+    #: Each option's :meth:`GameRules.raised_to`, in step with ``options``.
+    raised_to: tuple[int, ...]
     #: The pot before this action, and what the actor had left to put in it.
     pot: float
     stack: float
@@ -242,6 +244,7 @@ def replay(
                 actor=state.current_player,
                 chosen=token,
                 options=legal,
+                raised_to=tuple(rules.raised_to(state, action) for action in legal),
                 pot=state.pot,
                 stack=state.stacks[state.current_player],
             )

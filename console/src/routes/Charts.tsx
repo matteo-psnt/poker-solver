@@ -100,8 +100,8 @@ export function Charts() {
   // Sizes are meaningless without the stakes, so labelling waits on /run.
   const bigBlind = run.data?.big_blind ?? 0;
   const labels = useMemo(
-    () => describeActions(grid?.actions ?? [], bigBlind),
-    [grid?.actions, bigBlind],
+    () => describeActions(grid?.actions ?? [], node.data?.children ?? [], bigBlind),
+    [grid?.actions, node.data?.children, bigBlind],
   );
 
   const shown = pinned ?? hovered;
@@ -344,7 +344,7 @@ function SpotColumn({
           style={rowStyle(option.token === spot.chosen, colours[index] ?? "transparent")}
         >
           <Dot colour={colours[index] ?? "transparent"} show={false} />
-          {describeAction(option.token, bigBlind).text}
+          {describeAction(option, bigBlind).text}
         </span>
       ))}
     </Column>
@@ -380,7 +380,7 @@ function HereColumn({
         <span className="px-1.5 py-1 text-[11px] text-[var(--fg-faint)]">no actions</span>
       )}
       {options.map((option, index) => {
-        const label = describeAction(option.token, bigBlind).text;
+        const label = describeAction(option, bigBlind).text;
         return (
           <ActionRow
             key={option.token}

@@ -1027,6 +1027,8 @@ export interface components {
         Edge: {
             /** Amount */
             amount: number;
+            /** To */
+            to: number;
             /** Token */
             token: string;
             /** Type */
@@ -1102,6 +1104,8 @@ export interface components {
             seat: number;
             /** Street */
             street: string;
+            /** To */
+            to: number;
             /** Untrained */
             untrained: boolean | null;
         };

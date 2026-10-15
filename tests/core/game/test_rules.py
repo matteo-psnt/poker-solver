@@ -595,3 +595,55 @@ class TestOfferedActionsAreApplicable:
             bad.extend(found)
         assert total > 100_000, f"only {total} states — the sweep stopped early"
         assert bad == []
+
+
+class TestRaisedTo:
+    """`raised_to` is what a player reads: the actor's chips in on the street after acting."""
+
+    @pytest.mark.parametrize("config_name", ["production", "production_opens"])
+    def test_matches_the_chips_the_stack_actually_paid_on_every_line(self, config_name):
+        import random
+
+        from src.shared.config.loader import load_training_config
+
+        config = load_training_config(config_name)
+        rules = GameRules(config.game.small_blind, config.game.big_blind)
+        model = ActionModel(config)
+        start = config.game.starting_stack
+        hole = ((Card(1), Card(2)), (Card(3), Card(4)))
+        rng = random.Random(7)
+        checked = 0
+        for _ in range(400):
+            state = rules.create_initial_state(start, hole, button=rng.randint(0, 1))
+            street_start = (start, start)
+            while not state.is_terminal:
+                legal = rules.get_legal_actions(state, action_model=model)
+                for action in legal:
+                    actor = state.current_player
+                    child = state.apply_action(action, rules)
+                    assert (
+                        rules.raised_to(state, action) == street_start[actor] - child.stacks[actor]
+                    )
+                    checked += 1
+                child = state.apply_action(rng.choice(legal), rules)
+                if child.street != state.street:
+                    street_start = child.stacks
+                    if not child.is_terminal:
+                        deal = child.street.board_card_count
+                        child = child.replace(board=tuple(Card(n) for n in range(5, 5 + deal)))
+                state = child
+        assert checked > 5000
+
+    def test_the_new_opens_read_as_two_and_two_and_a_half_blinds(self):
+        from src.shared.config.loader import load_training_config
+
+        config = load_training_config("production_opens")
+        rules = GameRules(config.game.small_blind, config.game.big_blind)
+        state = rules.create_initial_state(
+            config.game.starting_stack, ((Card(1), Card(2)), (Card(3), Card(4)))
+        )
+        legal = rules.get_legal_actions(state, action_model=ActionModel(config))
+        raises_to = [
+            rules.raised_to(state, a) / rules.big_blind for a in legal if a.type == ActionType.RAISE
+        ]
+        assert raises_to == [2.0, 2.5, 3.0, 4.0, 5.5]

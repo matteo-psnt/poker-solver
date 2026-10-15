@@ -6,12 +6,9 @@
  * an identifier and the wrong one for a button, so it is translated here rather
  * than shown raw.
  *
- * SIZES ARE IN BIG BLINDS, not chips. The wire carries the amount a bet raises
- * *to*, in chips, because that is unambiguous without knowing the stakes. But
- * "raise to 4" means nothing until you also know the blinds are 1/2 — and every
- * poker player already thinks in blinds, so `r4` at 1/2 reads as a 2bb open.
- * The conversion needs the big blind, which is why these take it as an argument
- * rather than being a lookup table.
+ * SIZES ARE IN BIG BLINDS, and they are the server's `to`: the chips the
+ * actor has in on the street after acting. The token's number is NOT that --
+ * on a raise it is only the chips above the call -- so it is never read here.
  */
 
 export interface ActionLabel {
@@ -37,22 +34,28 @@ export function inBlinds(chips: number, bigBlind: number): string {
   return Number.isInteger(bb) ? String(bb) : bb.toFixed(1);
 }
 
-export function describeAction(token: string, bigBlind: number): ActionLabel {
+/** An action as the server sends it: the path token and its raise-to. */
+export interface Sized {
+  token: string;
+  to: number;
+}
+
+export function describeAction({ token, to }: Sized, bigBlind: number): ActionLabel {
   const kind = token.slice(0, 1);
   const word = WORDS[kind];
   if (word) return { text: word, token };
+  if (!Number.isFinite(to)) return { text: token, token };
 
-  const chips = Number(token.slice(1));
-  if (!Number.isFinite(chips)) return { text: token, token };
-
-  const size = inBlinds(chips, bigBlind);
-  // "to", because the amount is the total the pot is raised TO, not the
-  // increment — the distinction that makes a 3-bet read as 9 rather than 5.
+  const size = inBlinds(to, bigBlind);
   if (kind === "r") return { text: `raise to ${size}bb`, token };
   if (kind === "b") return { text: `bet ${size}bb`, token };
   return { text: token, token };
 }
 
-export function describeActions(tokens: string[], bigBlind: number): ActionLabel[] {
-  return tokens.map((token) => describeAction(token, bigBlind));
+/** Label `tokens` in their order, sized from the `edges` the node offered. */
+export function describeActions(tokens: string[], edges: Sized[], bigBlind: number): ActionLabel[] {
+  const to = new Map(edges.map((edge) => [edge.token, edge.to]));
+  return tokens.map((token) =>
+    describeAction({ token, to: to.get(token) ?? Number.NaN }, bigBlind),
+  );
 }

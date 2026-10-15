@@ -410,6 +410,52 @@ class GameRules:
 
         return actions_this_street
 
+    def raised_to(self, state: GameState, action: Action) -> int:
+        """The chips the actor has in on this street once ``action`` is taken.
+
+        That is what a player means by "raise to 3bb": a RAISE's ``amount`` is
+        only the chips above the call, so it under-reads every raise by the level.
+        """
+        level = self._street_level(state)
+        mine = level - state.to_call
+        stack = state.stacks[state.current_player]
+        if action.type == ActionType.RAISE:
+            return level + action.amount
+        if action.type == ActionType.BET:
+            return mine + action.amount
+        if action.type == ActionType.ALL_IN:
+            return mine + stack
+        if action.type == ActionType.CALL:
+            return mine + min(state.to_call, stack)
+        return mine
+
+    def _street_level(self, state: GameState) -> int:
+        """The most either seat has put in on the current street, blinds included.
+
+        Replays ``betting_history`` with the same closers as
+        ``_get_actions_on_current_street``, but counts the final action as one:
+        here it has already been applied.
+        """
+        level, owed = self.big_blind, state.blind_to_call
+        on_street: list[Action] = []
+        for index, action in enumerate(state.betting_history):
+            on_street.append(action)
+            if action.type in (ActionType.BET, ActionType.RAISE):
+                level, owed = level + action.amount, action.amount
+            elif action.type == ActionType.ALL_IN:
+                put = level - owed + action.amount
+                level, owed = max(level, put), max(0, put - level)
+            elif action.type == ActionType.CALL:
+                owed = 0
+            closes_street = (action.type == ActionType.CALL and index > 0) or (
+                len(on_street) >= 2
+                and action.type == ActionType.CHECK
+                and on_street[-2].type in (ActionType.CHECK, ActionType.CALL)
+            )
+            if closes_street:
+                level, owed, on_street = 0, 0, []
+        return level
+
     def _advance_street(
         self,
         state: GameState,

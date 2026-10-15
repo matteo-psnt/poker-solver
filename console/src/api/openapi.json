@@ -1068,6 +1068,10 @@
             "title": "Amount",
             "type": "number"
           },
+          "to": {
+            "title": "To",
+            "type": "number"
+          },
           "token": {
             "title": "Token",
             "type": "string"
@@ -1080,7 +1084,8 @@
         "required": [
           "token",
           "type",
-          "amount"
+          "amount",
+          "to"
         ],
         "title": "Edge",
         "type": "object"
@@ -1285,6 +1290,10 @@
             "title": "Street",
             "type": "string"
           },
+          "to": {
+            "title": "To",
+            "type": "number"
+          },
           "untrained": {
             "anyOf": [
               {
@@ -1302,6 +1311,7 @@
           "actor",
           "action",
           "amount",
+          "to",
           "street",
           "untrained",
           "mix"

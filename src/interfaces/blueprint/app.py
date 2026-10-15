@@ -42,8 +42,11 @@ from src.pipeline.blueprint.paths import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
+    from src.core.game.actions import Action
+    from src.core.game.rules import GameRules
+    from src.core.game.state import GameState
     from src.engine.search.heads_up_session import HeadsUpHand
     from src.engine.solver.policy.source import ScorableBlueprint
 
@@ -124,6 +127,7 @@ class Edge(BaseModel):
     token: str
     type: str
     amount: float
+    to: float  # the actor's chips in on the street after it -- what "raise to" names
 
 
 class Spot(BaseModel):
@@ -198,6 +202,7 @@ class HandEvent(BaseModel):
     actor: str
     action: str
     amount: float
+    to: float  # as on :class:`Edge`
     street: str
     """Whether the bot had NO strategy here and played uniform-random. A human
     explores far off the self-play distribution, so misses are common, and one
@@ -292,9 +297,13 @@ def grid_payload(grid: StrategyGrid) -> NodeGrid:
     )
 
 
-def _edge(action) -> Edge:
+def _edge(action: Action, to: int) -> Edge:
     """One action on the wire."""
-    return Edge(token=encode_action(action), type=str(action.type), amount=action.amount)
+    return Edge(token=encode_action(action), type=str(action.type), amount=action.amount, to=to)
+
+
+def _edges(rules: GameRules, state: GameState, actions: Iterable[Action]) -> list[Edge]:
+    return [_edge(action, rules.raised_to(state, action)) for action in actions]
 
 
 def _line_payload(line: tuple[Step, ...]) -> list[Spot | Dealt]:
@@ -304,7 +313,7 @@ def _line_payload(line: tuple[Step, ...]) -> list[Spot | Dealt]:
             street=step.street,
             actor=step.actor,
             chosen=step.chosen,
-            options=[_edge(action) for action in step.options],
+            options=[_edge(*option) for option in zip(step.options, step.raised_to, strict=True)],
             pot=step.pot,
             stack=step.stack,
         )
@@ -393,10 +402,7 @@ def hand_payload(hand: HeadsUpHand, session_id: str, *, public: bool) -> Hand:
             if reveal or (public and hand.showdown)
             else None
         ),
-        legal=[
-            Edge(token=encode_action(action), type=str(action.type), amount=action.amount)
-            for action in hand.legal_actions()
-        ],
+        legal=_edges(hand.rules, state, hand.legal_actions()),
         payoff=hand.human_payoff() if hand.is_over else None,
         showdown=hand.showdown,
         bot_decisions=hand.bot_decisions,
@@ -407,6 +413,7 @@ def hand_payload(hand: HeadsUpHand, session_id: str, *, public: bool) -> Hand:
                 actor=event.actor,
                 action=event.action_type,
                 amount=event.amount,
+                to=event.raised_to,
                 street=event.street,
                 untrained=None if public else event.untrained,
                 # Revealed only at the end: the mix is what the bot WOULD have
@@ -552,7 +559,7 @@ def create_app(
                 # The children are here so a client can walk the tree without
                 # guessing which sizes are legal: the menu is a function of
                 # the chip configuration, not of the action model alone.
-                children=[_edge(action) for action in node.legal_actions],
+                children=_edges(chosen.rules, node.state, node.legal_actions),
                 line=_line_payload(node.line),
                 button=node.button,
                 pot=node.state.pot,
