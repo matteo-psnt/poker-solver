@@ -111,15 +111,11 @@ class StrategyGrid:
 def strategy_grid(
     blueprint: ScorableBlueprint,
     node: ReplayedNode,
-    *,
-    use_average: bool = True,
 ) -> StrategyGrid:
     """Per-combo strategy at ``node``.
 
-    ``use_average`` selects the average strategy -- the blueprint proper, and
-    what converges -- over the regret-matched current strategy. They diverge
-    sharply on an under-trained run, which is why this is explicit at every call
-    rather than defaulted somewhere out of sight.
+    Always the AVERAGE strategy: a served blueprint is loaded play-only, which
+    keeps the average and zeroes the regrets the current strategy is read from.
 
     Raises :class:`PathError` at a terminal node: there is no strategy at a spot
     where nobody acts, and a grid of empty rows would be a worse answer than a
@@ -148,7 +144,7 @@ def strategy_grid(
         bucket = source.bucket_for(with_combo, actor)
         combo_buckets.append(bucket)
         if bucket not in buckets:
-            buckets[bucket] = _read_bucket(blueprint, with_combo, bucket, legal, use_average)
+            buckets[bucket] = _read_bucket(blueprint, with_combo, bucket, legal)
 
     return StrategyGrid(
         street=str(state.street),
@@ -166,7 +162,6 @@ def _read_bucket(
     state: GameState,
     bucket: int,
     legal: tuple[Action, ...],
-    use_average: bool,
 ) -> BucketStrategy:
     """One bucket's row.
 
@@ -180,7 +175,7 @@ def _read_bucket(
         return BucketStrategy(bucket=bucket, trained=False, strategy=None)
 
     distribution = blueprint_action_distribution(
-        infoset, state, blueprint.rules, legal, use_average=use_average
+        infoset, state, blueprint.rules, legal, use_average=True
     )
     if distribution is None:
         return BucketStrategy(bucket=bucket, trained=False, strategy=None)

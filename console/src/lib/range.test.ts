@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, bucketGroups, cellFor, classLabel, combosIn, summarise } from "./range";
+import {
+  aggregate,
+  aggressiveFirst,
+  bucketGroups,
+  cellFor,
+  classLabel,
+  combosIn,
+  summarise,
+} from "./range";
 
 /**
  * The aggregation is the only real logic on the client, and its job is to keep
@@ -215,5 +223,17 @@ describe("the combos behind one cell", () => {
     expect(bucketGroups(combosIn("AKs", { ...AKS, comboBuckets: [7, 7, 7, 7, 3] })).size).toBe(1);
     // A blocked combo is in no bucket and must not split a group that agrees.
     expect(bucketGroups(combosIn("AKs", { ...AKS, comboBuckets: [7, 7, 7, -1, 3] })).size).toBe(1);
+  });
+});
+
+describe("the order actions are drawn in", () => {
+  it("runs aggressive to passive, fold last, largest raise first", () => {
+    const tokens = ["f", "c", "r6", "r9", "A"];
+    expect(aggressiveFirst(tokens).map((i) => tokens[i])).toEqual(["A", "r9", "r6", "c", "f"]);
+  });
+
+  it("keeps a check last when there is no fold", () => {
+    const tokens = ["x", "b3", "A"];
+    expect(aggressiveFirst(tokens).map((i) => tokens[i])).toEqual(["A", "b3", "x"]);
   });
 });

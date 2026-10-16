@@ -78,7 +78,7 @@ class TestForwarding:
         # The trailing slash on the base must not survive into the path.
         assert seen["method"] == "GET"
         assert seen["url"] == "http://server/api/node"
-        assert seen["params"] == {"path": "c/x", "board": "2c7d9h", "average": True}
+        assert seen["params"] == {"path": "c/x", "board": "2c7d9h"}
 
     def test_the_token_is_sent_when_configured(self, client, monkeypatch):
         """Caddy checks this on the box; without it every request reads as a 404."""

@@ -4,7 +4,7 @@
 // giving it a role to satisfy the rule would misdescribe the grid to a reader.
 
 import type { ActionLabel } from "@/lib/actions";
-import { actionColours, type Cell, GRID_SIZE } from "@/lib/range";
+import { actionColours, aggressiveFirst, type Cell, GRID_SIZE } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  *
  *   blocked    the board holds one of its cards — nothing to say, drawn empty
  *   untrained  reachable, but training never visited its bucket — hatched
- *   trained    a stacked bar in action order
+ *   trained    a stacked bar, aggressive on the left and fold on the right
  *
  * Collapsing the first two into "no bar" would be the single most misleading
  * thing this page could do: "you cannot hold this" and "the solver never
@@ -105,13 +105,14 @@ function Bar({ strategy, actions }: { strategy: number[]; actions: ActionLabel[]
   // Keyed on the TOKENS, not the labels: colour encodes what kind of action it
   // is, and the label is prose. Computed for the whole menu at once, because a
   // raise's shade depends on how many other raises there are.
-  const colours = actionColours(actions.map((action) => action.token));
+  const tokens = actions.map((action) => action.token);
+  const colours = actionColours(tokens);
   return (
     <span className="absolute inset-0 flex">
-      {strategy.map((weight, index) => (
+      {aggressiveFirst(tokens).map((index) => (
         <span
-          key={actions[index]?.token ?? index}
-          style={{ width: `${weight * 100}%`, backgroundColor: colours[index] }}
+          key={tokens[index] ?? index}
+          style={{ width: `${(strategy[index] ?? 0) * 100}%`, backgroundColor: colours[index] }}
         />
       ))}
     </span>
@@ -134,8 +135,9 @@ function Hatch() {
 function describe(cell: Cell, actions: ActionLabel[]): string {
   if (cell.combos === 0) return `${cell.label} — blocked by the board`;
   if (!cell.strategy) return `${cell.label} — ${cell.combos} combos, none trained`;
-  const parts = cell.strategy
-    .map((weight, index) => `${actions[index]?.text ?? "?"} ${(weight * 100).toFixed(0)}%`)
+  const strategy = cell.strategy;
+  const parts = aggressiveFirst(actions.map((action) => action.token))
+    .map((index) => `${actions[index]?.text ?? "?"} ${((strategy[index] ?? 0) * 100).toFixed(0)}%`)
     .join("  ");
   const caveat = cell.untrained > 0 ? `  (${cell.untrained}/${cell.combos} untrained)` : "";
   return `${cell.label}  ${parts}${caveat}`;

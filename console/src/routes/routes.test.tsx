@@ -85,10 +85,10 @@ describe("the search params that had to survive", () => {
    * exactly the kind of move that would quietly undo that.
    */
   it("keeps a shared chart spot intact through the new route", async () => {
-    const landed = await at("/blueprint?tab=chart&path=r/c&board=AhKd7s&average=false");
+    const landed = await at("/blueprint?tab=chart&path=r/c&board=AhKd7s&at=1");
     expect(landed).toMatchObject({
       pathname: "/blueprint",
-      search: { tab: "chart", path: "r/c", board: "AhKd7s", average: false },
+      search: { tab: "chart", path: "r/c", board: "AhKd7s", at: 1 },
     });
   });
 

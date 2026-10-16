@@ -54,7 +54,7 @@ def _headers() -> dict[str, str]:
 
 def forward(
     path: str,
-    params: dict[str, str | bool] | None = None,
+    params: dict[str, str] | None = None,
     *,
     method: str = "GET",
     json: Any = None,
@@ -128,13 +128,11 @@ def mount(app: FastAPI) -> None:
         return forward("/api/combos", {})
 
     @app.get("/api/blueprint/node", response_model=contract.SolverNode)
-    def _node(
-        path: str = "", board: str = "", average: bool = True, stack: int | None = None
-    ) -> JSONResponse:
+    def _node(path: str = "", board: str = "", stack: int | None = None) -> JSONResponse:
         # `stack` picks a rung of the depth ladder; omitted reads the deepest. Sent
         # only when asked for, so a single-depth server never sees a parameter it
         # would have to ignore.
-        query: dict[str, str | bool] = {"path": path, "board": board, "average": average}
+        query: dict[str, str] = {"path": path, "board": board}
         if stack is not None:
             # A STRING, because that is what `forward` puts on a query string and an
             # int here would only be stringified a layer later.

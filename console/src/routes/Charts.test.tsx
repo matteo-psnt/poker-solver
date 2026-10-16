@@ -125,6 +125,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+/** Whether `/api/blueprint/node` was asked for a query containing `part`. */
+function fetched(part: string): boolean {
+  return (globalThis.fetch as unknown as { mock: { calls: string[][] } }).mock.calls.some(
+    ([url]) => String(url).includes("node") && String(url).includes(part),
+  );
+}
+
 function mountAt(path: string) {
   const router = createRouter({
     routeTree,
@@ -226,20 +233,40 @@ describe("the line, as columns", () => {
     ).toBe(false);
   });
 
-  it("goes BACK to a spot when you click the column for it", async () => {
+  it("reads an earlier spot without cutting the line after it", async () => {
     mountAt(SPOT);
     await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
 
     // The chart as it stood when that spot was being decided: the line BEFORE
     // its token, which for the first column is the preflop root.
-    fireEvent.click(screen.getAllByTitle("read the chart at this spot")[0] as HTMLElement);
-    await waitFor(() =>
-      expect(
-        (globalThis.fetch as unknown as { mock: { calls: string[][] } }).mock.calls.some(
-          ([url]) => String(url).includes("node") && String(url).includes("path=&"),
-        ),
-      ).toBe(true),
-    );
+    fireEvent.click(screen.getAllByTitle("see what to do at this spot")[0] as HTMLElement);
+    await waitFor(() => expect(fetched("path=&")).toBe(true));
+    // The moves after it are still on the line, and its actions are now buttons.
+    expect(screen.getAllByText("BTN").length).toBe(2);
+    expect(screen.getByTitle("fold instead")).toBeTruthy();
+    expect(screen.getByTitle(/as the line does$/)).toBeTruthy();
+  });
+
+  it("replaces the line from a read spot when you take another action there", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    fireEvent.click(screen.getAllByTitle("see what to do at this spot")[0] as HTMLElement);
+    await waitFor(() => expect(screen.getByTitle("fold instead")).toBeTruthy());
+
+    fireEvent.click(screen.getByTitle("fold instead"));
+    await waitFor(() => expect(fetched("path=f&")).toBe(true));
+  });
+
+  it("moves the reading on when you take the action the line already took", async () => {
+    mountAt(SPOT);
+    await waitFor(() => expect(screen.getByText("whole range")).toBeTruthy());
+    fireEvent.click(screen.getAllByTitle("see what to do at this spot")[0] as HTMLElement);
+    await waitFor(() => expect(screen.getByTitle(/as the line does$/)).toBeTruthy());
+
+    fireEvent.click(screen.getByTitle(/as the line does$/));
+    // The second spot is read -- the line up to `c` -- and the line is kept.
+    await waitFor(() => expect(fetched("path=c&")).toBe(true));
+    expect(screen.getAllByText("BTN").length).toBe(2);
   });
 
   it("shows the flop's cards where the flop happened", async () => {
@@ -362,7 +389,7 @@ describe("the chart, drawn", () => {
 
     // Step to a different spot: same page, different chart. The first column's
     // taken action is the way back now.
-    fireEvent.click(screen.getAllByTitle("read the chart at this spot")[0] as HTMLElement);
+    fireEvent.click(screen.getAllByTitle("see what to do at this spot")[0] as HTMLElement);
     await waitFor(() => expect(screen.getByText(/Hover a hand, or click to pin it/)).toBeTruthy());
     expect(screen.queryByText("pinned")).toBeNull();
   });

@@ -4473,16 +4473,6 @@
           },
           {
             "in": "query",
-            "name": "average",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Average",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
             "name": "stack",
             "required": false,
             "schema": {

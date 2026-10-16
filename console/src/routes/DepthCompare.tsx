@@ -13,6 +13,9 @@ const KIND_COLOUR: Record<Kind, string> = {
   allin: "#6E1F1A",
 };
 
+/** Aggressive to passive, fold on the right -- the order the chart draws in. */
+const DRAWN = [...KINDS].reverse();
+
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 type DepthRow = {
@@ -34,7 +37,6 @@ type DepthRow = {
 export function DepthCompare({
   path,
   board,
-  average,
   depths,
   bigBlind,
   combos,
@@ -45,7 +47,6 @@ export function DepthCompare({
 }: {
   path: string;
   board: string;
-  average: boolean;
   depths: readonly number[];
   bigBlind: number;
   combos: string[] | null;
@@ -56,13 +57,7 @@ export function DepthCompare({
 }) {
   // Shallow first, so the eye reads depth left to right / top to bottom.
   const ordered = useMemo(() => [...depths].sort((a, b) => a - b), [depths]);
-  const nodes = useSolverNodes(
-    path,
-    board,
-    average,
-    ordered,
-    combos !== null && ordered.length > 1,
-  );
+  const nodes = useSolverNodes(path, board, ordered, combos !== null && ordered.length > 1);
   const current = stack ?? ordered[ordered.length - 1];
 
   const rows: DepthRow[] = ordered.map((s, i) => {
@@ -203,7 +198,7 @@ function DepthBars({
         );
       })}
       <p className="flex gap-3 pt-1 text-[11px] text-[var(--fg-faint)]">
-        {KINDS.map((k) => (
+        {DRAWN.map((k) => (
           <span key={k} className="flex items-center gap-1">
             <span className="size-2 rounded-sm" style={{ background: KIND_COLOUR[k] }} />
             {KIND_LABEL[k]}
@@ -222,7 +217,7 @@ function Stack({ mix, ring }: { mix: KindMix; ring?: boolean }) {
         ring && "outline outline-1 outline-[var(--fg-muted)]",
       )}
     >
-      {(["allin", "raise", "call", "fold"] as const).map((k) => (
+      {DRAWN.map((k) => (
         <span key={k} style={{ width: `${mix[k] * 100}%`, background: KIND_COLOUR[k] }} />
       ))}
     </span>

@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
  * A tab strip whose selection lives in the URL.
  *
  * **Not `useState`.** The console already learned this once: the chart page's
- * own docstring claimed a bookmarked spot stays the spot it was, while `path`,
- * `board` and `average` were all component state — so nothing on it was
+ * own docstring claimed a bookmarked spot stays the spot it was, while `path`
+ * and `board` were all component state — so nothing on it was
  * shareable and the claim was simply false. A tab is the same kind of thing. If
  * `/blueprint` opens on the chart no matter what you were looking at, then
  * sending someone "the play table" is impossible and a refresh loses your place.

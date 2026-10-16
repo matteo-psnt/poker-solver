@@ -1,7 +1,7 @@
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useBlueprintRun, useCombos, useSolverNode } from "@/api/queries";
-import type { Edge, SolverNode, Spot } from "@/api/types";
+import type { Edge, SolverNode } from "@/api/types";
 import { BoardPicker } from "@/components/BoardPicker";
 import { Panel } from "@/components/Panel";
 import { PlayingCard } from "@/components/PlayingCard";
@@ -10,6 +10,7 @@ import { type ActionLabel, describeAction, describeActions, inBlinds } from "@/l
 import {
   actionColours,
   aggregate,
+  aggressiveFirst,
   bucketGroups,
   type Cell,
   type ComboRow,
@@ -25,9 +26,10 @@ const route = getRouteApi("/blueprint");
 /**
  * The chart: the line across the top, the grid under it, the mix beside it.
  *
- * **The spot is in the URL.** `path`, `board` and `average` are search params, not
+ * **The spot is in the URL.** `path`, `board` and `at` are search params, not
  * `useState`, which is what makes a bookmarked spot the spot it was and lets you
- * send someone one.
+ * send someone one. `path` is the whole line; `at` is how much of it the chart
+ * reads, so looking back at an earlier decision keeps the moves after it.
  *
  * **A street appears when the line reaches it, and not before.** The board is not
  * a thing you set up first; it is a column that arrives mid-line, the way cards
@@ -36,7 +38,12 @@ const route = getRouteApi("/blueprint");
  * has no strategy at all until someone says which flop.
  */
 export function Charts() {
-  const { path, board, average, stack } = route.useSearch();
+  const { path, board, stack, at } = route.useSearch();
+  const line = path ? path.split("/") : [];
+  // How many of the line's actions the chart reads; the whole line unless a past
+  // spot was clicked.
+  const reading = at === undefined ? line.length : Math.min(at, line.length);
+  const read = line.slice(0, reading).join("/");
   const navigate = useNavigate({ from: "/blueprint" });
   /**
    * A pin belongs to the SPOT it was taken in, so it is STORED with one.
@@ -52,7 +59,7 @@ export function Charts() {
   // to another: the grid would redraw from the new depth while the rail beside it
   // still showed the old one's strategy and combo count, under a label saying
   // "pinned" -- the same two-contradictory-answers bug the board once had.
-  const spot = `${path}|${board}|${average}|${stack ?? "deepest"}`;
+  const spot = `${read}|${board}|${stack ?? "deepest"}`;
   const [held, setHeld] = useState<{ spot: string; cell: Cell } | null>(null);
   const pinned = held?.spot === spot ? held.cell : null;
   const [hovered, setHovered] = useState<Cell | null>(null);
@@ -62,10 +69,25 @@ export function Charts() {
 
   const run = useBlueprintRun();
   const combos = useCombos(!!run.data);
-  const node = useSolverNode(path, board, average, !!run.data, stack);
+  // The whole line draws the sequence; the read prefix draws the chart. One
+  // query when nothing earlier is being read, since the keys are then equal.
+  const full = useSolverNode(path, board, !!run.data, stack);
+  const node = useSolverNode(read, board, !!run.data, stack);
 
-  const set = (next: Partial<{ path: string; board: string; average: boolean; stack: number }>) =>
-    navigate({ search: (old) => ({ ...old, ...next }) });
+  const set = (
+    next: Partial<{ path: string; board: string; stack: number; at: number | undefined }>,
+  ) => navigate({ search: (old) => ({ ...old, ...next }) });
+  /** Read the spot after `count` actions, leaving the line as it is. */
+  const view = (count: number) => set({ at: count >= line.length ? undefined : count });
+  /**
+   * Take `token` at the spot after `count` actions. The action already on the
+   * line just moves the reading on; any other one replaces the line from there.
+   */
+  const take = (count: number, token: string) => {
+    setEditing(false);
+    if (line[count] === token) view(count + 1);
+    else set({ path: [...line.slice(0, count), token].join("/"), at: undefined });
+  };
 
   const grid = node.data?.grid ?? null;
   const cells = useMemo(() => {
@@ -107,28 +129,29 @@ export function Charts() {
 
   const shown = pinned ?? hovered;
   const pending = node.data?.pending ?? null;
-  const deckOpen = editing || pending !== null;
+  // The deck answers the LINE, which may be waiting on a street past the spot read.
+  const linePending = full.data?.pending ?? null;
+  const deckOpen = editing || linePending !== null;
 
   return (
     <div className="space-y-3">
       <Sequence
-        node={node.data ?? null}
+        node={full.data ?? null}
+        reading={reading}
         bigBlind={bigBlind}
-        onGo={(next) => {
-          setEditing(false);
-          set({ path: next });
-        }}
+        onView={view}
+        onTake={take}
         onEditBoard={() => setEditing((was) => !was)}
         editing={editing}
       />
 
       {deckOpen && (
         <div className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-3">
-          {pending && (
+          {linePending && (
             <p className="mb-2 text-[12px] text-[var(--fg-muted)]">
-              This line is on the <span className="text-[var(--fg)]">{pending.street}</span>. Deal{" "}
-              {pending.needed - pending.have} more card
-              {pending.needed - pending.have === 1 ? "" : "s"} to see the strategy here.
+              This line is on the <span className="text-[var(--fg)]">{linePending.street}</span>.
+              Deal {linePending.needed - linePending.have} more card
+              {linePending.needed - linePending.have === 1 ? "" : "s"} to see the strategy here.
             </p>
           )}
           <BoardPicker
@@ -145,15 +168,12 @@ export function Charts() {
           grid ? `${grid.street} · ${seatName(grid.actor, node.data?.button ?? 0)} to act` : "chart"
         }
         aside={
-          <>
-            <Depth
-              depths={run.data?.depths ?? []}
-              stack={stack}
-              bigBlind={run.data?.big_blind ?? 2}
-              onSet={set}
-            />
-            <Average average={average} onSet={set} />
-          </>
+          <Depth
+            depths={run.data?.depths ?? []}
+            stack={stack}
+            bigBlind={run.data?.big_blind ?? 2}
+            onSet={set}
+          />
         }
         // `combos` is fetched once with staleTime Infinity and is not retried,
         // so a 503 from the blueprint box would otherwise blank the grid for the
@@ -210,9 +230,8 @@ export function Charts() {
 
       {grid && !pending && !node.data?.terminal && (
         <DepthCompare
-          path={path}
+          path={read}
           board={board}
-          average={average}
           depths={run.data?.depths ?? []}
           bigBlind={bigBlind || 2}
           combos={combos.data?.combos ?? null}
@@ -241,23 +260,27 @@ function seatName(seat: number, button: number): string {
  * The line, as one column per thing that happened.
  *
  * Read left to right it is the hand: someone acted, someone acted, the flop came,
- * someone acted. Every past column keeps the WHOLE menu that was on offer there,
- * so stepping back into a spot and taking the other branch is one click and no
- * round trip — the server sent the options with the line for that reason.
+ * someone acted. Every column keeps the WHOLE menu that was on offer there.
  *
- * The last column is where you are, and it is the only one with nothing chosen
- * in it yet.
+ * Clicking a column READS it: the chart shows what to do at that spot and the
+ * moves after it stay on the line, dimmed. Inside the column being read the
+ * actions are buttons, and taking one sets the line to that action from there.
  */
 function Sequence({
   node,
+  reading,
   bigBlind,
-  onGo,
+  onView,
+  onTake,
   onEditBoard,
   editing,
 }: {
   node: SolverNode | null;
+  /** How many of the line's actions the chart reads. */
+  reading: number;
   bigBlind: number;
-  onGo: (path: string) => void;
+  onView: (count: number) => void;
+  onTake: (count: number, token: string) => void;
   onEditBoard: () => void;
   editing: boolean;
 }) {
@@ -267,17 +290,17 @@ function Sequence({
     );
   }
 
-  // A column's path is the tokens BEFORE it -- the line that leads TO this
-  // spot, which is where clicking it goes. Looking at a spot never changes the
-  // line: you step back into one and then take an action, rather than editing a
-  // decision in place. Deals carry no token, which is why this counts spots
-  // rather than using the column index.
-  const tokens: string[] = [];
+  // A spot column is numbered by the actions BEFORE it, which is the count the
+  // chart reads to show it. Deals carry no action, so this counts spots rather
+  // than using the column index.
+  let count = 0;
   const columns = (node.line ?? []).map((step) => {
-    const before = tokens.join("/");
-    if (step.kind === "spot") tokens.push(step.chosen);
+    const before = count;
+    if (step.kind === "spot") count += 1;
     return { step, before };
   });
+  const end = count;
+  const button = node.button ?? 0;
 
   return (
     <div className="flex items-stretch gap-1.5 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] p-1.5">
@@ -285,10 +308,15 @@ function Sequence({
         step.kind === "spot" ? (
           <SpotColumn
             key={`${index}-${step.chosen}`}
-            spot={step}
-            button={node.button ?? 0}
+            label={seatName(step.actor, button)}
+            note={inBlinds(step.stack, bigBlind)}
+            options={step.options}
+            chosen={step.chosen}
             bigBlind={bigBlind}
-            onGo={() => onGo(before)}
+            read={before === reading}
+            ahead={before > reading}
+            onView={() => onView(before)}
+            onTake={(token) => onTake(before, token)}
           />
         ) : (
           <DealColumn
@@ -299,6 +327,7 @@ function Sequence({
             bigBlind={bigBlind}
             onEdit={onEditBoard}
             editing={editing}
+            ahead={before > reading}
           />
         ),
       )}
@@ -316,14 +345,20 @@ function Sequence({
       )}
 
       {!node.pending && !node.terminal && node.grid && (
-        <HereColumn
-          actor={node.grid.actor}
-          button={node.button ?? 0}
-          pot={node.pot ?? 0}
-          stack={node.stack ?? null}
-          bigBlind={bigBlind}
+        <SpotColumn
+          label={seatName(node.grid.actor, button)}
+          note={
+            node.stack === null || node.stack === undefined
+              ? `${inBlinds(node.pot ?? 0, bigBlind)} pot`
+              : inBlinds(node.stack, bigBlind)
+          }
           options={node.children ?? []}
-          onPick={(token) => onGo(node.path ? `${node.path}/${token}` : token)}
+          chosen={null}
+          bigBlind={bigBlind}
+          read={reading === end}
+          ahead={false}
+          onView={() => onView(end)}
+          onTake={(token) => onTake(end, token)}
         />
       )}
 
@@ -336,79 +371,75 @@ function Sequence({
   );
 }
 
-/** One past decision: who, with how much, and every action they had. */
+/**
+ * One decision: who, with how much, and every action they had, aggressive at
+ * the top and fold at the bottom.
+ *
+ * Not being read, the whole card is one button that reads it. Being read, each
+ * action is its own button, and the one already on the line is marked.
+ */
 function SpotColumn({
-  spot,
-  button,
-  bigBlind,
-  onGo,
-}: {
-  spot: Spot;
-  button: number;
-  bigBlind: number;
-  /** Read the chart at this spot. The line is not changed by looking at it. */
-  onGo: () => void;
-}) {
-  const colours = actionColours(spot.options.map((option) => option.token));
-  return (
-    <Column
-      label={seatName(spot.actor, button)}
-      note={inBlinds(spot.stack, bigBlind)}
-      onGo={onGo}
-      title="read the chart at this spot"
-    >
-      {spot.options.map((option, index) => (
-        <span
-          key={option.token}
-          className={rowClass(option.token === spot.chosen, false)}
-          style={rowStyle(option.token === spot.chosen, colours[index] ?? "transparent")}
-        >
-          <Dot colour={colours[index] ?? "transparent"} show={false} />
-          {describeAction(option, bigBlind).text}
-        </span>
-      ))}
-    </Column>
-  );
-}
-
-/** Where you are: the same column shape, with nothing taken yet. */
-function HereColumn({
-  actor,
-  button,
-  pot,
-  stack,
-  bigBlind,
+  label,
+  note,
   options,
-  onPick,
+  chosen,
+  bigBlind,
+  read,
+  ahead,
+  onView,
+  onTake,
 }: {
-  actor: number;
-  button: number;
-  pot: number;
-  stack: number | null;
-  bigBlind: number;
+  label: string;
+  note: string;
   options: Edge[];
-  onPick: (token: string) => void;
+  /** The action the line took here; null at the end of the line. */
+  chosen: string | null;
+  bigBlind: number;
+  read: boolean;
+  /** Past the spot being read: still on the line, drawn dimmed. */
+  ahead: boolean;
+  onView: () => void;
+  onTake: (token: string) => void;
 }) {
-  const colours = actionColours(options.map((option) => option.token));
+  const tokens = options.map((option) => option.token);
+  const colours = actionColours(tokens);
+  const order = aggressiveFirst(tokens);
   return (
     <Column
-      label={seatName(actor, button)}
-      note={stack === null ? `${inBlinds(pot, bigBlind)} pot` : inBlinds(stack, bigBlind)}
-      here
+      label={label}
+      note={note}
+      here={read}
+      ahead={ahead}
+      onGo={read ? undefined : onView}
+      title="see what to do at this spot"
     >
       {options.length === 0 && (
         <span className="px-1.5 py-1 text-[11px] text-[var(--fg-faint)]">no actions</span>
       )}
-      {options.map((option, index) => {
-        const label = describeAction(option, bigBlind).text;
-        return (
+      {order.map((index) => {
+        const option = options[index];
+        if (!option) return null;
+        const text = describeAction(option, bigBlind).text;
+        const colour = colours[index] ?? "transparent";
+        const taken = option.token === chosen;
+        return read ? (
           <ActionRow
             key={option.token}
-            label={label}
-            colour={colours[index] ?? "transparent"}
-            title={`${label}, and read the spot after it`}
-            onClick={() => onPick(option.token)}
+            label={text}
+            colour={colour}
+            chosen={taken}
+            title={taken ? `${text}, as the line does` : `${text} instead`}
+            onClick={() => onTake(option.token)}
           />
+        ) : (
+          <span
+            key={option.token}
+            className={rowClass(taken, false)}
+            style={rowStyle(taken, colour)}
+          >
+            <Dot colour={colour} show={false} />
+            {text}
+          </span>
         );
       })}
     </Column>
@@ -431,6 +462,7 @@ function DealColumn({
   bigBlind,
   onEdit,
   editing,
+  ahead = false,
 }: {
   street: string;
   cards: string[];
@@ -439,12 +471,14 @@ function DealColumn({
   bigBlind: number;
   onEdit: () => void;
   editing: boolean;
+  ahead?: boolean;
 }) {
   return (
     <Column
       label={street}
       note={pot === null ? "" : `${inBlinds(pot, bigBlind)} pot`}
       here={editing}
+      ahead={ahead}
     >
       <button
         type="button"
@@ -472,14 +506,15 @@ function DealColumn({
 /**
  * The frame every column shares: a header, then rows.
  *
- * A PAST column is one button covering the whole card, because every part of it
- * means the same thing -- show me this spot. Only the column you are standing in
- * has per-action controls, and that is where taking an action lives.
+ * A column not being read is one button covering the whole card, because every
+ * part of it means the same thing -- show me this spot. Only the column being
+ * read has per-action controls, and that is where taking an action lives.
  */
 function Column({
   label,
   note,
   here = false,
+  ahead = false,
   onGo,
   title,
   children,
@@ -488,6 +523,8 @@ function Column({
   note: string;
   /** This is the spot being read, or the street being dealt. */
   here?: boolean;
+  /** Later in the line than the spot being read. */
+  ahead?: boolean;
   /** Makes the whole card a link to one spot. Omit for the current column. */
   onGo?: () => void;
   title?: string;
@@ -498,7 +535,8 @@ function Column({
     // Every column is a card, so the line reads as columns rather than as
     // one wide table; the spot being READ is the lit one among them.
     here ? "border-[var(--fg-faint)] bg-white/[0.05]" : "border-[var(--border)] bg-white/[0.015]",
-    onGo && "hover:border-[var(--fg-faint)] hover:bg-white/[0.05]",
+    ahead && "opacity-45",
+    onGo && "hover:border-[var(--fg-faint)] hover:bg-white/[0.05] hover:opacity-100",
   );
   const inside = (
     <>
@@ -525,11 +563,12 @@ function Column({
   );
 }
 
-/** The look of one action row, shared by the past columns and the live one. */
+/** The look of one action row, in a column being read or not. */
 function rowClass(chosen: boolean, live: boolean): string {
   return cn(
     "flex items-center gap-2 rounded-[3px] border-l-2 py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",
     chosen && "font-medium text-[var(--fg)]",
+    chosen && live && "hover:brightness-125",
     !chosen && live && "border-l-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
     !chosen && !live && "border-l-transparent text-[var(--fg-faint)]",
     live && !chosen && "hover:bg-white/[0.05]",
@@ -555,23 +594,31 @@ function Dot({ colour, show }: { colour: string; show: boolean }) {
 function ActionRow({
   label,
   colour,
+  chosen,
   title,
   onClick,
 }: {
   label: string;
   colour: string;
+  /** The action the line already takes here. */
+  chosen: boolean;
   title: string;
   onClick: () => void;
 }) {
   return (
-    <button type="button" title={title} onClick={onClick} className={rowClass(false, true)}>
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={rowClass(chosen, true)}
+      style={rowStyle(chosen, colour)}
+    >
       <Dot colour={colour} show />
       {label}
     </button>
   );
 }
 
-/** The average/current toggle, which belongs to the numbers rather than the line. */
 /**
  * Which DEPTH of the ladder the grid reads.
  *
@@ -613,31 +660,6 @@ function Depth({
   );
 }
 
-function Average({
-  average,
-  onSet,
-}: {
-  average: boolean;
-  onSet: (next: { average: boolean }) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-[11px] text-[var(--fg-muted)]">
-      <input
-        type="checkbox"
-        checked={average}
-        onChange={(event) => onSet({ average: event.target.checked })}
-      />
-      average strategy
-      {/* Not a detail: the average is the blueprint and what converges; the
-          current strategy is regret-matching's latest guess, and on an
-          under-trained run they disagree sharply. */}
-      <span className="text-[var(--fg-faint)]">
-        {average ? "the blueprint proper" : "regret-matched current guess"}
-      </span>
-    </label>
-  );
-}
-
 /**
  * What the range DOES, as one tile per action.
  *
@@ -655,14 +677,17 @@ function Actions({ summary, labels }: { summary: RangeSummary | null; labels: Ac
       <div className="text-[var(--fg-faint)]">Nothing here was trained — no range to total.</div>
     );
   }
-  const colours = actionColours(labels.map((label) => label.token));
+  const tokens = labels.map((label) => label.token);
+  const colours = actionColours(tokens);
   return (
     <div className="space-y-2">
       <div className="text-[11px] tracking-widest text-[var(--fg-faint)] uppercase">
         whole range
       </div>
       <div className="space-y-2">
-        {labels.map((label, index) => {
+        {aggressiveFirst(tokens).map((index) => {
+          const label = labels[index];
+          if (!label) return null;
           const weight = summary.strategy[index] ?? 0;
           return (
             <div key={label.token} className="space-y-1">
@@ -781,7 +806,9 @@ function HandDetail({
       </div>
     );
   }
-  const colours = actionColours(actions.map((action) => action.token));
+  const tokens = actions.map((action) => action.token);
+  const colours = actionColours(tokens);
+  const strategy = cell.strategy;
   return (
     <div className="min-h-[7rem] space-y-1 border-t border-[var(--border)] pt-2">
       <div className="flex items-baseline gap-2">
@@ -791,16 +818,16 @@ function HandDetail({
       </div>
       {cell.combos === 0 ? (
         <div className="text-[var(--fg-faint)]">blocked by the board</div>
-      ) : cell.strategy ? (
-        cell.strategy.map((weight, index) => (
-          <div key={actions[index]?.token ?? index} className="flex items-center gap-2">
+      ) : strategy ? (
+        aggressiveFirst(tokens).map((index) => (
+          <div key={tokens[index] ?? index} className="flex items-center gap-2">
             <span
               className="size-2.5 shrink-0 rounded-[2px]"
               style={{ backgroundColor: colours[index] }}
             />
             <span className="text-[var(--fg-muted)]">{actions[index]?.text}</span>
             <span className="ml-auto tabular-nums text-[var(--fg)]">
-              {(weight * 100).toFixed(1)}%
+              {((strategy[index] ?? 0) * 100).toFixed(1)}%
             </span>
           </div>
         ))
@@ -833,7 +860,9 @@ function HandDetail({
  * widest thing in a 19rem column.
  */
 function Combos({ rows, actions }: { rows: ComboRow[]; actions: ActionLabel[] }) {
-  const colours = actionColours(actions.map((action) => action.token));
+  const tokens = actions.map((action) => action.token);
+  const colours = actionColours(tokens);
+  const order = aggressiveFirst(tokens);
   const groups = bucketGroups(rows);
   const playable = rows.filter((row) => !row.blocked).length;
 
@@ -852,6 +881,7 @@ function Combos({ rows, actions }: { rows: ComboRow[]; actions: ActionLabel[] })
             key={row.combo}
             row={row}
             colours={colours}
+            order={order}
             group={groups.size > 1 ? (groups.get(row.bucket) ?? null) : null}
           />
         ))}
@@ -875,10 +905,13 @@ function Combos({ rows, actions }: { rows: ComboRow[]; actions: ActionLabel[] })
 function ComboRowView({
   row,
   colours,
+  order,
   group,
 }: {
   row: ComboRow;
   colours: string[];
+  /** Menu indices in drawing order, aggressive first. */
+  order: number[];
   /** Which set of look-alikes this combo is in, or null when they all match. */
   group: number | null;
 }) {
@@ -900,13 +933,16 @@ function ComboRowView({
         <span className="text-[11px] text-[var(--fg-faint)]">on the board</span>
       ) : row.strategy ? (
         <span className="flex h-4 min-w-0 flex-1 overflow-hidden rounded-[2px]">
-          {row.strategy.map((weight, index) => (
-            <span
-              key={index}
-              style={{ backgroundColor: colours[index], width: `${weight * 100}%` }}
-              title={`${(weight * 100).toFixed(1)}%`}
-            />
-          ))}
+          {order.map((index) => {
+            const weight = row.strategy?.[index] ?? 0;
+            return (
+              <span
+                key={index}
+                style={{ backgroundColor: colours[index], width: `${weight * 100}%` }}
+                title={`${(weight * 100).toFixed(1)}%`}
+              />
+            );
+          })}
         </span>
       ) : (
         <span className="text-[11px] text-[var(--fg-faint)]">never trained</span>

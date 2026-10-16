@@ -166,21 +166,15 @@ export const useCombos = (enabled: boolean) =>
     enabled,
   });
 
-export const useSolverNode = (
-  path: string,
-  board: string,
-  average: boolean,
-  enabled: boolean,
-  stack?: number,
-) =>
+export const useSolverNode = (path: string, board: string, enabled: boolean, stack?: number) =>
   useQuery<SolverNode>({
     // `stack` is in the key: switching depth must refetch, not reuse the grid of
     // the depth before it. A cached 100 bb range shown under a 6 bb label is the
     // exact failure the server's own 422 exists to prevent.
-    queryKey: ["blueprint", "node", path, board, average, stack ?? "deepest"],
+    queryKey: ["blueprint", "node", path, board, stack ?? "deepest"],
     queryFn: () =>
       get(
-        `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}` +
+        `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}` +
           (stack === undefined ? "" : `&stack=${stack}`),
       ),
     enabled,
@@ -199,16 +193,15 @@ export const useSolverNode = (
 export const useSolverNodes = (
   path: string,
   board: string,
-  average: boolean,
   stacks: readonly number[],
   enabled: boolean,
 ) =>
   useQueries({
     queries: stacks.map((stack) => ({
-      queryKey: ["blueprint", "node", path, board, average, stack],
+      queryKey: ["blueprint", "node", path, board, stack],
       queryFn: () =>
         get<SolverNode>(
-          `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&average=${average}&stack=${stack}`,
+          `/api/blueprint/node?path=${encodeURIComponent(path)}&board=${encodeURIComponent(board)}&stack=${stack}`,
         ),
       enabled,
       staleTime: 60_000,

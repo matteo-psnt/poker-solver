@@ -117,15 +117,6 @@ class TestUntrainedIsNotUniform:
         assert grid.trained_buckets == len(trained)
 
 
-class TestAverageAndCurrentAreDifferentQuestions:
-    def test_both_are_available_and_the_choice_is_explicit(self, blueprint, root):
-        average = strategy_grid(blueprint, root, use_average=True)
-        current = strategy_grid(blueprint, root, use_average=False)
-
-        assert average.combo_buckets == current.combo_buckets
-        assert average.actions == current.actions
-
-
 class TestRefusals:
     def test_a_terminal_node_has_no_strategy(self, blueprint):
         fold = replay(blueprint, "f")

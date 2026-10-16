@@ -501,9 +501,7 @@ def create_app(
         return JSONResponse(Combos(combos=list(_COMBO_LABELS)).model_dump())
 
     @app.get("/api/node")
-    def _node(
-        path: str = "", board: str = "", average: bool = True, stack: int | None = None
-    ) -> JSONResponse:
+    def _node(path: str = "", board: str = "", stack: int | None = None) -> JSONResponse:
         """The strategy at one spot, for every combo the board allows.
 
         ``stack`` selects a rung of the depth ladder; omitted means the deepest.
@@ -549,7 +547,7 @@ def create_app(
                     line=_line_payload(node.line),
                 ).model_dump()
             )
-        grid = strategy_grid(chosen, node, use_average=average)
+        grid = strategy_grid(chosen, node)
         return JSONResponse(
             SolverNode(
                 path=path,

@@ -2538,7 +2538,6 @@ export interface operations {
             query?: {
                 path?: string;
                 board?: string;
-                average?: boolean;
                 stack?: number | null;
             };
             header?: never;

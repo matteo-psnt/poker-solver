@@ -14,7 +14,7 @@ const route = getRouteApi("/blueprint");
  * on every spot -- and both halves below already say what they are looking at.
  *
  * The tab is a search param, so a spot stays shareable -- as are the chart's
- * `path`/`board`/`average`, which this page had to keep when it absorbed them.
+ * `path`/`board`/`at`, which this page had to keep when it absorbed them.
  */
 export function Blueprint() {
   const { tab } = route.useSearch();

@@ -61,7 +61,7 @@ const routes = [
   /**
    * The blueprint, read as a grid or played against.
    *
-   * `path`/`board`/`average` came with the chart and had to: they are search
+   * `path`/`board`/`at` came with the chart and had to: they are search
    * params precisely because the page they replaced held them in `useState`, so
    * its own claim that a bookmarked spot survives was untrue of anything on it.
    * `tab` joins them for the same reason.
@@ -74,7 +74,8 @@ const routes = [
       tab: z.enum(["chart", "play"]).default("chart"),
       path: z.string().default(""),
       board: z.string().default(""),
-      average: z.boolean().default(true),
+      // How many of `path`'s actions the chart reads; absent reads all of them.
+      at: z.number().int().nonnegative().optional(),
       // The DEPTH, when the server holds a ladder. Optional rather than defaulted:
       // absent means "the deepest", which is what a single-run server has, and
       // baking a number in would make a shared link wrong on a different box.

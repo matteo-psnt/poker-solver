@@ -217,6 +217,35 @@ export function actionColours(tokens: readonly string[]): string[] {
   });
 }
 
+/**
+ * The order actions are DRAWN in: all in, raises largest first, call or check,
+ * fold last -- aggressive on the left, passive on the right, so fold sits at the
+ * right edge of every bar and list.
+ *
+ * Indices into the menu rather than a sorted copy, because every strategy row is
+ * indexed by the menu and must stay aligned with it.
+ */
+export function aggressiveFirst(tokens: readonly string[]): number[] {
+  const rank = (token: string) => {
+    const kind = token[0];
+    if (kind === "A") return 0;
+    if (kind === "b" || kind === "r") return 1;
+    if (kind === "x" || kind === "c") return 2;
+    if (kind === "f") return 3;
+    return 4;
+  };
+  // A stable sort keeps the menu's own order among raises, which runs small to
+  // large; reversing it within the raise rank puts the largest first.
+  return tokens
+    .map((token, index) => ({ token, index }))
+    .sort(
+      (a, b) =>
+        rank(a.token) - rank(b.token) ||
+        (rank(a.token) === 1 ? b.index - a.index : a.index - b.index),
+    )
+    .map(({ index }) => index);
+}
+
 export interface ComboRow {
   /** The wire spelling, `"AsKs"` — the same one the board and the URL use. */
   combo: string;
