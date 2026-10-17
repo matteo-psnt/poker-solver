@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Deploy every commit that lands on `main` to the serving box.
+# Deploy what is pushed to GitHub's `main` to the serving box.
 #
-#   autodeploy.sh hook     what .git/hooks/post-commit runs (`just autodeploy-install`)
-#   autodeploy.sh worker   the background half; never run it by hand
+#   autodeploy.sh push <remote>   what .git/hooks/pre-push runs (`just autodeploy-install`)
+#   autodeploy.sh worker <repo>   the background half; never run it by hand
 #
-# The hook returns at once: it records the commit as WANTED and forks a worker.
-# One worker at a time holds the lock, waits out the 00:00-05:00 UTC match window
-# (deploy.sh says why), and deploys the newest wanted commit, so a burst of
-# merges coalesces into one deploy. The settings the seat fields are NOT this
+# The hook returns at once: it records the pushed commit as WANTED and forks a
+# worker. One worker at a time holds the lock, waits out the 00:00-05:00 UTC match
+# window (deploy.sh says why), and deploys the newest wanted commit, so a burst of
+# pushes coalesces into one deploy. The settings the seat fields are NOT this
 # script's: `just serve-redeploy` reads them off the box at deploy time.
 #
 # What is deployed is the COMMIT, built in a scratch checkout, never the primary
@@ -32,26 +32,45 @@ notify() {
 # tests alone) skips the restart.
 RELEVANT='^(src/|console/|infra/serve/|config/|pyproject\.toml$|uv\.lock$|justfile$)'
 
-hook() {
-    local repo common sha
-    repo=$(git rev-parse --show-toplevel)
-    common=$(cd "$repo" && cd "$(git rev-parse --git-common-dir)" && pwd)
-    # The primary checkout's `main` only: a worktree's commits are a branch.
-    [ "$common" = "$repo/.git" ] || return 0
-    [ "$(git symbolic-ref --short -q HEAD || true)" = main ] || return 0
-    sha=$(git rev-parse HEAD)
-    if [ -e "$STATE/off" ]; then
-        log "off: skipping ${sha:0:8} ($STATE/off exists)"
-        return 0
-    fi
-    if ! git diff-tree --no-commit-id --name-only -r --root HEAD | grep -qE "$RELEVANT"; then
-        log "skip ${sha:0:8}: nothing the box runs changed"
-        return 0
-    fi
-    echo "$sha" > "$STATE/wanted"
-    log "wanted ${sha:0:8}"
-    echo "autodeploy: ${sha:0:8} queued; log at $LOG" >&2
-    nohup "$repo/infra/serve/autodeploy.sh" worker "$repo" >> "$LOG" 2>&1 < /dev/null &
+# pre-push hands over "<local ref> <local sha> <remote ref> <remote sha>" lines.
+push() {
+    local remote="$1" common repo local_ref local_sha remote_ref remote_sha changed
+    [ "$remote" = origin ] || return 0
+    common=$(cd "$(git rev-parse --git-common-dir)" && pwd)
+    repo=$(dirname "$common")
+    # shellcheck disable=SC2034
+    while read -r local_ref local_sha remote_ref remote_sha; do
+        [ "$remote_ref" = refs/heads/main ] || continue
+        case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+        if [ -e "$STATE/off" ]; then
+            log "off: skipping ${local_sha:0:8} ($STATE/off exists)"
+            continue
+        fi
+        if git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$remote_sha" "$local_sha")
+        else
+            changed=$(git ls-tree -r --name-only "$local_sha")
+        fi
+        if ! grep -qE "$RELEVANT" <<< "$changed"; then
+            log "skip ${local_sha:0:8}: nothing the box runs changed"
+            continue
+        fi
+        echo "$local_sha" > "$STATE/wanted"
+        log "wanted ${local_sha:0:8}"
+        echo "autodeploy: ${local_sha:0:8} queued; log at $LOG" >&2
+        nohup "$repo/infra/serve/autodeploy.sh" worker "$repo" >> "$LOG" 2>&1 < /dev/null &
+    done
+}
+
+# pre-push runs BEFORE the push: deploy only what GitHub accepted, which a
+# successful push records by moving origin/main.
+landed() {
+    local repo="$1" sha="$2" _
+    for _ in $(seq 60); do
+        git -C "$repo" merge-base --is-ancestor "$sha" refs/remotes/origin/main 2>/dev/null && return 0
+        sleep 2
+    done
+    return 1
 }
 
 take_lock() {
@@ -100,6 +119,10 @@ worker() {
         done
         sha=$(cat "$STATE/wanted")
         [ "$sha" != "$deployed" ] || break
+        if ! landed "$repo" "$sha"; then
+            log "not deploying ${sha:0:8}: origin/main does not contain it (push rejected?)"
+            break
+        fi
         if deploy "$repo" "$sha"; then
             deployed="$sha"
             echo "$sha" > "$STATE/deployed"
@@ -113,7 +136,7 @@ worker() {
 }
 
 case "${1:-}" in
-    hook) hook ;;
+    push) push "$2" ;;
     worker) worker "$2" ;;
-    *) echo "usage: autodeploy.sh hook|worker <repo>" >&2; exit 2 ;;
+    *) echo "usage: autodeploy.sh push <remote> | worker <repo>" >&2; exit 2 ;;
 esac

@@ -142,18 +142,12 @@ serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="" resolver="
 serve-redeploy code="":
     just serve-deploy keep {{code}}
 
-# Deploy every commit that lands on main, in the background, after the 00:00-05:00
-# UTC match window. Installs a line into .git/hooks/post-commit (idempotent);
-# `touch ~/.cache/poker-solver/autodeploy/off` pauses it. Log: autodeploy/log.
+# Deploy what is pushed to GitHub's main, in the background, after the 00:00-05:00
+# UTC match window. Installs infra/serve/pre-push as the repo's pre-push hook (it
+# also runs git-lfs); `touch ~/.cache/poker-solver/autodeploy/off` pauses it.
+# Log: ~/.cache/poker-solver/autodeploy/log.
 autodeploy-install:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    hook="$(git rev-parse --git-common-dir)/hooks/post-commit"
-    line='"$(git rev-parse --show-toplevel)/infra/serve/autodeploy.sh" hook || true'
-    [ -f "$hook" ] || printf '#!/bin/sh\n' > "$hook"
-    grep -qF 'autodeploy.sh' "$hook" || printf '%s\n' "$line" >> "$hook"
-    chmod +x "$hook"
-    echo "post-commit -> autodeploy installed in $hook"
+    install -m 755 infra/serve/pre-push "$(git rev-parse --git-common-dir)/hooks/pre-push"
 
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.
