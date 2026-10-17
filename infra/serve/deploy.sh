@@ -41,7 +41,7 @@ RUN="${1:-}"
 RECORD_DSN="${2:-}"
 STORE_ACCOUNT="${3:-}"
 if [ -z "$RUN" ] || [ -z "$RECORD_DSN" ] || [ -z "$STORE_ACCOUNT" ]; then
-    echo "usage: deploy.sh <run-id|keep> <record-dsn> <storage-account>" >&2
+    echo "usage: deploy.sh <run-id|keep|console> <record-dsn> <storage-account>" >&2
     echo "       (just serve-deploy <run> supplies all three)" >&2
     exit 2
 fi
@@ -131,25 +131,90 @@ else
 fi
 echo "==> code $snapshot"
 
+tarball="$WORK/code.incoming.tar.gz"
+az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
+    --container-name code --name "$snapshot" --file "$tarball" --output none
 # Extracted beside the live tree and swapped in, so a failed or interrupted
 # extraction never leaves a half-written checkout that `uv sync` would then
 # build against.
-rm -rf "$WORK/code.incoming"
-mkdir -p "$WORK/code.incoming"
-az storage blob download --auth-mode login --account-name "$STORE_ACCOUNT" \
-    --container-name code --name "$snapshot" --file "$WORK/code.incoming.tar.gz" --output none
-tar -xzf "$WORK/code.incoming.tar.gz" -C "$WORK/code.incoming"
-rm -f "$WORK/code.incoming.tar.gz"
-rm -rf "$WORK/code.previous"
-[ -d "$WORK/code" ] && mv "$WORK/code" "$WORK/code.previous"
-mv "$WORK/code.incoming" "$WORK/code"
+install_tree() {
+    local tree="$1"
+    rm -rf "$tree.incoming" "$tree.previous"
+    mkdir -p "$tree.incoming"
+    tar -xzf "$tarball" -C "$tree.incoming"
+    if [ -d "$tree" ]; then mv "$tree" "$tree.previous"; fi
+    mv "$tree.incoming" "$tree"
+    # The abstraction resolver scans `<cwd>/data/combo_abstraction`, and the
+    # services run with the tree as WorkingDirectory -- so `data` has to be
+    # there. A symlink: the snapshot excludes `data`, and the artifacts are far
+    # too big to live inside a tree that gets replaced.
+    mkdir -p "$WORK/data/combo_abstraction" "$WORK/data/runs"
+    ln -sfn "$WORK/data" "$tree/data"
+}
 
-# The abstraction resolver scans `<cwd>/data/combo_abstraction`, and the service
-# runs with WorkingDirectory=/mnt/work/code -- so `data` has to be there. A
-# symlink rather than a copy: the snapshot deliberately excludes `data`, and the
-# artifacts are far too big to live inside a tree that gets replaced.
-mkdir -p "$WORK/data/combo_abstraction" "$WORK/data/runs"
-ln -sfn "$WORK/data" "$WORK/code/data"
+# --------------------------------------------------------------------------- #
+# the read-only console, on the tailnet
+# --------------------------------------------------------------------------- #
+# `poker-solver serve --read-only` on loopback, published to the tailnet ONLY by
+# `tailscale serve` -- no Caddy route, no NSG rule. It reads as this box's
+# identity (Batch and Cost Management Reader, Storage Blob Data Reader; see
+# main.tf) and from Terraform outputs rendered on the laptop WITHOUT the store's
+# access key or the DSN, which reaches it through its environment instead.
+#
+# It runs from a tree of its OWN. The seat imported the code it started with,
+# so swapping its tree means restarting it -- and a restart inside 00:00-05:00
+# UTC costs matches. The console's tree can be swapped at any hour, which is
+# what `deploy.sh console` does, and all it does.
+field_console() {
+    if [ -n "${OUTPUTS_INFRA:-}" ] && [ -n "${OUTPUTS_STORE:-}" ]; then
+        outputs="$WORK/console/outputs"
+        mkdir -p "$outputs"
+        echo "$OUTPUTS_INFRA" | base64 -d > "$outputs/infra.json"
+        echo "$OUTPUTS_STORE" | base64 -d > "$outputs/infra-store.json"
+        env_file=$(mktemp)
+        {
+            echo "POKER_SOLVER_OUTPUTS_DIR=$outputs"
+            echo "POKER_SOLVER_RECORD_DSN=$RECORD_DSN"
+            echo "POKER_SOLVER_BLUEPRINT_URL=http://127.0.0.1:8790"
+            echo "POKER_SOLVER_BLUEPRINT_TOKEN=${API_TOKEN:-}"
+        } > "$env_file"
+        sudo install -m 0600 -o solver -g solver "$env_file" /etc/console.env
+        rm -f "$env_file"
+        sudo cp "$WORK/console-code/infra/serve/console.service" /etc/systemd/system/
+        if ! command -v tailscale >/dev/null 2>&1; then
+            echo "==> installing tailscale"
+            curl -fsSL https://tailscale.com/install.sh | sudo sh >/dev/null
+        fi
+        # `serve` does not build the page and this box has no npm: the snapshot
+        # carries `console/dist` only if it was pushed from a tree that built it.
+        [ -f "$WORK/console-code/console/dist/index.html" ] || echo "==> console: this snapshot" \
+            "has no console/dist -- push one built with \`just console-build\`"
+        sudo systemctl daemon-reload
+        sudo systemctl enable console
+        sudo systemctl restart console
+        # Joining the tailnet is a login, so it is done once by hand; until then the
+        # console runs on loopback and nothing can reach it.
+        if sudo tailscale status >/dev/null 2>&1; then
+            sudo tailscale serve --bg --https=443 http://127.0.0.1:8765 >/dev/null
+            echo "==> console: https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')/ (tailnet only, read-only)"
+        else
+            echo "==> console: running on loopback; join the tailnet once with" \
+                 "\`sudo tailscale up --hostname poker-console\` and re-deploy"
+        fi
+    else
+        echo "==> console: no OUTPUTS_INFRA/OUTPUTS_STORE passed, left as it is"
+    fi
+}
+
+install_tree "$WORK/console-code"
+(cd "$WORK/console-code" && "$HOME/.local/bin/uv" sync --no-dev)
+if [ "$RUN" = console ]; then
+    field_console
+    rm -f "$tarball"
+    exit 0
+fi
+install_tree "$WORK/code"
+rm -f "$tarball"
 
 # --------------------------------------------------------------------------- #
 # the run, resolved first
@@ -618,58 +683,12 @@ else
     echo "==> caddy: no API_TOKEN/PUBLIC_HOST passed, config left as it is"
 fi
 
-# --------------------------------------------------------------------------- #
-# the read-only console, on the tailnet
-# --------------------------------------------------------------------------- #
-# `poker-solver serve --read-only` on loopback, published to the tailnet ONLY by
-# `tailscale serve` -- no Caddy route, no NSG rule. It reads as this box's
-# identity (Batch and Cost Management Reader, Storage Blob Data Reader; see
-# main.tf) and from Terraform outputs rendered on the laptop WITHOUT the store's
-# access key or the DSN, which reaches it through its environment instead.
-if [ -n "${OUTPUTS_INFRA:-}" ] && [ -n "${OUTPUTS_STORE:-}" ]; then
-    outputs="$WORK/console/outputs"
-    mkdir -p "$outputs"
-    echo "$OUTPUTS_INFRA" | base64 -d > "$outputs/infra.json"
-    echo "$OUTPUTS_STORE" | base64 -d > "$outputs/infra-store.json"
-    env_file=$(mktemp)
-    {
-        echo "POKER_SOLVER_OUTPUTS_DIR=$outputs"
-        echo "POKER_SOLVER_RECORD_DSN=$RECORD_DSN"
-        echo "POKER_SOLVER_BLUEPRINT_URL=http://127.0.0.1:8790"
-        echo "POKER_SOLVER_BLUEPRINT_TOKEN=${API_TOKEN:-}"
-    } > "$env_file"
-    sudo install -m 0600 -o solver -g solver "$env_file" /etc/console.env
-    rm -f "$env_file"
-    sudo cp "$WORK/code/infra/serve/console.service" /etc/systemd/system/
-    if ! command -v tailscale >/dev/null 2>&1; then
-        echo "==> installing tailscale"
-        curl -fsSL https://tailscale.com/install.sh | sudo sh >/dev/null
-    fi
-    # `serve` does not build the page and this box has no npm: the snapshot
-    # carries `console/dist` only if it was pushed from a tree that built it.
-    [ -f "$WORK/code/console/dist/index.html" ] || echo "==> console: this snapshot" \
-        "has no console/dist -- push one built with \`just console-build\`"
-    CONSOLE=1
-else
-    echo "==> console: no OUTPUTS_INFRA/OUTPUTS_STORE passed, left as it is"
-fi
+
+field_console
 
 sudo systemctl daemon-reload
 sudo systemctl enable blueprint
 sudo systemctl restart blueprint
-if [ -n "${CONSOLE:-}" ]; then
-    sudo systemctl enable console
-    sudo systemctl restart console
-    # Joining the tailnet is a login, so it is done once by hand; until then the
-    # console runs on loopback and nothing can reach it.
-    if sudo tailscale status >/dev/null 2>&1; then
-        sudo tailscale serve --bg --https=443 http://127.0.0.1:8765 >/dev/null
-        echo "==> console: https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')/ (tailnet only, read-only)"
-    else
-        echo "==> console: running on loopback; join the tailnet once with" \
-             "\`sudo tailscale up --hostname poker-console\` and re-deploy"
-    fi
-fi
 
 # A running seat imported the code it started with, so after the tree underneath
 # it is replaced its behaviour no longer matches what is on disk -- and checking

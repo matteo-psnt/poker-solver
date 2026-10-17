@@ -11,7 +11,7 @@ User=solver
 # record DSN, and the local blueprint server's address and token.
 EnvironmentFile=/etc/console.env
 Environment=POKER_SOLVER_CACHE=/mnt/work/cache
-WorkingDirectory=/mnt/work/code
+WorkingDirectory=/mnt/work/console-code
 # Loopback only, as on the laptop. `tailscale serve` is the one door in, so
 # nothing outside the tailnet can reach it; the public Caddy site never routes here.
 ExecStart=/home/solver/.local/bin/uv run poker-solver serve --read-only
