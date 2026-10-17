@@ -41,9 +41,48 @@ RUN="${1:-}"
 RECORD_DSN="${2:-}"
 STORE_ACCOUNT="${3:-}"
 if [ -z "$RUN" ] || [ -z "$RECORD_DSN" ] || [ -z "$STORE_ACCOUNT" ]; then
-    echo "usage: deploy.sh <run-id> <record-dsn> <storage-account>" >&2
+    echo "usage: deploy.sh <run-id|keep> <record-dsn> <storage-account>" >&2
     echo "       (just serve-deploy <run> supplies all three)" >&2
     exit 2
+fi
+
+# `keep` redeploys the CODE and fields exactly what the seat fields now. The
+# settings are read here, off the box, at deploy time: a caller holding its own
+# copy rolls back whatever another session fielded since (30000 -> 60200 in one
+# day, 10-16). A flag this cannot carry over is a refusal, never a silent drop.
+# >>> keep_seat
+keep_seat() {
+    local env="$1" extra word i=0
+    local -a words
+    RUN=$(sed -n 's/^RUN=//p' <<< "$env")
+    POLICY_THRESHOLD=$(sed -n 's/^POLICY_THRESHOLD=//p' <<< "$env")
+    CHIPZEN_ENV=$(sed -n 's/^CHIPZEN_ENV=//p' <<< "$env")
+    extra=$(sed -n 's/^SEAT_EXTRA=//p' <<< "$env")
+    AT="" BUDGET_MS="" RESOLVER=1 RESOLVER_OFF_TREE="" RUNGS=""
+    read -ra words <<< "$extra"
+    while [ "$i" -lt "${#words[@]}" ]; do
+        word="${words[$i]}"
+        case "$word" in
+            --at) AT="${words[$((i + 1))]}"; i=$((i + 2)) ;;
+            --budget-ms) BUDGET_MS="${words[$((i + 1))]}"; i=$((i + 2)) ;;
+            --rung) RUNGS="${RUNGS:+$RUNGS,}${words[$((i + 1))]}"; i=$((i + 2)) ;;
+            --no-resolver) RESOLVER=""; i=$((i + 1)) ;;
+            --resolver-off-tree-only) RESOLVER_OFF_TREE=1; i=$((i + 1)) ;;
+            *) echo "keep: the seat runs with '$word', which a keep deploy cannot carry over" >&2
+               return 1 ;;
+        esac
+    done
+    if [ -z "$RUN" ]; then
+        echo "keep: the seat env names no RUN" >&2
+        return 1
+    fi
+    # Empty means "the default ladder" below; a seat fielding one tree must stay one.
+    [ -n "$RUNGS" ] || RUNGS=none
+}
+# <<< keep_seat
+if [ "$RUN" = keep ]; then
+    keep_seat "$(sudo cat /etc/chipzen-seat.env)"
+    echo "==> keep: $RUN at ${AT:-the head}, rungs ${RUNGS}"
 fi
 
 WORK=/mnt/work
