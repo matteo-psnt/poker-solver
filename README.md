@@ -7,6 +7,7 @@ on an autoscaling Azure Batch pool. It plays live.**
 
 [![Play it](https://img.shields.io/badge/▶_play_the_bot-live-d42a2a?style=for-the-badge)](https://poker.matteopsnt.dev/)
 
+[![CI](https://github.com/matteo-psnt/poker-solver/actions/workflows/ci.yml/badge.svg)](https://github.com/matteo-psnt/poker-solver/actions/workflows/ci.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/badge/managed_by-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 [![Ruff](https://img.shields.io/badge/lint-ruff-d7ff64.svg)](https://github.com/astral-sh/ruff)
