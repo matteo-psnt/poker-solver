@@ -1,14 +1,17 @@
 """The `seat-plan` subcommand: what the chipzen seat fields, resolved against the store.
 
 `infra/serve/seat.toml` names the runs and rungs. "latest" there means the newest
-rung the checkpoints container HOLDS -- not what a manifest names, which includes
-rungs still uploading and rungs pruned long ago. The deploy runs this before it
-touches the box, so a typo'd run or a missing rung fails there and not on the box.
+rung a reader can LOAD: one the checkpoints container holds AND the run's manifest
+retains. The two disagree both ways -- a manifest still names rungs pruned long
+ago, and a rung lands in the container before the manifest that lists it. The
+deploy runs this before it touches the box, so a typo'd run or a missing rung
+fails there and not on the box.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -20,7 +23,7 @@ from src.interfaces.cloud.config import CloudConfig
 from src.interfaces.cloud.store import blob
 from src.interfaces.commands._base import Command
 from src.interfaces.errors import CommandError
-from src.shared import repo
+from src.shared import records, repo
 
 if TYPE_CHECKING:
     import argparse
@@ -71,7 +74,7 @@ def _resolve(run: str, at: str, threshold: float, held: Callable[[str], set[str]
 
 
 def plan(spec: dict, held: Callable[[str], set[str]]) -> SeatPlanPayload:
-    """Resolve a parsed seat file against `held(run)`, the rung objects a run holds."""
+    """Resolve a parsed seat file against `held(run)`, the rung objects a reader can load."""
     base = _resolve(spec["run"], str(spec["at"]), float(spec["threshold"]), held)
     rungs = []
     for entry in spec.get("rungs", []):
@@ -82,11 +85,24 @@ def plan(spec: dict, held: Callable[[str], set[str]]) -> SeatPlanPayload:
     return SeatPlanPayload(base=base, rungs=rungs, digest=digest)
 
 
+def _loadable(config: CloudConfig, run_id: str) -> set[str]:
+    """Rung objects the container holds that the run's manifest also retains.
+
+    Measured 10-17: d50 held static-45200 while its manifest ended at 45000, and
+    the reader refused the rung with a KeyError the deploy only met on the box.
+    """
+    entry = blob.published_record_for(config, run_id)[run_id]
+    if entry["manifest"] is None:
+        return set()
+    retained = json.loads(entry["manifest"]).get("retained") or []
+    return entry["rungs"] & {records.object_name(rung["zarr"]) for rung in retained}
+
+
 def run(args: argparse.Namespace) -> SeatPlanPayload:
-    """Resolve the seat file against the checkpoints container."""
+    """Resolve the seat file against the checkpoints container and each manifest."""
     config = CloudConfig.load()
     spec = tomllib.loads(Path(args.file).read_text())
-    return plan(spec, lambda run_id: blob.rungs_for(config, run_id))
+    return plan(spec, lambda run_id: _loadable(config, run_id))
 
 
 def render(payload: SeatPlanPayload) -> None:
