@@ -38,6 +38,9 @@ fi
 
 WORK=/mnt/work
 UV="$HOME/.local/bin/uv"
+# Run Command starts this inside root's download directory, which `solver` cannot
+# read: `find` then fails on its way back, after it has done its work.
+cd "$WORK"
 
 # The box reads the store as its managed identity (Storage Blob Data Reader), so
 # no key lives here.
