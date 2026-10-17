@@ -511,14 +511,17 @@ resource "azurerm_federated_identity_credential" "github" {
   subject             = "repo:${var.github_repo}:environment:serve"
 }
 
-# Run Command on this one VM and nothing else: no start, no stop, no delete. A
+# Run Command on the box and nothing else: no start, no stop, no delete. A
 # deallocated box is reported and left asleep -- waking it is the user's call.
+# Scoped to the box's resource group (it holds one VM) because `az vm
+# run-command create` reads the group first, and a VM-scoped grant cannot.
 resource "azurerm_role_definition" "run_command" {
   name        = "serve-run-command"
-  scope       = azurerm_linux_virtual_machine.serve.id
+  scope       = azurerm_resource_group.serve.id
   description = "Run a deploy script on the serving box."
   permissions {
     actions = [
+      "Microsoft.Resources/subscriptions/resourceGroups/read",
       "Microsoft.Compute/virtualMachines/read",
       "Microsoft.Compute/virtualMachines/instanceView/read",
       "Microsoft.Compute/virtualMachines/runCommands/read",
@@ -526,11 +529,11 @@ resource "azurerm_role_definition" "run_command" {
       "Microsoft.Compute/virtualMachines/runCommands/delete",
     ]
   }
-  assignable_scopes = [azurerm_linux_virtual_machine.serve.id]
+  assignable_scopes = [azurerm_resource_group.serve.id]
 }
 
 resource "azurerm_role_assignment" "deploy_runs_commands" {
-  scope              = azurerm_linux_virtual_machine.serve.id
+  scope              = azurerm_resource_group.serve.id
   role_definition_id = azurerm_role_definition.run_command.role_definition_resource_id
   principal_id       = azurerm_user_assigned_identity.deploy.principal_id
 }
