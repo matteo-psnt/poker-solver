@@ -1,0 +1,59 @@
+# Keeps the serving box at main. The logic is infra/serve/ci-deploy.sh: console
+# changes deploy at once, anything that restarts the seat waits for the 05:10 UTC
+# run, after the 00:00-05:00 match window.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "console/**"
+      - "infra/serve/**"
+      - "config/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "justfile"
+  schedule:
+    - cron: "10 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write  # the OIDC token Azure trusts (infra/serve: serve-deploy-github)
+  contents: read
+
+# One deploy at a time, none cancelled: deploy.sh swaps trees in place.
+concurrency:
+  group: serve
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: serve
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the deploy diffs against the last deployed commit
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: terraform init
+        run: |
+          for root in infra infra/store infra/serve; do
+            terraform -chdir=$root init -input=false -no-color > /dev/null
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm --prefix console ci
+      - uses: astral-sh/setup-uv@v6
+      - run: infra/serve/ci-deploy.sh

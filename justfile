@@ -137,23 +137,11 @@ serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="" resolver="
         -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
            "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
 
-# Redeploy CODE only: the box keeps fielding exactly what its seat fields now,
-# read off the box at deploy time (deploy.sh `keep`). What autodeploy runs.
-serve-redeploy code="":
-    just serve-deploy keep {{code}}
-
-# Redeploy the CONSOLE only, from its own tree on the box: the seat and the
-# blueprint server are untouched, so this is safe inside the match window.
-serve-console code="":
-    just serve-deploy console {{code}}
-
-# Deploy what is pushed to GitHub's main, in the background: the console at once,
-# the seat after the 00:00-05:00 UTC match window when its code changed.
-# Installs infra/serve/pre-push as the repo's pre-push hook (it also runs
-# git-lfs); `touch ~/.cache/poker-solver/autodeploy/off` pauses it.
-# Log: ~/.cache/poker-solver/autodeploy/log.
-autodeploy-install:
-    install -m 755 infra/serve/pre-push "$(git rev-parse --git-common-dir)/hooks/pre-push"
+# What .github/workflows/deploy.yml runs on every push to main, from a laptop
+# signed in with `az login`. Fielding NEW seat settings is `serve-deploy` above.
+# Bring the box up to HEAD: console at once, seat after the match window.
+serve-ci:
+    infra/serve/ci-deploy.sh
 
 # Wake the box, or put it back to sleep. The console does this too; these are
 # for when the console is what you are trying to fix.

@@ -31,3 +31,8 @@ output "ssh" {
   description = "A shell on the box, for pointing it at a run."
   value       = "ssh ${var.admin_username}@${azurerm_public_ip.serve.ip_address}"
 }
+
+# What the deploy workflow signs in as; set as the repo variable AZURE_CLIENT_ID.
+output "deploy_client_id" {
+  value = azurerm_user_assigned_identity.deploy.client_id
+}

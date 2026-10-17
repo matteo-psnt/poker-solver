@@ -1,7 +1,0 @@
-#!/bin/sh
-# Installed by `just autodeploy-install`. git-lfs and autodeploy both read the
-# refs being pushed from stdin, so it is read once and handed to each.
-refs=$(cat)
-command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\n%s\n\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path."; exit 2; }
-printf '%s\n' "$refs" | git lfs pre-push "$@" || exit $?
-printf '%s\n' "$refs" | "$(git rev-parse --git-common-dir)/../infra/serve/autodeploy.sh" push "$1" || true

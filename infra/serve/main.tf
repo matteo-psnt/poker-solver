@@ -485,3 +485,59 @@ resource "azurerm_virtual_machine_data_disk_attachment" "work" {
   lun                = 0
   caching            = "ReadOnly"
 }
+
+# --------------------------------------------------------------------------- #
+# Deploys from GitHub Actions
+# --------------------------------------------------------------------------- #
+# `.github/workflows/deploy.yml` signs in as this identity through GitHub's OIDC
+# token, so GitHub stores no Azure secret. It reaches the box through Run Command
+# rather than SSH (the NSG admits one address on 22), and reads everything else
+# a deploy needs -- the store key, the DSN, the api token -- from Terraform state.
+resource "azurerm_user_assigned_identity" "deploy" {
+  name                = "serve-deploy-github"
+  location            = azurerm_resource_group.serve.location
+  resource_group_name = azurerm_resource_group.serve.name
+  tags                = local.tags
+}
+
+# Only a job in the repo's `serve` environment gets a token for it, and the
+# workflow is the only thing that names that environment.
+resource "azurerm_federated_identity_credential" "github" {
+  name                = "github-serve-environment"
+  resource_group_name = azurerm_resource_group.serve.name
+  parent_id           = azurerm_user_assigned_identity.deploy.id
+  audience            = ["api://AzureADTokenExchange"]
+  issuer              = "https://token.actions.githubusercontent.com"
+  subject             = "repo:${var.github_repo}:environment:serve"
+}
+
+# Run Command on this one VM and nothing else: no start, no stop, no delete. A
+# deallocated box is reported and left asleep -- waking it is the user's call.
+resource "azurerm_role_definition" "run_command" {
+  name        = "serve-run-command"
+  scope       = azurerm_linux_virtual_machine.serve.id
+  description = "Run a deploy script on the serving box."
+  permissions {
+    actions = [
+      "Microsoft.Compute/virtualMachines/read",
+      "Microsoft.Compute/virtualMachines/instanceView/read",
+      "Microsoft.Compute/virtualMachines/runCommands/read",
+      "Microsoft.Compute/virtualMachines/runCommands/write",
+      "Microsoft.Compute/virtualMachines/runCommands/delete",
+    ]
+  }
+  assignable_scopes = [azurerm_linux_virtual_machine.serve.id]
+}
+
+resource "azurerm_role_assignment" "deploy_runs_commands" {
+  scope              = azurerm_linux_virtual_machine.serve.id
+  role_definition_id = azurerm_role_definition.run_command.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.deploy.principal_id
+}
+
+# All three states live in this container; `terraform output` only reads.
+resource "azurerm_role_assignment" "deploy_reads_state" {
+  scope                = "${data.azurerm_storage_account.store.id}/blobServices/default/containers/tfstate"
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_user_assigned_identity.deploy.principal_id
+}

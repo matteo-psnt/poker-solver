@@ -138,3 +138,9 @@ variable "batch_resource_group" {
   type    = string
   default = "poker-batch-rg"
 }
+
+variable "github_repo" {
+  description = "owner/name of the repo whose `serve` environment may deploy this box."
+  type        = string
+  default     = "matteo-psnt/poker-solver"
+}
