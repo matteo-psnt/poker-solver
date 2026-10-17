@@ -424,14 +424,14 @@ fi
 #
 # 10-17 the shallow rungs moved to 50000 after each played its own 12000, 3 seeds x
 # 20,000 deals, edge for 50000: d35 +23.8+/-10.6  d25 +1.4+/-8.2  d15 +2.6+/-5.6
-# d10 +7.5+/-3.9  d06 +1.6+/-1.4  d03 +1.4+/-0.9 (mbb/hand). d50 stays at 12000
-# until its 50000 rung exists and is gated.
+# d10 +7.5+/-3.9  d06 +1.6+/-1.4  d03 +1.4+/-0.9 (mbb/hand). d50 names no rung, so it
+# fields its run's latest (user 10-17): it trains to 50000, ungated past 12000.
 #
 # TO REVERT: the 10-08 ladder was the base run-pcs-production-to12k-d100-041050-3512
 # (12000, 0.35) and run-pcs-production-to12k-{d50-040438-26625 (0.35),
 # d35-040443-23758, d25-040447-19378, d15-041035-5670, d10-041039-12284,
 # d06-041042-19674, d03-041046-2454}:12000:0.20.
-DEFAULT_RUNGS="run-pcs-production_opens-to12k-d50-145211-17367:12000:0.35,\
+DEFAULT_RUNGS="run-pcs-production_opens-to12k-d50-145211-17367::0.35,\
 run-pcs-production_opens-to12k-d35-145220-21331:50000:0.20,\
 run-pcs-production_opens-to12k-d25-145224-6826:50000:0.20,\
 run-pcs-production_opens-to12k-d15-145228-12723:50000:0.20,\
