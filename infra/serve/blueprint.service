@@ -19,7 +19,8 @@ WorkingDirectory=/mnt/work/code
 # empty one expands to no arguments at all. It carries `--at <rung>`, so the
 # chart reads the rung the seat is actually playing rather than whatever the
 # manifest calls the head.
-ExecStart=/home/solver/.local/bin/uv run poker-solver blueprint-serve \
+# --no-sync: deploy.sh syncs the venv; a bare `uv run` re-adds the dev group on every start.
+ExecStart=/home/solver/.local/bin/uv run --no-sync poker-solver blueprint-serve \
   --run ${RUN} --runs-dir ${RUNS_DIR} $READER_EXTRA
 # ALWAYS, not on-failure. The reader exits for one reason now -- something went
 # wrong -- and a box kept up by the seat must not sit there without one.

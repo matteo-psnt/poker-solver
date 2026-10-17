@@ -21,7 +21,8 @@ WorkingDirectory=/mnt/work/code
 # $SEAT_EXTRA is the UNQUOTED form on purpose: systemd word-splits it, and an
 # empty one expands to no arguments at all. That is what lets `--at <rung>` be
 # optional without a second unit -- ${SEAT_EXTRA} would pass one empty argument.
-ExecStart=/home/solver/.local/bin/uv run poker-solver chipzen-seat \
+# --no-sync: deploy.sh syncs the venv; a bare `uv run` re-adds the dev group on every start.
+ExecStart=/home/solver/.local/bin/uv run --no-sync poker-solver chipzen-seat \
   --run ${RUN} --runs-dir ${RUNS_DIR} --env ${CHIPZEN_ENV} \
   --policy-threshold ${POLICY_THRESHOLD} --log-level INFO $SEAT_EXTRA
 # ALWAYS, not on-failure. A standing seat has no successful exit: the one
