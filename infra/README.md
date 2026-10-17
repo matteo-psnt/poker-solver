@@ -357,9 +357,12 @@ costs nothing but its disks (~$15/mo), and because the run lives on a **managed*
 data disk that survives deallocation, waking is a boot plus a checkpoint load
 (~2 min) rather than re-copying ~1.6 GB.
 
-**One run per host, and the deploy decides which.** `just serve-deploy <run>`
-stages the checkpoint, rewrites both units' environment and restarts them, so the
-strategy the chart reads is the one the seat is playing. There is no switching it
+**One file decides what it serves.** `infra/serve/seat.toml` names the run and
+rungs the seat plays (a rung number or `latest`); a push to main, or the
+two-hourly scheduled run, deploys it through GitHub Actions
+(`.github/workflows/deploy.yml` -> `infra/serve/ci-deploy.sh`). The deploy stages
+those rungs, rewrites both units' environment and restarts them, so the strategy
+the chart reads is the one the seat is playing. There is no switching it
 from the console: a page that could change the loaded run is a page that can make
 the chart and the seat disagree about what "Blueprint" means.
 
@@ -371,7 +374,7 @@ add it; that would publish an unauthenticated read interface to a trained run.
 
 ```bash
 just serve-create                 # once
-just serve-deploy <run>           # stage a run and start serving it
+just deploy                       # what GitHub runs: code + infra/serve/seat.toml
 uv run poker-solver serve         # console; Chart and Play find the host themselves
 ```
 

@@ -1,6 +1,7 @@
-# Keeps the serving box at main. The logic is infra/serve/ci-deploy.sh: console
-# changes deploy at once, anything that restarts the seat waits for the 05:10 UTC
-# run, after the 00:00-05:00 match window.
+# Keeps the serving box at main and at what infra/serve/seat.toml fields. The
+# logic is infra/serve/ci-deploy.sh: console changes deploy at once; anything that
+# restarts the seat -- its code, or a new rung for an entry following `latest` --
+# waits for a scheduled run outside the 00:00-05:00 UTC match window.
 name: deploy
 
 on:
@@ -15,7 +16,7 @@ on:
       - "uv.lock"
       - "justfile"
   schedule:
-    - cron: "10 5 * * *"
+    - cron: "10 */2 * * *"  # also how a new `latest` rung reaches the seat
   workflow_dispatch:
 
 permissions:

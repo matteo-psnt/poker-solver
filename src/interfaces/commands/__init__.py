@@ -88,6 +88,9 @@ GROUPS: tuple[CommandGroup, ...] = (
             CommandRef(
                 "chipzen-seat", "Play a run on chipzen.ai, or replay one recorded turn offline."
             ),
+            CommandRef(
+                "seat-plan", "Resolve infra/serve/seat.toml: the rungs the seat would field."
+            ),
         ),
     ),
     CommandGroup(

@@ -1,0 +1,27 @@
+# What the chipzen seat plays, and the chart on the box reads. The ONLY place it
+# is set: a change here is a commit, and GitHub deploys it outside the
+# 00:00-05:00 UTC match window (.github/workflows/deploy.yml).
+#
+# `at` is a rung number or "latest", the newest rung the checkpoints container
+# holds, followed every 2 h while a run trains (user, 10-17: field the latest
+# rung of every depth). `poker-solver seat-plan` resolves it.
+#
+# The base run plays every depth deeper than the shallowest rung below; each
+# rung is `run:at:threshold`, and the seat takes the one nearest in log depth.
+# Thresholds purify the policy; why 0.35 deep and 0.20 shallow is in memory
+# (purification-is-worth-more-than-the-ladder).
+
+run = "run-pcs-production_opens-to12k-d100-145201-6584"
+at = "latest"
+threshold = 0.35
+
+rungs = [
+    "run-pcs-production_opens-to12k-d50-145211-17367:latest:0.35",
+    # 50000 vs 12000, 3 seeds x 20,000 deals, mbb/hand (10-17):
+    "run-pcs-production_opens-to12k-d35-145220-21331:50000:0.20",  # +23.8 +/- 10.6
+    "run-pcs-production_opens-to12k-d25-145224-6826:50000:0.20",  # +1.4 +/- 8.2
+    "run-pcs-production_opens-to12k-d15-145228-12723:50000:0.20",  # +2.6 +/- 5.6
+    "run-pcs-production_opens-to12k-d10-145232-1181:50000:0.20",  # +7.5 +/- 3.9
+    "run-pcs-production_opens-to12k-d06-145235-565:50000:0.20",  # +1.6 +/- 1.4
+    "run-pcs-production_opens-to12k-d03-145240-32111:50000:0.20",  # +1.4 +/- 0.9
+]

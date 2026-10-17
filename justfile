@@ -79,7 +79,7 @@ serve-create:
     {{tfv}} apply -input=false -auto-approve
     just _forget-coordinates
     @echo ""
-    @echo "  next:  just serve-deploy <run>"
+    @echo "  next:  just deploy"
 
 # Show what the serving box would change, without changing it.
 serve-plan:
@@ -100,47 +100,11 @@ serve-env:
 serve-ssh:
     @sh -c "$({{tfv}} output -raw ssh)"
 
-# Put code, the abstraction and one run on the box, and start serving it.
-# The script is PIPED over ssh rather than installed, so the box always runs the
-# version in this repo and keeps none of it.
-#
-# Args: run (id or fragment), and optionally the code snapshot `push-code`
-# echoed -- PIN IT when another session might be pushing, because the default is
-# whichever snapshot sorts newest in the container and that is not necessarily
-# yours -- `at`, the rung to stage and seat (without it both the reader and the
-# seat take the manifest head) -- and `rungs`, a comma-separated
-# `run[:at[:threshold]]` list of SHALLOWER blueprints, each staged and turned
-# into a `--rung` so the seat plays a depth ladder rather than one tree, and
-# DEFAULTS to the fielded eight when omitted (`rungs=none` to field one tree) --
-# `offtree=1`, which confines the resolver to hands that have left our tree,
-# the only place its edge was ever measured. `extra` stages runs the seat will
-# NOT play, so a candidate can be duelled against the fielded ladder on the box
-# before it is given the chair. The runtime resolver is OFF unless you pass
-# `resolver=1` -- measured 09-12 to be worth nothing (-46.9 +/- 159.2 mbb/hand
-# over 2,000 paired deals, even with range inference) and to cost 1.83x the
-# stack-off rate. The default lives in deploy.sh, not here, so a deploy that
-# forgets the flag cannot quietly put it back.
-#
-# The record's address rides along as $2: the box reads the run from Postgres
-# and has no Terraform of its own to ask.
-# The API token and public hostname ride along for the same reason: deploy.sh
-# renders Caddy's config, which holds the token door and the public play page.
-serve-deploy run code="" at="" rungs="" budget="" offtree="" extra="" resolver="":
-    ssh solver@$({{tfv}} output -raw public_ip) \
-        "CODE={{code}} AT={{at}} RUNGS={{rungs}} BUDGET_MS={{budget}} \
-         RESOLVER_OFF_TREE={{offtree}} EXTRA_RUNS={{extra}} \
-         RESOLVER={{resolver}} API_TOKEN=$({{tfv}} output -raw api_token) \
-         PUBLIC_HOST=$({{tfv}} output -raw url | sed 's|^https://||') \
-         OUTPUTS_INFRA=$(terraform -chdir=infra output -json | base64 | tr -d '\n') \
-         OUTPUTS_STORE=$({{tfs}} output -json | jq -c 'del(.access_key, .postgres_dsn)' | base64 | tr -d '\n') \
-         bash -s" \
-        -- {{run}} "$({{tfs}} output -raw postgres_dsn)" \
-           "$({{tfs}} output -raw storage_account)" < infra/serve/deploy.sh
-
-# What .github/workflows/deploy.yml runs on every push to main, from a laptop
-# signed in with `az login`. Fielding NEW seat settings is `serve-deploy` above.
-# Bring the box up to HEAD: console at once, seat after the match window.
-serve-ci:
+# What GitHub Actions runs on every push to main and every two hours, from a
+# laptop signed in with `az login`. What the seat plays is infra/serve/seat.toml:
+# edit it and push. The console deploys at once; the seat after 05:00 UTC.
+# Bring the box to HEAD and to what infra/serve/seat.toml fields.
+deploy:
     infra/serve/ci-deploy.sh
 
 # Wake the box, or put it back to sleep. The console does this too; these are
@@ -159,7 +123,7 @@ serve-destroy:
 # --------------------------------------------------------------------------- #
 # the chipzen seat
 # --------------------------------------------------------------------------- #
-# Seating is a DELIBERATE act, which is why `serve-deploy` installs the unit and
+# Seating is a DELIBERATE act, which is why a deploy installs the unit and
 # stops. `enable` is the half that matters: an unsupervised seat died at 04:2x on
 # 08-25 and nothing noticed for 26 hours, and every match dispatched in that
 # window met an empty chair.

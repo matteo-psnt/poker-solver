@@ -18,13 +18,14 @@ WorkingDirectory=/mnt/work/code
 # empty -- an empty ${POLICY_THRESHOLD} would reach argparse as a bare
 # `--policy-threshold` and refuse to start.
 #
-# $SEAT_EXTRA is the UNQUOTED form on purpose: systemd word-splits it, and an
-# empty one expands to no arguments at all. That is what lets `--at <rung>` be
-# optional without a second unit -- ${SEAT_EXTRA} would pass one empty argument.
+# $SEAT_EXTRA is the UNQUOTED form on purpose: systemd word-splits it into the
+# `--at` and `--rung` flags deploy.sh writes; ${SEAT_EXTRA} would pass one argument.
+# `--no-resolver` is fixed here: the runtime resolver measured worth nothing
+# (09-12) and doubled the stack-off rate.
 # --no-sync: deploy.sh syncs the venv; a bare `uv run` re-adds the dev group on every start.
 ExecStart=/home/solver/.local/bin/uv run --no-sync poker-solver chipzen-seat \
   --run ${RUN} --runs-dir ${RUNS_DIR} --env ${CHIPZEN_ENV} \
-  --policy-threshold ${POLICY_THRESHOLD} --log-level INFO $SEAT_EXTRA
+  --policy-threshold ${POLICY_THRESHOLD} --log-level INFO --no-resolver $SEAT_EXTRA
 # ALWAYS, not on-failure. A standing seat has no successful exit: the one
 # observed exit took none of the SDK's three documented paths and left no
 # traceback, so "it returned 0" is not evidence it meant to stop.

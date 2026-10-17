@@ -120,7 +120,7 @@ def _rendered_outputs(directory: Path, chdir: str) -> dict[str, Any]:
     if not path.is_file():
         raise CloudConfigError(
             f"No rendered outputs at {path}. ${OUTPUTS_DIR_ENV} points here, so "
-            "Terraform is not consulted; `just serve-deploy` writes these files."
+            "Terraform is not consulted; a deploy (`just deploy`) writes these files."
         )
     return cast("dict[str, Any]", json.loads(path.read_text()))
 
