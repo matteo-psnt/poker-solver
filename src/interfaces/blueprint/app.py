@@ -24,7 +24,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.core.game.state import Card
@@ -40,6 +41,7 @@ from src.pipeline.blueprint.paths import (
     match_action,
     replay,
 )
+from src.shared import repo
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -350,6 +352,12 @@ PUBLIC_HEADER = "x-public"
 # code snapshot onto the box with no node toolchain there.
 PLAY_PAGE = Path(__file__).parent / "static" / "play.html"
 
+# The public chart: the console's Blueprint grid as its own Vite entry. CI builds
+# `console/dist` into every snapshot; a checkout that never ran `npm` has no chart
+# and answers 404 for it rather than refusing to start.
+CONSOLE_DIST = repo.ROOT / "console" / "dist"
+CHART_PAGE = CONSOLE_DIST / "chart.html"
+
 
 def _is_public(http: Request) -> bool:
     return http.headers.get(PUBLIC_HEADER) == "1"
@@ -568,6 +576,18 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def _page() -> FileResponse:
         return FileResponse(PLAY_PAGE, media_type="text/html")
+
+    @app.get("/blueprint", include_in_schema=False, response_model=None)
+    def _chart() -> FileResponse | JSONResponse:
+        if not CHART_PAGE.is_file():
+            return JSONResponse({"error": "this checkout has no console build"}, status_code=404)
+        return FileResponse(CHART_PAGE, media_type="text/html")
+
+    @app.get("/chart", include_in_schema=False)
+    def _chart_alias() -> RedirectResponse:
+        return RedirectResponse("/blueprint")
+
+    app.mount("/assets", StaticFiles(directory=CONSOLE_DIST / "assets", check_dir=False))
 
     @app.post("/api/play")
     def _start(request: StartPlay, http: Request) -> JSONResponse:

@@ -11,6 +11,7 @@ import { createRootRoute, createRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
 import { Shell } from "@/components/Shell";
 import { Blueprint } from "@/routes/Blueprint";
+import { blueprintSearch } from "@/routes/blueprintSearch";
 import { Cost } from "@/routes/Cost";
 import { Overview } from "@/routes/Overview";
 import { Results } from "@/routes/Results";
@@ -70,17 +71,7 @@ const routes = [
     getParentRoute: () => rootRoute,
     path: "/blueprint",
     component: Blueprint,
-    validateSearch: z.object({
-      tab: z.enum(["chart", "play"]).default("chart"),
-      path: z.string().default(""),
-      board: z.string().default(""),
-      // How many of `path`'s actions the chart reads; absent reads all of them.
-      at: z.number().int().nonnegative().optional(),
-      // The DEPTH, when the server holds a ladder. Optional rather than defaulted:
-      // absent means "the deepest", which is what a single-run server has, and
-      // baking a number in would make a shared link wrong on a different box.
-      stack: z.number().optional(),
-    }),
+    validateSearch: blueprintSearch,
   }),
 
   /**

@@ -50,5 +50,10 @@ export default defineConfig({
       },
     },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    // `chart.html` is the public chart the blueprint host serves (`src/chart.tsx`).
+    rollupOptions: { input: { console: "index.html", chart: "chart.html" } },
+  },
 });

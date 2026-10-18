@@ -29,6 +29,7 @@ on an autoscaling Azure Batch pool. It plays live.**
 | | Where | What is behind it |
 |---|---|---|
 | 🃏 **Play the bot** | [poker.matteopsnt.dev](https://poker.matteopsnt.dev/) | The deepest blueprint (100 bb), served by `blueprint-serve` behind Caddy. The public route redacts the strategy mix and the bot's mucked cards. |
+| 📈 **Strategy chart** | [poker.matteopsnt.dev/chart](https://poker.matteopsnt.dev/chart) | The same blueprints read as a 13×13 grid at any spot in the tree, every stack depth the seat fields. |
 | 🤖 **Ranked seat** | [chipzen.ai](https://chipzen.ai) | `chipzen-seat` plays a ladder of **eight blueprints trained at different stack depths (3 → 100 bb)**, around the clock on a systemd unit with a watchdog. |
 | 📊 **Console** | `just console` → `localhost:8765` | The operator's view of the pool, runs, tasks, blueprints and spend. It reads the record and is not public. |
 

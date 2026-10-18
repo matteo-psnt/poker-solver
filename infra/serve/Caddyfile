@@ -5,11 +5,14 @@
 # Two doors onto the one loopback server, tried IN ORDER inside `route`:
 #
 #   bearer token  everything, as before -- the console's door.
-#   public        the play page and the play API, nothing else. Caddy stamps
-#                 X-Public, and the server then withholds the mix, the untrained
-#                 marks and mucked bot cards: what a real opponent would see.
-#                 /api/node and /api/combos stay behind the token -- they ARE
-#                 the strategy the Chipzen seat fields.
+#   public        the play page and its API, and the strategy chart. Caddy
+#                 stamps X-Public, and the play API then withholds the mix, the
+#                 untrained marks and mucked bot cards: what a real opponent
+#                 would see. The chart (/blueprint, the console's grid) reads
+#                 /api/node and /api/combos -- the strategy itself, published
+#                 on purpose since 10-18, when the 100 bb rung was released.
+#                 It asks for them under the console's /api/blueprint/ prefix,
+#                 rewritten here so one build serves both.
 #
 # The header is stripped on the token door and set (not appended) on the public
 # one, so a client cannot claim either. A bare 404 for everything else, so a
@@ -21,11 +24,13 @@
 __HOST__, poker.matteopsnt.dev {
 	encode gzip
 	@authorized header_regexp auth Authorization ^Bearer\s+__TOKEN__$
-	@public path / /api/run /api/play /api/play/*
+	@public path / /api/run /api/play /api/play/* /blueprint /chart /assets/* /api/node /api/combos
+	@chart_api path /api/blueprint/run /api/blueprint/combos /api/blueprint/node
 	route {
 		reverse_proxy @authorized 127.0.0.1:8790 {
 			header_up -X-Public
 		}
+		uri @chart_api replace /api/blueprint/ /api/ 1
 		reverse_proxy @public 127.0.0.1:8790 {
 			header_up X-Public 1
 		}

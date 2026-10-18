@@ -8,6 +8,10 @@
   // for the same reason.
   "ignore": ["src/api/**"],
 
+  // The public chart is a second Vite entry (`chart.html`), which knip cannot
+  // read out of `vite.config.ts`.
+  "entry": ["src/chart.tsx"],
+
   // Keeps knip off the types that exist only to give an exported function's
   // signature a name -- `Timeline`, `Bar`, `AggregateInput`. Imported nowhere,
   // load-bearing where they are declared.

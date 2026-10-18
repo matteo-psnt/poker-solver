@@ -51,10 +51,10 @@
 # session store is capped, so neither the experiment record nor the box's memory
 # is at risk. Rotate by tainting `random_password.api_token` and re-applying.
 #
-# ONE PUBLIC DOOR, on purpose: `/` (the play page), `/api/run` and `/api/play*`
-# answer without the token, so anyone with the link can sit down against the
-# bot. That route is redacted server-side (no mix, no untrained marks, no mucked
-# cards); the strategy endpoints stay behind the token. The live Caddyfile is
+# ONE PUBLIC DOOR, on purpose: `/` (the play page), `/api/play*` and the
+# strategy chart (`/blueprint` and the reads behind it) answer without the token,
+# so anyone with the link can sit down against the bot or read its strategy. Play
+# is redacted server-side (no mix, no untrained marks, no mucked cards). The live Caddyfile is
 # `infra/serve/Caddyfile`, rendered by deploy.sh -- the copy below is only what
 # a fresh box has until its first deploy.
 
