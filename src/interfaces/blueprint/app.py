@@ -20,6 +20,7 @@ thing allowed to decide what is loaded, not a browser tab.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -354,8 +355,9 @@ PLAY_PAGE = Path(__file__).parent / "static" / "play.html"
 
 # The public chart: the console's Blueprint grid as its own Vite entry. CI builds
 # `console/dist` into every snapshot; a checkout that never ran `npm` has no chart
-# and answers 404 for it rather than refusing to start.
-CONSOLE_DIST = repo.ROOT / "console" / "dist"
+# and answers 404 for it rather than refusing to start. The serving box points
+# this at the console's tree (blueprint.service), which console deploys update.
+CONSOLE_DIST = Path(os.environ.get("POKER_SOLVER_CONSOLE_DIST") or repo.ROOT / "console" / "dist")
 CHART_PAGE = CONSOLE_DIST / "chart.html"
 
 
