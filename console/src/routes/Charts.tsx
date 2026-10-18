@@ -417,11 +417,7 @@ function SpotColumn({
             onClick={() => onTake(option.token)}
           />
         ) : (
-          <span
-            key={option.token}
-            className={rowClass(taken, false)}
-            style={rowStyle(taken, colour)}
-          >
+          <span key={option.token} className={rowClass(taken, false)}>
             <Dot colour={colour} show={false} />
             {text}
           </span>
@@ -551,18 +547,14 @@ function Column({
 /** The look of one action row, in a column being read or not. */
 function rowClass(chosen: boolean, live: boolean): string {
   return cn(
-    "flex items-center gap-2 rounded-[3px] border-l-2 py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",
-    chosen && "font-medium text-[var(--fg)]",
-    chosen && live && "hover:brightness-125",
-    !chosen && live && "border-l-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
-    !chosen && !live && "border-l-transparent text-[var(--fg-faint)]",
-    live && !chosen && "hover:bg-white/[0.05]",
+    // Bordered on every row, transparent unless chosen, so taking one never shifts text.
+    "flex items-center gap-2 rounded-[3px] border border-transparent py-1 pr-2 pl-1.5 text-left text-[12px] leading-tight transition-colors",
+    // Chosen is the table's pressed preset chip (play.html `.preset[aria-pressed]`).
+    chosen && "border-black bg-[linear-gradient(#6a6a6a,#4a4a4a)] font-semibold text-white",
+    chosen && live && "hover:brightness-110",
+    !chosen && live && "text-[var(--fg-muted)] hover:bg-white/[0.05] hover:text-[var(--fg)]",
+    !chosen && !live && "text-[var(--fg-faint)]",
   );
-}
-
-/** The action's own colour, so a fold reads blue here as it does in the grid. */
-function rowStyle(chosen: boolean, colour: string) {
-  return chosen ? { borderLeftColor: colour, backgroundColor: `${colour}26` } : undefined;
 }
 
 /** Drawn on every row so the text starts at the same x, coloured only when live. */
@@ -591,13 +583,7 @@ function ActionRow({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={rowClass(chosen, true)}
-      style={rowStyle(chosen, colour)}
-    >
+    <button type="button" title={title} onClick={onClick} className={rowClass(chosen, true)}>
       <Dot colour={colour} show />
       {label}
     </button>
