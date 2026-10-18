@@ -39,9 +39,6 @@ function Page() {
               Strategy
             </a>
           </nav>
-          <span className="blurb">
-            The trained strategy at every depth the bot plays, before purification
-          </span>
         </div>
         <div className="end">
           <a href="https://github.com/matteo-psnt/poker-solver">source</a>

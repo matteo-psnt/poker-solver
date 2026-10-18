@@ -75,22 +75,10 @@ html:root body {
 .bar nav a[aria-current="page"] {
   color: var(--fg);
 }
-.bar .blurb {
-  padding-left: 14px;
-  border-left: 1px solid #2c2c2c;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .bar .end > a {
   color: #9a9a9a;
   font-size: 12px;
   text-decoration: underline;
-}
-@media (max-width: 640px) {
-  .bar .blurb {
-    display: none;
-  }
 }
 
 /* ---- the chart's boxes become the table's plates ------------------------- */

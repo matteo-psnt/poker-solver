@@ -68,9 +68,7 @@
   .bar nav a { color: var(--dim); text-decoration: none; font-weight: 600; }
   .bar nav a:hover { color: #d8d8d8; }
   .bar nav a[aria-current="page"] { color: var(--text); }
-  .bar .blurb { padding-left: 14px; border-left: 1px solid #2c2c2c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar .end > a { color: var(--dim); font-size: 12px; }
-  @media (max-width: 640px) { .bar .blurb { display: none; } }
 
   /* ---- table --------------------------------------------------------------- */
   .stage { flex: 1; display: grid; place-items: center; padding: 34px 16px 30px; }
@@ -239,7 +237,6 @@
     .seat { width: 170px; }
     .dealer { left: calc(50% + 98px); }
     .dock { grid-template-columns: 1fr; }
-    #stakes { display: none; }
     .chat { order: 2; height: 96px; }
   }
   @media (prefers-reduced-motion: reduce) { .card.dealt { animation: none; } }
@@ -250,7 +247,6 @@
     <div class="site">
       <a class="brand" href="/"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 1Q21 9.5 28 16Q21 22.5 16 31Q11 22.5 4 16Q11 9.5 16 1Z" fill="#c8161d"/></svg>Blueprint</a>
       <nav><a aria-current="page" href="/">Play</a><a href="/chart">Strategy</a></nav>
-      <span class="blurb">No-Limit Hold'em <span id="stakes"></span></span>
     </div>
     <div class="end">
       <div id="tally"></div>
@@ -480,7 +476,6 @@
   }
 
   function renderBar() {
-    if (run) $("stakes").textContent = `· Heads-up · Blinds ${num(bbOf(run.small_blind))}/1 BB · ${BB(run.starting_stack)} stacks`;
     const node = $("tally");
     node.replaceChildren();
     if (!score.hands) return;
@@ -644,7 +639,6 @@
     chat.replaceChildren();
     const line = (cls, ...parts) => { const p = el("p", cls); p.append(...parts); chat.append(p); };
     if (!h) {
-      line("muted", "Heads-up against Blueprint, a bot trained by counterfactual regret minimisation. The button alternates and stacks reset every hand.");
       line("muted", "Keys: F fold · C check/call · R bet/raise · ← → size · Space deal.");
       return;
     }
