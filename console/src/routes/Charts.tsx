@@ -19,7 +19,6 @@ import {
   summarise,
 } from "@/lib/range";
 import { cn } from "@/lib/utils";
-import { DepthCompare } from "@/routes/DepthCompare";
 
 const route = getRouteApi("/blueprint");
 
@@ -143,6 +142,14 @@ export function Charts() {
         onTake={take}
         onEditBoard={() => setEditing((was) => !was)}
         editing={editing}
+        depth={
+          <Depth
+            depths={run.data?.depths ?? []}
+            stack={stack}
+            bigBlind={run.data?.big_blind ?? 2}
+            onSet={set}
+          />
+        }
       />
 
       {deckOpen && (
@@ -166,14 +173,6 @@ export function Charts() {
       <Panel
         title={
           grid ? `${grid.street} · ${seatName(grid.actor, node.data?.button ?? 0)} to act` : "chart"
-        }
-        aside={
-          <Depth
-            depths={run.data?.depths ?? []}
-            stack={stack}
-            bigBlind={run.data?.big_blind ?? 2}
-            onSet={set}
-          />
         }
         // `combos` is fetched once with staleTime Infinity and is not retried,
         // so a 503 from the blueprint box would otherwise blank the grid for the
@@ -227,24 +226,6 @@ export function Charts() {
           </div>
         ) : undefined}
       </Panel>
-
-      {grid && !pending && !node.data?.terminal && (
-        <DepthCompare
-          path={read}
-          board={board}
-          depths={run.data?.depths ?? []}
-          bigBlind={bigBlind || 2}
-          combos={combos.data?.combos ?? null}
-          stack={stack}
-          hand={pinned?.label ?? "AA"}
-          onStack={(next) => set({ stack: next })}
-          onHand={(label) => {
-            for (const line of cells ?? []) {
-              for (const cell of line) if (cell.label === label) setHeld({ spot, cell });
-            }
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -274,6 +255,7 @@ function Sequence({
   onTake,
   onEditBoard,
   editing,
+  depth,
 }: {
   node: SolverNode | null;
   /** How many of the line's actions the chart reads. */
@@ -283,6 +265,8 @@ function Sequence({
   onTake: (count: number, token: string) => void;
   onEditBoard: () => void;
   editing: boolean;
+  /** The depth picker, first in the row: the line starts from a stack. */
+  depth: React.ReactNode;
 }) {
   if (!node) {
     return (
@@ -304,6 +288,7 @@ function Sequence({
 
   return (
     <div className="flex items-stretch gap-1.5 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--panel)] p-1.5">
+      {depth}
       {columns.map(({ step, before }, index) =>
         step.kind === "spot" ? (
           <SpotColumn
@@ -640,23 +625,25 @@ function Depth({
   onSet: (next: { stack: number }) => void;
 }) {
   if (depths.length < 2) return null;
+  const current = stack ?? depths[0];
   return (
-    <label className="flex items-center gap-2 text-[11px] text-[var(--fg-muted)]">
-      depth
-      <select
-        className="bg-[var(--bg-raised)] text-[var(--fg)] text-[11px] rounded px-1 py-0.5"
-        value={stack ?? depths[0]}
-        onChange={(event) => onSet({ stack: Number(event.target.value) })}
-      >
-        {depths.map((chips) => (
-          <option key={chips} value={chips}>
-            {/* From the server's own big blind, never a hardcoded 2: the label is
-                the only thing telling you which game this range belongs to. */}
-            {Math.round(chips / bigBlind)} bb
-          </option>
-        ))}
-      </select>
-    </label>
+    <Column label="depth" note="">
+      {depths.map((chips) => {
+        // From the server's own big blind, never a hardcoded 2: the label is
+        // the only thing telling you which game this range belongs to.
+        const text = `${Math.round(chips / bigBlind)} bb`;
+        return (
+          <ActionRow
+            key={chips}
+            label={text}
+            colour="var(--fg-faint)"
+            chosen={chips === current}
+            title={`the ${text} blueprint`}
+            onClick={() => onSet({ stack: chips })}
+          />
+        );
+      })}
+    </Column>
   );
 }
 
