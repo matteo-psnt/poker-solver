@@ -139,9 +139,12 @@ def render(payload: BlueprintServePayload) -> None:
     from src.pipeline.training.run_tracker import RunTracker  # noqa: PLC0415 -- see above
 
     run_dir = Path(payload.run_dir)
-    # The serving box needs the DSN in its environment once the log stops
-    # being published; without one this falls back to the file, as before.
-    source = connect.record_source_from_environment()
+    # The serving box reads the record; a downloaded release bundle (`just play`)
+    # has no database and carries the run's events as its `run.jsonl` instead.
+    try:
+        source = connect.record_source_from_environment()
+    except connect.NoRecordError:
+        source = None
 
     def _build(directory: Path, at_iteration: int | None):
         """A run directory on local disk -> a blueprint. ~1 min in production."""

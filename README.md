@@ -84,15 +84,25 @@ flowchart LR
 
 ## Quick start
 
+Play the trained 100 bb bot on your own machine. No cloud account needed: it
+downloads the blueprint once (1.9 GB) and serves the play page locally.
+
 ```bash
 git clone https://github.com/matteo-psnt/poker-solver.git
 cd poker-solver
-uv sync --group dev
-just console        # build the web console and serve it on localhost:8765
+uv sync
+just play           # then open http://127.0.0.1:8790
 ```
 
+Without [`just`](https://github.com/casey/just): download
+[`blueprint-100bb.tar`](https://github.com/matteo-psnt/poker-solver/releases/tag/v0.1.0),
+untar it into an empty directory, and from there run
+`uv run --project <clone> poker-solver blueprint-serve --runs-dir data/runs --run run-pcs-production_opens-to12k-d100-145201-6584 --at 65000`.
+
+Run the tests with `uv sync --group dev && uv run pytest -m "not slow"`.
 Training, precompute and evaluation run on an Azure Batch pool that scales to
-zero; `uv run poker-solver --help` lists everything the CLI can do.
+zero and need the Terraform in `infra/`; `uv run poker-solver --help` lists
+everything the CLI can do.
 
 ## Architecture
 

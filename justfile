@@ -260,6 +260,27 @@ submit config to *flags:
 score run *flags:
     uv run poker-solver score --run "{{run}}" {{flags}}
 
+# Play the 100 bb blueprint on localhost, with no Azure and no record database.
+# The release asset holds one rung, its run's events as `run.jsonl`, and its card
+# abstraction, laid out as the serving box lays them out; it is fetched once,
+# into a temp name, so an interrupted download is never mistaken for a bundle.
+play_release := "https://github.com/matteo-psnt/poker-solver/releases/download/v0.1.0/blueprint-100bb.tar"
+play_run := "run-pcs-production_opens-to12k-d100-145201-6584"
+
+[doc("Play the trained 100bb bot locally (downloads 1.9 GB once). Args: [port]")]
+play port="8790":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="${POKER_SOLVER_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/poker-solver}/play"
+    if [ ! -d "$dir/data" ]; then
+        rm -rf "$dir.partial" && mkdir -p "$dir.partial"
+        curl -fL --progress-bar "{{play_release}}" | tar -xf - -C "$dir.partial"
+        mv "$dir.partial" "$dir"
+    fi
+    echo "open http://127.0.0.1:{{port}} once it has loaded"
+    cd "$dir" && uv run --project "{{justfile_directory()}}" poker-solver blueprint-serve \
+        --runs-dir data/runs --run "{{play_run}}" --at 65000 --port "{{port}}"
+
 # --- console ---------------------------------------------------------------- #
 # The web console. Its toolchain is npm and lives entirely under `console/`;
 # nothing here touches the Python environment.
