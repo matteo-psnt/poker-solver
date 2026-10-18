@@ -20,24 +20,29 @@ import { createRoot } from "react-dom/client";
 import { blueprintSearch } from "@/routes/blueprintSearch";
 import { Charts } from "@/routes/Charts";
 import "./index.css";
+import "./chart.css";
 
 function Page() {
   return (
     <div className="min-h-full">
-      <header className="flex items-center gap-4 border-b border-[var(--border)] px-4 py-2 font-mono text-[11px] text-[var(--fg-muted)]">
-        <span className="tracking-widest text-[var(--fg-faint)]">BLUEPRINT</span>
-        <span>the trained strategy, before purification</span>
-        <a className="ml-auto text-[var(--fg)] hover:underline" href="/">
-          play against it →
-        </a>
-        <a
-          className="text-[var(--fg)] hover:underline"
-          href="https://github.com/matteo-psnt/poker-solver"
-        >
-          source
-        </a>
-      </header>
-      <main className="max-w-[1400px] p-4">
+      <div className="bar">
+        <div className="site">
+          <b>Blueprint</b>
+          <nav>
+            <a href="/">Play</a>
+            <a className="on" href="/chart">
+              Strategy
+            </a>
+          </nav>
+          <span className="blurb">
+            the trained strategy at every depth the bot plays, before purification
+          </span>
+        </div>
+        <div className="end">
+          <a href="https://github.com/matteo-psnt/poker-solver">source</a>
+        </div>
+      </div>
+      <main className="mx-auto max-w-[1400px] p-4">
         <Outlet />
       </main>
     </div>
