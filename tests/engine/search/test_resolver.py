@@ -15,6 +15,7 @@ from src.engine.search.range_inference import (
     combo_index_for,
     infer_ranges,
     replace_actor_hole_cards,
+    update_ranges,
 )
 from src.engine.search.resolver import HUResolver
 from src.engine.search.tree_builder import build_local_tree
@@ -282,6 +283,41 @@ def test_observe_replays_history_for_both_seats():
     second_base = baseline.p0 if responder == 0 else baseline.p1
     assert not np.allclose(second_slot, second_base)
     assert second_slot[combo_index_for(kk)] > second_base[combo_index_for(kk)]
+
+
+def test_the_opponent_model_explains_only_the_other_seat():
+    """The opponent's actions are read through ``opponent_model``; our own through our table."""
+    state, rules = _make_initial_state()
+    config = make_test_config(
+        seed=42, **{"resolver.max_iterations": 8, "resolver.leaf_rollouts": 2}
+    )
+    ours, action_model = _trained_solver(config)
+    theirs, _ = _trained_solver(config)
+    first_actor = state.current_player
+    legal = rules.get_legal_actions(state, action_model=action_model)
+    open_raise = next(a for a in legal if a.is_aggressive())
+    aa = (Card.new("Ad"), Card.new("Ac"))
+    # Only THEIR table opens AA with certainty.
+    skew_preflop_infoset(theirs, state, actor=first_actor, combo=aa, action=open_raise)
+    baseline = infer_ranges(state, ours)
+
+    def slot_after(seat: int) -> np.ndarray:
+        resolver = HUResolver(
+            blueprint=ours,
+            action_model=action_model,
+            rules=rules,
+            config=config.resolver,
+            seat=seat,
+            opponent_model=theirs,
+        )
+        resolver.observe(state, open_raise)
+        assert resolver._ranges is not None
+        return resolver._ranges.p0 if first_actor == 0 else resolver._ranges.p1
+
+    as_opponent = slot_after(1 - first_actor)
+    assert as_opponent[combo_index_for(aa)] > baseline.p0[combo_index_for(aa)]
+    own = update_ranges(state, baseline, open_raise, ours)
+    assert np.array_equal(slot_after(first_actor), own.p0 if first_actor == 0 else own.p1)
 
 
 @pytest.mark.timeout(60)

@@ -68,8 +68,16 @@ class HUResolver:
         rules: GameRules,
         config: ResolverConfig,
         rng: np.random.Generator | None = None,
+        seat: int | None = None,
+        opponent_model: ScorableBlueprint | None = None,
     ):
         self.blueprint = blueprint
+        # Whose range is ours: only the OTHER seat's actions are read through
+        # `opponent_model`. None reads both seats through it.
+        self.seat = seat
+        # The table the opponent's actions are explained by. None is our own
+        # blueprint -- correct only against an opponent who plays like us.
+        self.opponent_model = opponent_model if opponent_model is not None else blueprint
         # Backend-agnostic policy access: key-addressed storage and the
         # tree-addressed one answer 'which infoset is this?' incompatibly.
         # Resolved once: the blueprint's storage backend does not change mid-solve,
@@ -125,11 +133,12 @@ class HUResolver:
         uniform range that made deployed play measurably exploitable. Likelihoods
         come from the blueprint (translation-completed for off-tree sizes), so
         the update is a model-based inference: "the opponent plays roughly like
-        the blueprint." Deterministic; no RNG.
+        ``opponent_model``". Deterministic; no RNG.
         """
         if self._ranges is None:
             self._ranges = infer_ranges(state, self.blueprint)
-        self._ranges = update_ranges(state, self._ranges, action, self.blueprint)
+        model = self.blueprint if state.current_player == self.seat else self.opponent_model
+        self._ranges = update_ranges(state, self._ranges, action, model)
         self.observe_public(state, action)
 
     def start_hand(self, state: GameState) -> None:

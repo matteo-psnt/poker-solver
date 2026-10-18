@@ -93,6 +93,7 @@ CONDITIONAL_TIER_KNOBS = (
     "resolver_blend_alpha",
     "resolver_root_prior_weight",
     "resolver_min_street",
+    "resolver_opponent_model",
     "root_prior_weight",
     "leaf_rollouts",
     "allin_runouts",
@@ -307,6 +308,10 @@ def build_blueprint_match_knobs(results: dict[str, Any]) -> dict[str, Any]:
         knobs["root_prior_weight"] = results.get("root_prior_weight")
         knobs["resolver_blend_alpha"] = results.get("resolver_blend_alpha")
         knobs["resolver_min_street"] = results.get("resolver_min_street")
+        # The range model. Conditional on the oracle, so every deployed row
+        # recorded before the knob existed keeps its digest.
+        if results.get("resolver_opponent_model", "self") != "self":
+            knobs["resolver_opponent_model"] = results["resolver_opponent_model"]
     return knobs
 
 

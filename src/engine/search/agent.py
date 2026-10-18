@@ -44,6 +44,8 @@ class BlueprintAgent:
         use_resolver: bool | None = None,
         resolver_config: ResolverConfig | None = None,
         rng: np.random.Generator | None = None,
+        seat: int | None = None,
+        opponent_model: ScorableBlueprint | None = None,
     ):
         self.blueprint = blueprint
         config = resolver_config if resolver_config is not None else blueprint.config.resolver
@@ -56,6 +58,8 @@ class BlueprintAgent:
                 rules=blueprint.rules,
                 config=config,
                 rng=rng,
+                seat=seat,
+                opponent_model=opponent_model,
             )
             if use_resolver
             else None

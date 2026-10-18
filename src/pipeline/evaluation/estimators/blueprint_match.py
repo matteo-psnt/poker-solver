@@ -64,6 +64,7 @@ def play_blueprint_match(
     seed: int = 1,
     resolver_a: bool = False,
     resolver_b: bool = False,
+    oracle_opponent_a: bool = False,
 ) -> BlueprintMatchResult:
     """Play duplicate deals of A vs B and report A's chip edge.
 
@@ -71,6 +72,8 @@ def play_blueprint_match(
     Strategy sampling reseeds the global NumPy RNG (which the blueprints draw
     from) identically for both games of a pair, so a match is reproducible for
     a fixed seed and a pair only diverges where the blueprints disagree.
+    ``oracle_opponent_a`` hands A's resolver B's real table as its range model:
+    the ceiling a perfect opponent model would reach, never a fieldable arm.
     """
     rules = solver_a.rules
     big_blind = solver_a.config.game.big_blind
@@ -101,6 +104,7 @@ def play_blueprint_match(
                 a_seat=a_seat,
                 resolver_a=resolver_a,
                 resolver_b=resolver_b,
+                oracle_opponent_a=oracle_opponent_a,
                 # Pinned per (deal, seat) like resolver_match's, so a deployed
                 # side A is reproducible rather than reading the ambient stream.
                 resolver_rng=np.random.default_rng(np.random.SeedSequence([seed, deal, a_seat]))
@@ -138,6 +142,7 @@ def _play_game(
     a_seat: int,
     resolver_a: bool = False,
     resolver_b: bool = False,
+    oracle_opponent_a: bool = False,
     resolver_rng: np.random.Generator | None = None,
 ) -> tuple[float, MatchTelemetry]:
     """One game off a fixed deck; returns blueprint A's payoff and its counts.
@@ -151,10 +156,24 @@ def _play_game(
     telemetry = MatchTelemetry()
     # A fresh agent per game, matching its documented contract (one resolver per
     # agent lifetime, a new agent per hand).
-    agent = BlueprintAgent(solver_a, use_resolver=True, rng=resolver_rng) if resolver_a else None
+    agent = (
+        BlueprintAgent(
+            solver_a,
+            use_resolver=True,
+            rng=resolver_rng,
+            seat=a_seat,
+            opponent_model=solver_b if oracle_opponent_a else None,
+        )
+        if resolver_a
+        else None
+    )
     # A deployed side B is what lets two DIFFERENT action trees meet at all: a bare
     # side raises KeyError on any size its own tree lacks.
-    agent_b = BlueprintAgent(solver_b, use_resolver=True, rng=resolver_rng) if resolver_b else None
+    agent_b = (
+        BlueprintAgent(solver_b, use_resolver=True, rng=resolver_rng, seat=1 - a_seat)
+        if resolver_b
+        else None
+    )
     state = rules.create_initial_state(
         starting_stack=starting_stack,
         hole_cards=hole_cards,

@@ -274,6 +274,9 @@ def evaluate_blueprint_match(
     # whole remaining game solved exactly -- while flop and turn leave 13 of 53 to
     # an assumption that is identical at depth 6 and depth 10.
     resolver_min_street: str | None = None,
+    # Side A's resolver reads the opponent's actions through side B's own table
+    # rather than ours: the ceiling of a perfect range model, not a fieldable arm.
+    resolver_oracle_opponent: bool = False,
     # Side A as a BLEND of two runs, ``(run, rung, weight on it)``: the ensemble
     # question -- do separately trained replicates leave independent errors that
     # a mixture cancels -- asked on chips rather than on the bound.
@@ -333,14 +336,16 @@ def evaluate_blueprint_match(
         mix=mix_a,
         play_only=True,
     )
+    # A deployed side B is the TRANSLATION layer only (blend 0, no solve): it is
+    # the opponent under test, and inheriting A's alpha made it search too, so a
+    # resolver arm measured search against search.
     config_b = _with_resolver_overrides(
         metadata_b.config,
-        min_street=resolver_min_street,
         leaf_continuation_fraction=None,
-        max_iterations=resolver_max_iterations,
-        root_prior_weight=resolver_root_prior_weight,
+        max_iterations=None,
+        root_prior_weight=None,
         leaf_rollouts=None,
-        blend_alpha=resolver_blend_alpha,
+        blend_alpha=0.0,
     )
     solver_b, storage_b, _ = build_blueprint_for(
         run_dir_b,
@@ -369,6 +374,7 @@ def evaluate_blueprint_match(
         seed=seed,
         resolver_a=resolver_a,
         resolver_b=resolver_b,
+        oracle_opponent_a=resolver_oracle_opponent,
     )
     results = {
         "run_a": metadata_a.run_id,
@@ -415,6 +421,7 @@ def evaluate_blueprint_match(
                 "root_prior_weight": config_a.resolver.root_prior_weight,
                 "resolver_blend_alpha": config_a.resolver.policy_blend_alpha,
                 "resolver_min_street": config_a.resolver.min_street,
+                "resolver_opponent_model": "oracle" if resolver_oracle_opponent else "self",
             }
             if resolver_a
             else {}

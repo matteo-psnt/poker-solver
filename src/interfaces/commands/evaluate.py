@@ -118,6 +118,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "assumption that is identical at depth 6 and depth 10.",
     )
     parser.add_argument(
+        "--resolver-opponent-model",
+        choices=["self", "oracle"],
+        default="self",
+        help="[blueprint_match] Which table a deployed side A explains the OPPONENT's "
+        "actions with when it infers their range: `self` (our own blueprint, the "
+        "fielded model) or `oracle` (side B's real table -- the ceiling of a perfect "
+        "range model, never fieldable).",
+    )
+    parser.add_argument(
         "--resolver-prior-weight",
         type=float,
         default=None,
@@ -509,6 +518,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         select_a=args.select_a,
         select_b=args.select_b,
         resolver_min_street=args.resolver_min_street,
+        resolver_oracle_opponent=args.resolver_opponent_model == "oracle",
         abstraction_hash=args.abstraction_hash,
         at_iteration=args.at,
         progress_file=Path(args.progress_file) if args.progress_file else None,

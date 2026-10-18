@@ -94,10 +94,9 @@ def update_ranges(
     blueprint: ScorableBlueprint,
 ) -> PlayerRanges:
     """
-    Update ranges after an observed action using Bayesian likelihood weighting.
+    Update the actor's range after an observed action by Bayesian likelihood weighting.
 
-    The resolver still adapts through re-solving each node; this keeps the opponent
-    range tracking calibrated to observed actions.
+    ``blueprint`` is the model of the ACTOR's play: the posterior is only as right as it is.
     """
 
     actor = state.current_player

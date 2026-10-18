@@ -101,6 +101,8 @@ def evaluate_and_record(
     resolver_blend_alpha: float | None = None,
     # blueprint_match: the earliest street a deployed side A may resolve on.
     resolver_min_street: str | None = None,
+    # blueprint_match: side A's range model (see `evaluate_blueprint_match`).
+    resolver_oracle_opponent: bool = False,
     resolver_leaf_rollouts: int | None = None,
     resolver_allin_runouts: int = 1,
     # settle: the EARLIER rung this one is compared against.
@@ -241,6 +243,7 @@ def evaluate_and_record(
             resolver_root_prior_weight=resolver_root_prior_weight,
             resolver_blend_alpha=resolver_blend_alpha,
             resolver_min_street=resolver_min_street,
+            resolver_oracle_opponent=resolver_oracle_opponent,
             mix_a=(
                 (exact_br.mix_run, exact_br.mix_at, exact_br.mix_weight)
                 if exact_br is not None

@@ -256,6 +256,7 @@ def ledger_row(document: dict[str, Any]) -> dict[str, Any]:
                 "resolver_max_iterations",
                 "root_prior_weight",
                 "resolver_min_street",
+                "resolver_opponent_model",
                 "resolver_root_entropy",
                 "played_root_entropy",
             )
