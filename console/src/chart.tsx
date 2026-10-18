@@ -24,18 +24,23 @@ import "./chart.css";
 
 function Page() {
   return (
-    <div className="min-h-full">
+    <div className="site min-h-full">
       <div className="bar">
-        <div className="site">
-          <b>Blueprint</b>
+        <div className="site-nav">
+          <a className="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <path d="M16 1Q21 9.5 28 16Q21 22.5 16 31Q11 22.5 4 16Q11 9.5 16 1Z" fill="#c8161d" />
+            </svg>
+            Blueprint
+          </a>
           <nav>
             <a href="/">Play</a>
-            <a className="on" href="/chart">
+            <a aria-current="page" href="/chart">
               Strategy
             </a>
           </nav>
           <span className="blurb">
-            the trained strategy at every depth the bot plays, before purification
+            The trained strategy at every depth the bot plays, before purification
           </span>
         </div>
         <div className="end">
