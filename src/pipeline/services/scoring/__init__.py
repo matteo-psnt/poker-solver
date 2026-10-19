@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from src.pipeline.evaluation import ledger as eval_ledger
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.estimators.restricted_cfr import RestrictedConfig
 from src.pipeline.evaluation.ledger import tiers
 from src.pipeline.services.runs import load_run_metadata
 from src.pipeline.services.scoring._shared import (
@@ -44,6 +45,10 @@ from src.pipeline.services.scoring.matches import (
     RESOLVER_GATE_ESTIMATOR_LABEL,
     evaluate_blueprint_match,
     evaluate_run_resolver_gate,
+)
+from src.pipeline.services.scoring.restricted import (
+    RESTRICTED_ESTIMATOR_LABEL,
+    evaluate_run_restricted,
 )
 from src.pipeline.services.scoring.settling import (
     SETTLING_ESTIMATOR_LABEL,
@@ -107,6 +112,8 @@ def evaluate_and_record(
     resolver_allin_runouts: int = 1,
     # settle: the EARLIER rung this one is compared against.
     settle_from: int | None = None,
+    # restricted_cfr: the board pool and the arm trained on it.
+    restricted: RestrictedConfig | None = None,
     # blueprint_match: the OTHER arm, and which rung of it plays.
     vs_run_dir: Path | None = None,
     vs_at: int | None = None,
@@ -221,6 +228,15 @@ def evaluate_and_record(
         )
         estimator = SETTLING_ESTIMATOR_LABEL
         knobs = eval_ledger.build_settling_knobs(out.results)
+    elif method == "restricted_cfr":
+        out = evaluate_run_restricted(
+            run_dir,
+            restricted or RestrictedConfig(),
+            abstraction_hash=abstraction_hash,
+            record_source=record_source,
+        )
+        estimator = RESTRICTED_ESTIMATOR_LABEL
+        knobs = eval_ledger.build_restricted_knobs(out.results)
     elif method == "blueprint_match":
         # The only PAIRWISE estimator, and the only gate folding cannot win.
         # It records like every other one: the row is filed under A and carries

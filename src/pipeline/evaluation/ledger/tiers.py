@@ -357,6 +357,15 @@ def build_settling_knobs(results: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_restricted_knobs(results: dict[str, Any]) -> dict[str, Any]:
+    """The pool and the arm ARE the instrument: two pools are two different games."""
+    return {
+        "pool": results.get("pool"),
+        "pool_seed": results.get("pool_seed"),
+        "mode": results.get("mode"),
+    }
+
+
 def tier_key(record: dict[str, Any]) -> tuple[Any, ...]:
     """Identity of the comparison tier a row belongs to.
 

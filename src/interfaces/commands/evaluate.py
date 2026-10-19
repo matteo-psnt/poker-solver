@@ -16,6 +16,7 @@ from src.pipeline import services
 from src.pipeline.evaluation.estimators.elimination import SELECTION_RULES
 from src.pipeline.evaluation.estimators.lbr.config import LBRConfig
 from src.pipeline.evaluation.estimators.public_tree_br import PublicBRConfig
+from src.pipeline.evaluation.estimators.restricted_cfr import MODES, RestrictedConfig
 from src.shared.cloudtask.rung_spec import parse_ladder
 from src.shared.config import DEFAULT_RUNS_DIR
 
@@ -34,6 +35,7 @@ EVAL_METHODS = (
     "depth_duel",
     "elimination",
     "settle",
+    "restricted_cfr",
 )
 
 # Above this the SB is refusing to play rather than playing badly, and no
@@ -169,6 +171,28 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="[settle] The EARLIER rung to measure drift from. The GAP is the "
         "instrument: an average moves less the wider the base it covers, so a "
         "settling curve is only a curve at a FIXED gap (e.g. always 400).",
+    )
+    # restricted_cfr options; the pool's shape reuses --br-flops/--br-turns/
+    # --br-rivers/--br-board-seed.
+    parser.add_argument(
+        "--rc-mode",
+        choices=MODES,
+        default="full",
+        help="[restricted_cfr] full: every iteration passes every pool board; sampled: "
+        "the rivers under one drawn (flop, turn), as production samples.",
+    )
+    parser.add_argument(
+        "--rc-passes",
+        type=int,
+        default=8000,
+        help="[restricted_cfr] Board passes to train for, matched across modes.",
+    )
+    parser.add_argument(
+        "--rc-evals",
+        type=int,
+        default=14,
+        help="[restricted_cfr] Log-spaced exact scores along the curve; each costs two "
+        "passes per pool board.",
     )
     # blueprint_match options (--method blueprint_match).
     parser.add_argument(
@@ -500,6 +524,15 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         resolver_max_iterations=args.resolver_max_iterations,
         resolver_allin_runouts=args.resolver_allin_runouts,
         settle_from=args.settle_from,
+        restricted=RestrictedConfig(
+            flops=args.br_flops,
+            turns=args.br_turns,
+            rivers=args.br_rivers,
+            seed=args.br_board_seed,
+            mode=args.rc_mode,
+            board_passes=args.rc_passes,
+            evaluations=args.rc_evals,
+        ),
         vs_run_dir=resolve_run_dir(args.vs_run, args.runs_dir) if args.vs_run else None,
         vs_at=args.vs_at,
         match_deals=args.deals if args.deals is not None else MATCH_DEALS,
@@ -611,6 +644,19 @@ def render(payload: services.EvaluationPayload) -> None:
             # One machine-readable line: a node's log is where a ladder of these
             # is collected from, and the ledger keeps only the headline fields.
             print(f"  opening: {json.dumps(opening, separators=(',', ':'))}")
+        return
+    if payload.method == "restricted_cfr":
+        flops, turns, rivers = results["pool"]
+        print(
+            f"  Pool:          {flops} flops x {turns} turns x {rivers} rivers = "
+            f"{results['boards']} boards (seed {results['pool_seed']}), mode {results['mode']}"
+        )
+        print(f"  {'iteration':>10}{'passes':>10}{'train s':>10}{'mbb/hand':>12}")
+        for point in results["curve"]:
+            print(
+                f"  {point['iteration']:>10,}{point['board_passes']:>10,}"
+                f"{point['seconds']:>10.0f}{point['mbb']:>12.2f}"
+            )
         return
     if payload.method == "depth_duel":
         _render_depth_duel(payload.run_id, results)
