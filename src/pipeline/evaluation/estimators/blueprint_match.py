@@ -18,14 +18,18 @@ configs (blinds, stacks) agree, which is validated by the caller.
 
 from __future__ import annotations
 
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 from src.engine.search.agent import BlueprintAgent
 from src.pipeline.evaluation.estimators.resolver_match import (
     MatchTelemetry,
+    chunk_bounds,
     complete_board,
     deal_for,
     deal_from_stack,
@@ -65,6 +69,7 @@ def play_blueprint_match(
     resolver_a: bool = False,
     resolver_b: bool = False,
     oracle_opponent_a: bool = False,
+    workers: int = 1,
 ) -> BlueprintMatchResult:
     """Play duplicate deals of A vs B and report A's chip edge.
 
@@ -74,48 +79,32 @@ def play_blueprint_match(
     a fixed seed and a pair only diverges where the blueprints disagree.
     ``oracle_opponent_a`` hands A's resolver B's real table as its range model:
     the ceiling a perfect opponent model would reach, never a fieldable arm.
+    ``workers`` splits the deals into contiguous blocks, one forked process each.
     """
-    rules = solver_a.rules
-    big_blind = solver_a.config.game.big_blind
-    starting_stack = solver_a.config.game.starting_stack
-
-    pair_samples_mbb: list[float] = []
+    job = _Job(solver_a, solver_b, seed, resolver_a, resolver_b, oracle_opponent_a)
+    bounds = chunk_bounds(num_deals, workers) if workers > 1 and num_deals > 1 else []
+    if bounds:
+        # FORKED, after both blueprints are loaded: the workers read the parent's
+        # tables copy-on-write instead of each loading two ~1.5 GB rungs, the
+        # way `exact_br` shares its blueprint. Every deal reseeds its own streams,
+        # so the result is bit-identical at any worker count.
+        global _FORKED_JOB
+        _FORKED_JOB = job
+        try:
+            with ProcessPoolExecutor(
+                max_workers=len(bounds),
+                mp_context=multiprocessing.get_context("fork"),
+                initializer=_one_blas_thread,
+            ) as pool:
+                parts = list(pool.map(_forked_deals, bounds))
+        finally:
+            _FORKED_JOB = None
+    else:
+        parts = [_play_deals(job, 0, num_deals)]
+    pair_samples_mbb = [sample for samples, _ in parts for sample in samples]
     telemetry = MatchTelemetry()
-
-    for deal in range(num_deals):
-        hole_cards, board_stack, button = deal_for(seed, deal)
-
-        # Both seat-swapped games replay the SAME sampling stream: while the two
-        # blueprints agree, the games mirror each other exactly, so a self-match
-        # is provably all-zero pairs and an A-vs-B pair only diverges where the
-        # blueprints actually disagree — duplicate-style variance reduction.
-        game_seed = int(np.random.SeedSequence([seed, deal]).generate_state(1)[0])
-        seat_payoffs: list[float] = []
-        for a_seat in (0, 1):
-            np.random.seed(game_seed)
-            payoff, game = _play_game(
-                solver_a,
-                solver_b,
-                rules,
-                hole_cards=hole_cards,
-                board_stack=board_stack,
-                button=button,
-                starting_stack=starting_stack,
-                a_seat=a_seat,
-                resolver_a=resolver_a,
-                resolver_b=resolver_b,
-                oracle_opponent_a=oracle_opponent_a,
-                # Pinned per (deal, seat) like resolver_match's, so a deployed
-                # side A is reproducible rather than reading the ambient stream.
-                resolver_rng=np.random.default_rng(np.random.SeedSequence([seed, deal, a_seat]))
-                if resolver_a or resolver_b
-                else None,
-            )
-            seat_payoffs.append(payoff)
-            telemetry.absorb(game)
-
-        payoff_seat0, payoff_seat1 = seat_payoffs
-        pair_samples_mbb.append(pair_mean_mbb(payoff_seat0, payoff_seat1, big_blind))
+    for _, part in parts:
+        telemetry.absorb(part)
 
     summary = summarize_samples(pair_samples_mbb)
     return BlueprintMatchResult(
@@ -128,6 +117,78 @@ def play_blueprint_match(
         pair_samples_mbb=pair_samples_mbb,
         telemetry=telemetry if resolver_a else None,
     )
+
+
+@dataclass(frozen=True)
+class _Job:
+    """Everything a block of deals needs, held once so forked workers inherit it."""
+
+    solver_a: ScorableBlueprint
+    solver_b: ScorableBlueprint
+    seed: int
+    resolver_a: bool
+    resolver_b: bool
+    oracle_opponent_a: bool
+
+
+_FORKED_JOB: _Job | None = None
+
+
+def _one_blas_thread() -> None:
+    """One BLAS thread per worker: a worker per core already fills the box, and
+    every matrix product spawning a thread per core oversubscribed it many times
+    over -- MEASURED: a 20-deal match ran >13 minutes forked, ~1 minute pinned."""
+    threadpool_limits(1)
+
+
+def _forked_deals(bounds: tuple[int, int]) -> tuple[list[float], MatchTelemetry]:
+    assert _FORKED_JOB is not None, "a forked worker inherits the job from its parent"
+    return _play_deals(_FORKED_JOB, *bounds)
+
+
+def _play_deals(job: _Job, start: int, stop: int) -> tuple[list[float], MatchTelemetry]:
+    """Deals ``[start, stop)``: their per-pair samples, in order, and A's counts."""
+    solver_a = job.solver_a
+    rules = solver_a.rules
+    big_blind = solver_a.config.game.big_blind
+    starting_stack = solver_a.config.game.starting_stack
+    pair_samples_mbb: list[float] = []
+    telemetry = MatchTelemetry()
+    for deal in range(start, stop):
+        hole_cards, board_stack, button = deal_for(job.seed, deal)
+
+        # Both seat-swapped games replay the SAME sampling stream: while the two
+        # blueprints agree, the games mirror each other exactly, so a self-match
+        # is provably all-zero pairs and an A-vs-B pair only diverges where the
+        # blueprints actually disagree — duplicate-style variance reduction.
+        game_seed = int(np.random.SeedSequence([job.seed, deal]).generate_state(1)[0])
+        seat_payoffs: list[float] = []
+        for a_seat in (0, 1):
+            np.random.seed(game_seed)
+            payoff, game = _play_game(
+                solver_a,
+                job.solver_b,
+                rules,
+                hole_cards=hole_cards,
+                board_stack=board_stack,
+                button=button,
+                starting_stack=starting_stack,
+                a_seat=a_seat,
+                resolver_a=job.resolver_a,
+                resolver_b=job.resolver_b,
+                oracle_opponent_a=job.oracle_opponent_a,
+                # Pinned per (deal, seat) like resolver_match's, so a deployed
+                # side A is reproducible rather than reading the ambient stream.
+                resolver_rng=np.random.default_rng(np.random.SeedSequence([job.seed, deal, a_seat]))
+                if job.resolver_a or job.resolver_b
+                else None,
+            )
+            seat_payoffs.append(payoff)
+            telemetry.absorb(game)
+
+        payoff_seat0, payoff_seat1 = seat_payoffs
+        pair_samples_mbb.append(pair_mean_mbb(payoff_seat0, payoff_seat1, big_blind))
+    return pair_samples_mbb, telemetry
 
 
 def _play_game(

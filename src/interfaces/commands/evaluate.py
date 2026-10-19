@@ -277,7 +277,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--workers",
         type=int,
         default=1,
-        help="[lbr, resolver_match] Parallel workers. resolver_match splits DEALS, "
+        help="[lbr, resolver_match, blueprint_match] Parallel workers. The matches split DEALS, "
         "which are a pure function of (seed, deal) and so give identical numbers "
         "at any worker count.",
     )
@@ -537,6 +537,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         vs_at=args.vs_at,
         match_deals=args.deals if args.deals is not None else MATCH_DEALS,
         match_seed=args.seed if args.seed is not None else 1,
+        match_workers=args.workers,
         match_threshold_a=args.policy_threshold,
         match_threshold_b=args.vs_policy_threshold,
         match_resolver_a=args.opponent == "deployed",

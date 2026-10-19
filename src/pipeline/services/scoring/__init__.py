@@ -119,6 +119,7 @@ def evaluate_and_record(
     vs_at: int | None = None,
     match_deals: int = 2000,
     match_seed: int = 1,
+    match_workers: int = 1,
     # blueprint_match: what each side PURIFIES to before playing, as the seat does.
     match_threshold_a: float = 0.0,
     match_threshold_b: float = 0.0,
@@ -260,6 +261,7 @@ def evaluate_and_record(
             resolver_blend_alpha=resolver_blend_alpha,
             resolver_min_street=resolver_min_street,
             resolver_oracle_opponent=resolver_oracle_opponent,
+            workers=match_workers,
             mix_a=(
                 (exact_br.mix_run, exact_br.mix_at, exact_br.mix_weight)
                 if exact_br is not None

@@ -12,8 +12,8 @@ from src.core.game.actions import call, check
 from src.core.game.state import Card, Street
 from src.pipeline.evaluation.estimators.resolver_match import (
     _allin_payoff,
-    _chunk_bounds,
     _remaining_deck,
+    chunk_bounds,
     complete_board,
     deal_from_stack,
     play_resolver_match,
@@ -161,7 +161,7 @@ class TestParallelDealsAreTheSameExperiment:
 
     def test_chunks_cover_every_deal_exactly_once(self):
         for num_deals, workers in ((100, 16), (5, 16), (1, 4), (17, 3)):
-            bounds = _chunk_bounds(num_deals, workers)
+            bounds = chunk_bounds(num_deals, workers)
             covered = [deal for start, stop in bounds for deal in range(start, stop)]
             assert covered == list(range(num_deals)), (num_deals, workers)
 

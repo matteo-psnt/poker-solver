@@ -277,6 +277,8 @@ def evaluate_blueprint_match(
     # Side A's resolver reads the opponent's actions through side B's own table
     # rather than ours: the ceiling of a perfect range model, not a fieldable arm.
     resolver_oracle_opponent: bool = False,
+    # Deal blocks played in forked processes; the result does not depend on it.
+    workers: int = 1,
     # Side A as a BLEND of two runs, ``(run, rung, weight on it)``: the ensemble
     # question -- do separately trained replicates leave independent errors that
     # a mixture cancels -- asked on chips rather than on the bound.
@@ -375,6 +377,7 @@ def evaluate_blueprint_match(
         resolver_a=resolver_a,
         resolver_b=resolver_b,
         oracle_opponent_a=resolver_oracle_opponent,
+        workers=workers,
     )
     results = {
         "run_a": metadata_a.run_id,

@@ -186,7 +186,7 @@ def play_resolver_match(
     starting_stack = solver.config.game.starting_stack
 
     if workers > 1 and blueprint_factory is not None and num_deals > 1:
-        bounds = _chunk_bounds(num_deals, workers)
+        bounds = chunk_bounds(num_deals, workers)
         with ProcessPoolExecutor(max_workers=len(bounds)) as pool:
             # `map` yields IN ORDER, which is what keeps the aggregate identical
             # to the serial path rather than merely equivalent.
@@ -244,7 +244,7 @@ def _mean(total: float, count: int) -> float:
     return total / count if count else 0.0
 
 
-def _chunk_bounds(num_deals: int, workers: int) -> list[tuple[int, int]]:
+def chunk_bounds(num_deals: int, workers: int) -> list[tuple[int, int]]:
     """Contiguous [start, stop) deal ranges, one per worker, largest-first remainder."""
     count = min(workers, num_deals)
     size, extra = divmod(num_deals, count)
