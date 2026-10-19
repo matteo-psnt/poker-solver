@@ -64,6 +64,10 @@ class FakeBatch:
         self.get_task_calls.append((job_id, task_id))
         return _task(task_id)
 
+    def get_job_task_counts(self, job_id: str):
+        self.count_calls = [*getattr(self, "count_calls", []), job_id]
+        return _Obj(task_counts=_Obj(active=0, running=0))
+
     def get_pool(self, pool_id: str):
         self.get_pool_calls = getattr(self, "get_pool_calls", 0) + 1
         return _Obj(
@@ -161,6 +165,23 @@ class TestJobsDoesNotPayForHistory:
         client = FakeBatch(ACCOUNT)
         batch.attach_tasks(_as_client(client), batch.list_jobs(_as_client(client)), want=None)
         assert sorted(client.list_tasks_calls) == sorted(ACCOUNT)
+
+    def test_counts_are_asked_only_for_jobs_with_work_in_flight(self):
+        """The autoscale-blindness check costs one call per LIVE job, not per job."""
+        client = FakeBatch(ACCOUNT)
+        attached = batch.attach_tasks(
+            _as_client(client), batch.list_jobs(_as_client(client)), want=jobs.is_active
+        )
+        live = [
+            job.model_copy(
+                update={"tasks": [t.model_copy(update={"phase": "queued"}) for t in job.tasks]}
+            )
+            if job.job == "job-live"
+            else job
+            for job in attached
+        ]
+        batch.attach_counts(_as_client(client), live, want=jobs.is_live)
+        assert client.count_calls == ["job-live"]
 
 
 class TestReconcileAsksAboutOpenQuestionsOnly:

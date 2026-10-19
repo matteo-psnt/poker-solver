@@ -1207,6 +1207,8 @@ export interface components {
          * @description One Batch job. ``tasks`` is empty until `attach_tasks` fills it in.
          */
         Job: {
+            /** Counted */
+            counted?: number | null;
             /** Job */
             job: string;
             /** State */
@@ -1243,6 +1245,11 @@ export interface components {
              * @constant
              */
             op: "jobs";
+            /**
+             * Requeued
+             * @default []
+             */
+            requeued: string[];
             /** Total Jobs */
             total_jobs: number;
         };

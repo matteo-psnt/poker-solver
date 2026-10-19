@@ -216,6 +216,9 @@ class Job(BaseModel):
     job: str
     state: str | None
     tasks: list[BatchTask] = []
+    counted: int | None = None
+    """Batch's OWN active+running count, the number the autoscale formula's
+    `$PendingTasks` reads. Null unless `attach_counts` asked."""
 
 
 def _task_record(task: Any, job_id: str = "") -> BatchTask:
@@ -325,6 +328,38 @@ def attach_tasks(
     with ThreadPoolExecutor(max_workers=min(_PARALLEL_CALLS, len(wanted))) as pool:
         fetched = dict(zip([job.job for job in wanted], pool.map(_tasks, wanted), strict=True))
     return [job.model_copy(update={"tasks": fetched.get(job.job, [])}) for job in jobs]
+
+
+def attach_counts(batch: BatchClient, jobs: list[Job], *, want: Callable[[Job], bool]) -> list[Job]:
+    """Fill in ``counted`` for the jobs ``want`` selects: what autoscale believes.
+
+    Batch's per-job counters can disagree with its own task list for good. On
+    10-19 two tasks requeued after their nodes died read `active` while the
+    counters kept them `completed`, so `$PendingTasks` was 0 and the pool sat
+    at zero nodes for 12 hours. Nothing else exposes the disagreement.
+    """
+    wanted = [job for job in jobs if want(job)]
+    if not wanted:
+        return jobs
+
+    def _count(job: Job) -> int:
+        counts = batch.get_job_task_counts(job.job).task_counts
+        return counts.active + counts.running
+
+    with ThreadPoolExecutor(max_workers=min(_PARALLEL_CALLS, len(wanted))) as pool:
+        counted = dict(zip([job.job for job in wanted], pool.map(_count, wanted), strict=True))
+    return [job.model_copy(update={"counted": counted.get(job.job)}) for job in jobs]
+
+
+def requeue_task(batch: BatchClient, job_id: str, task_id: str) -> None:
+    """End a QUEUED task and reactivate it, which re-enters it into the counters.
+
+    Measured 10-19: terminate + reactivate moved a stuck task from `completed`
+    back to `active` in `get_job_task_counts` within 45 s, and the formula's
+    `pending` from 0 to 1. Reactivation also resets the retry count.
+    """
+    batch.terminate_task(job_id, task_id)
+    batch.reactivate_task(job_id, task_id)
 
 
 def task_record(batch: BatchClient, job_id: str, task_id: str) -> BatchTask | None:

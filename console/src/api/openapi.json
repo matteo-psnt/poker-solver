@@ -1558,6 +1558,17 @@
       "Job": {
         "description": "One Batch job. ``tasks`` is empty until `attach_tasks` fills it in.",
         "properties": {
+          "counted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counted"
+          },
           "job": {
             "title": "Job",
             "type": "string"
@@ -1615,6 +1626,14 @@
             "default": "jobs",
             "title": "Op",
             "type": "string"
+          },
+          "requeued": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Requeued",
+            "type": "array"
           },
           "total_jobs": {
             "title": "Total Jobs",

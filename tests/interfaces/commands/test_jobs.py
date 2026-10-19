@@ -111,3 +111,53 @@ class TestCrashLoopIsVisible:
         # The first attempt stays quiet, or every line carries noise and the
         # signal stops being one.
         assert "score-pcs-9101-800  ATTEMPT" not in out
+
+
+class TestAutoscaleBlindness:
+    """Batch's counters can miss queued tasks, and the pool then never scales.
+
+    Measured 10-19: two tasks requeued after node deaths read `active` while
+    `get_job_task_counts` kept them `completed`. `$PendingTasks` read 0 and
+    `train` sat at zero nodes for 12 hours with work queued.
+    """
+
+    @staticmethod
+    def _blind_job() -> Job:
+        tasks = [
+            BatchTask(task="stuck", job="poker-20261018", state=None, phase="queued"),
+            BatchTask(task="busy", job="poker-20261018", state=None, phase="running"),
+        ]
+        return Job(job="poker-20261018", state="BatchJobState.ACTIVE", tasks=tasks, counted=1)
+
+    def test_the_gap_is_rendered(self, capsys):
+        from src.interfaces.commands.jobs import JobsPayload, render, unseen
+
+        job = self._blind_job()
+        assert unseen(job) == 1
+        render(JobsPayload(jobs=[job], total_jobs=1))
+        assert "autoscale cannot see 1" in capsys.readouterr().out
+
+    def test_requeue_touches_only_the_queued_tasks_of_a_blind_job(self, monkeypatch):
+        import argparse
+
+        from src.interfaces.commands import jobs
+
+        seen = Job(
+            job="poker-20261019",
+            state="BatchJobState.ACTIVE",
+            tasks=[BatchTask(task="fine", job="poker-20261019", state=None, phase="queued")],
+            counted=1,
+        )
+        requeued: list[str] = []
+        monkeypatch.setattr(jobs.CloudConfig, "load", staticmethod(lambda: None))
+        monkeypatch.setattr(jobs.batch, "client", lambda _config: None)
+        monkeypatch.setattr(jobs.batch, "list_jobs", lambda _client: [])
+        monkeypatch.setattr(jobs.batch, "attach_tasks", lambda *_a, **_k: [self._blind_job(), seen])
+        monkeypatch.setattr(jobs.batch, "attach_counts", lambda _c, listed, **_k: listed)
+        monkeypatch.setattr(
+            jobs.batch, "requeue_task", lambda _c, _job, task: requeued.append(task)
+        )
+        args = argparse.Namespace(all=False, limit=20, requeue_unseen=True)
+        payload = jobs.run(args)
+        assert requeued == ["stuck"]
+        assert payload.requeued == ["stuck"]

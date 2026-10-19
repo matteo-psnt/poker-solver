@@ -11,6 +11,7 @@ from src.interfaces.cloud.tasks import batch
 from src.interfaces.cloud.tasks.batch import Job
 from src.interfaces.commands._base import Command
 from src.shared import task_states
+from src.shared.task_states import Phase
 
 if TYPE_CHECKING:
     import argparse
@@ -28,6 +29,8 @@ class JobsPayload(BaseModel):
     `hidden_jobs` are the ones `--limit` cut (`--limit 0`)."""
     filtered_jobs: int = 0
     hidden_jobs: int = 0
+    requeued: list[str] = []
+    """Tasks `--requeue-unseen` ended and reactivated so autoscale counts them."""
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -41,6 +44,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--limit", type=int, default=20, help="Show only the last N jobs (0 = all)."
+    )
+    parser.add_argument(
+        "--requeue-unseen",
+        action="store_true",
+        help="End and reactivate the queued tasks of every job whose queue autoscale "
+        "cannot see, so the pool scales up for them. Running tasks are left alone.",
     )
 
 
@@ -72,6 +81,13 @@ def is_live(job: Job) -> bool:
     if not is_active(job):
         return False
     return any(task.phase in task_states.IN_FLIGHT for task in job.tasks)
+
+
+def unseen(job: Job) -> int:
+    """In-flight tasks Batch's own counters miss: work the pool will never scale for."""
+    if job.counted is None:
+        return 0
+    return max(0, sum(task.phase in task_states.IN_FLIGHT for task in job.tasks) - job.counted)
 
 
 def select(jobs: list[Job], *, show_all: bool, limit: int) -> JobsPayload:
@@ -111,7 +127,19 @@ def run(args: argparse.Namespace) -> JobsPayload:
         want=None if args.all else is_active,
         in_flight_only=not args.all,
     )
-    return select(jobs, show_all=args.all, limit=args.limit)
+    jobs = batch.attach_counts(client, jobs, want=is_live)
+    requeued: list[str] = []
+    if args.requeue_unseen:
+        for job in jobs:
+            if not unseen(job):
+                continue
+            for task in job.tasks:
+                if task.phase is Phase.QUEUED:
+                    batch.requeue_task(client, job.job, task.task)
+                    requeued.append(task.task)
+    return select(jobs, show_all=args.all, limit=args.limit).model_copy(
+        update={"requeued": requeued}
+    )
 
 
 def render(payload: JobsPayload) -> None:
@@ -134,6 +162,14 @@ def render(payload: JobsPayload) -> None:
             # OOM-looping scores looked healthy for 4.7 hours on 09-27.
             attempt = f"  ATTEMPT {task.retry_count + 1}" if task.retry_count else ""
             print(f"   {word:<10} {task.task}{attempt}{exit_code}{because}")
+        if (missed := unseen(job)) and not payload.requeued:
+            print(
+                f"   ⚠ autoscale cannot see {missed} of these: Batch counts {job.counted} "
+                "queued+running, so the pool will not scale for them — "
+                "`poker-solver jobs --requeue-unseen`"
+            )
+    for task_id in payload.requeued:
+        print(f"  requeued {task_id}")
     if payload.hidden_jobs:
         listed = len(payload.jobs) + payload.hidden_jobs
         print(f"\n  showing {len(payload.jobs)} of {listed} job(s) — `--limit 0` for all")
