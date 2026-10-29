@@ -270,6 +270,8 @@ class SeatTally:
     #: actually about and the aggregate would read ~10-12% while saying nothing.
     #: The `>50bb` entry is the one to put beside the field's 3.61%.
     jams_by_band: dict[str, int] = field(default_factory=dict)
+    #: Decisions facing an oversized preflop raise, replayed as all-in.
+    read_as_jam: int = 0
 
     @property
     def off_tree(self) -> int:
@@ -316,6 +318,7 @@ class SeatTally:
                 else ""
             )
             + (f", {self.rung_switches} rung switches" if self.rung_switches else "")
+            + (f", {self.read_as_jam} oversized raises read as all-in" if self.read_as_jam else "")
         )
 
     def jam_census(self) -> str:
@@ -520,6 +523,7 @@ class BlueprintSeat:
             return self._pass(turn)
 
         self.tally.saw(turn.hand_number, spot.off_tree)
+        self.tally.read_as_jam += int(spot.read_as_jam)
         if spot.truncated:
             self.tally.truncated += 1
             logger.warning(

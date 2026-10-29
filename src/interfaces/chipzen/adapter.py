@@ -34,6 +34,7 @@ from src.interfaces.table import (
     TableScale,
     on_tree,
     opponent_hole_cards,
+    oversized,
     their_raise,
 )
 from src.pipeline.blueprint.paths import advance_chance
@@ -71,6 +72,9 @@ class Spot:
     # Named rather than inferred: the last attempt to identify the cause from the
     # journal read a `grep -B1` filter as a correlation and was wrong.
     truncated_reason: str = ""
+    # An oversized preflop raise of theirs was replayed as all-in, so our
+    # "call" (an ALL_IN in our tree) goes out as a shove (see `table.oversized`).
+    read_as_jam: bool = False
 
 
 def reconstruct(
@@ -112,6 +116,7 @@ def reconstruct(
     phase = "preflop"
 
     replayed = 0  # of their actions we got through before stopping
+    read_as_jam = False
     for entry in turn.action_history:
         if entry.is_synthetic:
             continue
@@ -129,8 +134,11 @@ def reconstruct(
             reason = f"our tree offered no legal action {replayed} of their actions in"
             break
         observed, snapped = _observed_action(entry, wagers, state, scale, legal)
+        read_as_jam = oversized(observed, state, legal)
+        if read_as_jam:
+            observed = next(action for action in legal if action.type is ActionType.ALL_IN)
         chosen = on_tree(observed, state, action_model, rules, legal)
-        off_tree += int(snapped or chosen != observed)
+        off_tree += int(snapped or read_as_jam or chosen != observed)
         state = state.apply_action(chosen, rules)
         # A call's `amount` is the INCREMENT on the live wire (SB limp: 50 at 50/100),
         # not the total its docstring promises; a call always matches the high bet.
@@ -156,6 +164,7 @@ def reconstruct(
         off_tree=off_tree,
         truncated=truncated,
         truncated_reason=reason,
+        read_as_jam=read_as_jam,
     )
 
 

@@ -146,6 +146,23 @@ def their_raise(
     return Action(kind, increment), False
 
 
+#: A preflop raise past this multiple of our largest raise increment is read as
+#: all-in. Every tree since 2025-12 sizes 3-bets off `to_call`, so its biggest one
+#: over a 2 bb open is to 5.5 bb, and a 10-12.5 bb 3-bet snapped there plays a big
+#: pot as a small one. 1.6 fires on 66-70% of fermat6's and NashForge's 3-bets in
+#: the 09-20..10-28 journal and on none from the field's on-tree bots (max 1.43).
+OVERSIZED_RAISE = 1.6
+
+
+def oversized(observed: Action, state: GameState, legal: tuple[Action, ...]) -> bool:
+    """Whether ``observed`` is a preflop raise our tree can only understate."""
+    if observed.type is not ActionType.RAISE or not state.street.is_preflop():
+        return False
+    raises = [action.amount for action in legal if action.type is ActionType.RAISE]
+    jams = any(action.type is ActionType.ALL_IN for action in legal)
+    return bool(raises) and jams and observed.amount > OVERSIZED_RAISE * max(raises)
+
+
 def on_tree(
     observed: Action,
     state: GameState,
