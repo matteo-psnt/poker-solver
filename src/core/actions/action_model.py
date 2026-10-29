@@ -14,7 +14,7 @@ import xxhash
 
 from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
-from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, parse_multiplier_token
+from src.shared.action_tokens import JAM_TOKENS, PASSIVE_TOKENS, TO_SUFFIX, parse_multiplier_token
 from src.shared.config import Config
 
 if TYPE_CHECKING:
@@ -198,13 +198,14 @@ class ActionModel:
                 if raise_amount > 0 and total_bet <= stack:
                     sizes.append(raise_amount)
             elif isinstance(token, str):
-                parsed = self._parse_preflop_raise_token(token, to_call=to_call, stack=stack)
+                parsed = self._parse_preflop_raise_token(token, state=state, stack=stack)
                 if parsed is not None:
                     sizes.append(parsed)
 
         return sorted({s for s in sizes if s > 0})
 
-    def _parse_preflop_raise_token(self, token: str, *, to_call: int, stack: int) -> int | None:
+    def _parse_preflop_raise_token(self, token: str, *, state: GameState, stack: int) -> int | None:
+        to_call = state.to_call
         normalized = token.strip().lower()
         if normalized in PASSIVE_TOKENS:
             return None
@@ -215,6 +216,12 @@ class ActionModel:
         mult = parse_multiplier_token(token)
         if mult is None:
             raise ValueError(f"Unsupported preflop raise token: {token}")
+        if normalized.endswith(TO_SUFFIX):
+            # Preflop the whole pot is this round's wagers, so the one faced is
+            # half of the pot once the call is in.
+            faced = (state.pot + to_call) // 2
+            raise_amount = round(mult * faced) - faced
+            return raise_amount if raise_amount > 0 and to_call + raise_amount <= stack else None
         total_bet = round(mult * max(1, to_call))
         raise_amount = total_bet - to_call
         if raise_amount > 0 and total_bet <= stack:

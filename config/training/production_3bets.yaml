@@ -1,0 +1,16 @@
+# TREATMENT arm: production_opens with preflop re-raises sized off the wager
+# faced (`x_to`) instead of the call owed (`x_open`/`x_last`). The fielded tree's
+# biggest 3-bet over a 2 bb open is to 5.5 bb; fermat6 and NashForge 3-bet to
+# 10-12.5 bb (live 09-20..10-28). These cover the field's 2x / 3x / 5x 3-bets,
+# and 4-bets to 2.3x the 3-bet. If it wins on chips, it becomes production_opens.
+
+extends: production_opens.yaml
+
+action_model:
+  preflop_templates:
+    bb_vs_open: ["fold", "call", "2.5x_to", "3.5x_to", "5x_to"]
+    sb_vs_3bet: ["fold", "call", "2.3x_to", "jam"]
+    sb_vs_limp_raise: ["fold", "call", "2.3x_to", "jam"]
+
+system:
+  config_name: "production_3bets"

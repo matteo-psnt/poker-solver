@@ -1,7 +1,7 @@
 """Tests for the node-template ActionModel."""
 
 from src.core.actions.action_model import ActionModel
-from src.core.game.actions import ActionType
+from src.core.game.actions import Action, ActionType
 from src.core.game.rules import GameRules
 from src.core.game.state import Card
 from src.shared.config import Config
@@ -38,3 +38,28 @@ def test_preflop_open_sizes_exposed():
     opens = model.get_preflop_open_sizes_bb()
     assert opens
     assert all(size > 0 for size in opens)
+
+
+def _three_bets_to_bb(token: str) -> list[float]:
+    """The big blind's 3-bet totals over a 2 bb open, in big blinds."""
+    config = Config.default().merge(
+        {"action_model": {"preflop_templates": {"bb_vs_open": ["fold", "call", token]}}}
+    )
+    model = ActionModel(config)
+    state, rules = _initial_state()
+    state = state.apply_action(Action(ActionType.RAISE, 2), rules)
+    return [
+        (200 - state.apply_action(action, rules).stacks[1]) / 2
+        for action in rules.get_legal_actions(state, action_model=model)
+        if action.type is ActionType.RAISE
+    ]
+
+
+def test_x_open_scales_the_call_owed():
+    """What every fielded tree carries: 3.5x over a 2 bb open is to 4.5 bb."""
+    assert _three_bets_to_bb("3.5x_open") == [4.5]
+
+
+def test_x_to_scales_the_wager_faced():
+    assert _three_bets_to_bb("3.5x_to") == [7.0]
+    assert _three_bets_to_bb("5x_to") == [10.0]
