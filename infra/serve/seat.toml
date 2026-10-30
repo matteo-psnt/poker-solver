@@ -11,7 +11,9 @@
 # Thresholds purify the policy; why 0.35 deep and 0.20 shallow is in memory
 # (purification-is-worth-more-than-the-ladder).
 
-run = "run-pcs-production_opens-to12k-d100-145201-6584"
+# 3-bets sized off the open (production_3bets); at 24000 vs 6584@75000, 4 seeds x
+# 20,000 deals x 2 arms: +59.7 mbb/hand, 8/8 positive (10-30).
+run = "run-pcs-production_3bets-to12k-d100-a-070733-27232"
 at = "latest"
 threshold = 0.35
 
