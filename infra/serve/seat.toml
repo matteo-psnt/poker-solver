@@ -20,11 +20,11 @@ threshold = 0.35
 rungs = [
     # 3-bets sized off the open; vs 17367@50000, 4 seeds x 20,000 deals: +93.8 +/- 16.5 (11-01)
     "run-pcs-production_3bets-to12k-d50-200257-29329:12000:0.35",
-    # 50000 vs 12000, 3 seeds x 20,000 deals, mbb/hand (10-17):
-    "run-pcs-production_opens-to12k-d35-145220-21331:50000:0.20",  # +23.8 +/- 10.6
-    "run-pcs-production_opens-to12k-d25-145224-6826:50000:0.20",  # +1.4 +/- 8.2
-    "run-pcs-production_opens-to12k-d15-145228-12723:50000:0.20",  # +2.6 +/- 5.6
-    "run-pcs-production_opens-to12k-d10-145232-1181:50000:0.20",  # +7.5 +/- 3.9
-    "run-pcs-production_opens-to12k-d06-145235-565:50000:0.20",  # +1.6 +/- 1.4
-    "run-pcs-production_opens-to12k-d03-145240-32111:50000:0.20",  # +1.4 +/- 0.9
+    # production_3bets@12000 vs production_opens@50000, 4 seeds x 20,000 deals, mbb/hand (11-02):
+    "run-pcs-production_3bets-to12k-d35-163322-3053:12000:0.20",  # +43.7 +/- 13.5
+    "run-pcs-production_3bets-to12k-d25-163332-28894:12000:0.20",  # +34.2 +/- 10.0
+    "run-pcs-production_3bets-to12k-d15-163342-330:12000:0.20",  # +29.6 +/- 7.4
+    "run-pcs-production_3bets-to12k-d10-163351-30081:12000:0.20",  # +12.5 +/- 4.9
+    "run-pcs-production_3bets-to12k-d06-163359-17879:12000:0.20",  # +5.9 +/- 2.5
+    "run-pcs-production_3bets-to12k-d03-163408-7671:12000:0.20",  # +2.2 +/- 1.0
 ]
