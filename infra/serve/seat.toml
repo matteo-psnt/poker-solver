@@ -18,7 +18,8 @@ at = "latest"
 threshold = 0.35
 
 rungs = [
-    "run-pcs-production_opens-to12k-d50-145211-17367:latest:0.35",
+    # 3-bets sized off the open; vs 17367@50000, 4 seeds x 20,000 deals: +93.8 +/- 16.5 (11-01)
+    "run-pcs-production_3bets-to12k-d50-200257-29329:12000:0.35",
     # 50000 vs 12000, 3 seeds x 20,000 deals, mbb/hand (10-17):
     "run-pcs-production_opens-to12k-d35-145220-21331:50000:0.20",  # +23.8 +/- 10.6
     "run-pcs-production_opens-to12k-d25-145224-6826:50000:0.20",  # +1.4 +/- 8.2
