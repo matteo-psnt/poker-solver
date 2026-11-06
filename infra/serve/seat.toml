@@ -11,21 +11,20 @@
 # Thresholds purify the policy; why 0.35 deep and 0.20 shallow is in memory
 # (purification-is-worth-more-than-the-ladder).
 
-# 3-bets sized off the open (production_3bets); at 24000 vs 6584@75000, 4 seeds x
-# 20,000 deals x 2 arms: +59.7 mbb/hand, 8/8 positive (10-30); at 36800 +67.4 +/- 22.1
-# (11-02). Pinned while the run trains on: a rung is fielded only after its gate.
-run = "run-pcs-production_3bets-to12k-d100-a-070733-27232"
-at = 36800
+# 3-bets sized off the open (production_3bets), run b. 4 seeds x 20,000 deals (11-05):
+# @61600 vs run a @36800 (the previous base) +71.2 +/- 19.9, vs run a @61600 +55.3 +/- 19.9.
+# Pinned: a rung is fielded only after its gate.
+run = "run-pcs-production_3bets-to12k-d100-b-070744-26295"
+at = 61600
 threshold = 0.35
 
 rungs = [
-    # 3-bets sized off the open; vs 17367@50000, 4 seeds x 20,000 deals: +93.8 +/- 16.5 (11-01)
-    "run-pcs-production_3bets-to12k-d50-200257-29329:12000:0.35",
-    # production_3bets@12000 vs production_opens@50000, 4 seeds x 20,000 deals, mbb/hand (11-02):
-    "run-pcs-production_3bets-to12k-d35-163322-3053:12000:0.20",  # +43.7 +/- 13.5
-    "run-pcs-production_3bets-to12k-d25-163332-28894:12000:0.20",  # +34.2 +/- 10.0
-    "run-pcs-production_3bets-to12k-d15-163342-330:12000:0.20",  # +29.6 +/- 7.4
-    "run-pcs-production_3bets-to12k-d10-163351-30081:12000:0.20",  # +12.5 +/- 4.9
-    "run-pcs-production_3bets-to12k-d06-163359-17879:12000:0.20",  # +5.9 +/- 2.5
-    "run-pcs-production_3bets-to12k-d03-163408-7671:12000:0.20",  # +2.2 +/- 1.0
+    # each @50000 vs its own fielded @12000, 4 seeds x 20,000 deals, mbb/hand (11-05):
+    "run-pcs-production_3bets-to12k-d50-200257-29329:50000:0.35",  # +71.5 +/- 16.0
+    "run-pcs-production_3bets-to12k-d35-163322-3053:50000:0.20",  # +39.0 +/- 13.2
+    "run-pcs-production_3bets-to12k-d25-163332-28894:50000:0.20",  # +70.9 +/- 10.5
+    "run-pcs-production_3bets-to12k-d15-163342-330:50000:0.20",  # +39.3 +/- 7.5
+    "run-pcs-production_3bets-to12k-d10-163351-30081:50000:0.20",  # +18.2 +/- 5.4
+    "run-pcs-production_3bets-to12k-d06-163359-17879:50000:0.20",  # +9.8 +/- 2.9
+    "run-pcs-production_3bets-to12k-d03-163408-7671:50000:0.20",  # +2.7 +/- 1.3
 ]
