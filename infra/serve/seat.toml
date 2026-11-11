@@ -19,12 +19,12 @@ at = 61600
 threshold = 0.35
 
 rungs = [
-    # each @50000 vs its own fielded @12000, 4 seeds x 20,000 deals, mbb/hand (11-05):
+    # each vs its own previously fielded rung, 4 seeds x 20,000 deals, mbb/hand (11-05):
     "run-pcs-production_3bets-to12k-d50-200257-29329:50000:0.35",  # +71.5 +/- 16.0
     "run-pcs-production_3bets-to12k-d35-163322-3053:50000:0.20",  # +39.0 +/- 13.2
     "run-pcs-production_3bets-to12k-d25-163332-28894:50000:0.20",  # +70.9 +/- 10.5
-    "run-pcs-production_3bets-to12k-d15-163342-330:50000:0.20",  # +39.3 +/- 7.5
-    "run-pcs-production_3bets-to12k-d10-163351-30081:50000:0.20",  # +18.2 +/- 5.4
-    "run-pcs-production_3bets-to12k-d06-163359-17879:50000:0.20",  # +9.8 +/- 2.9
-    "run-pcs-production_3bets-to12k-d03-163408-7671:50000:0.20",  # +2.7 +/- 1.3
+    "run-pcs-production_3bets-to12k-d15-163342-330:100000:0.20",  # @100k vs @50k +27.5 +/- 6.9 (11-11)
+    "run-pcs-production_3bets-to12k-d10-163351-30081:100000:0.20",  # @100k vs @50k +11.7 +/- 4.7 (11-11)
+    "run-pcs-production_3bets-to12k-d06-163359-17879:100000:0.20",  # @100k vs @50k +8.0 +/- 2.3 (11-11)
+    "run-pcs-production_3bets-to12k-d03-163408-7671:100000:0.20",  # @100k vs @50k +2.4 +/- 1.0 (11-11)
 ]
