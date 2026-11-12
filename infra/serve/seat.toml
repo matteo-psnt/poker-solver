@@ -20,7 +20,8 @@ threshold = 0.35
 
 rungs = [
     # each vs its own previously fielded rung, 4 seeds x 20,000 deals, mbb/hand (11-05):
-    "run-pcs-production_3bets-to12k-d50-200257-29329:100000:0.35",  # @100k vs @50k +47.0 +/- 14.8 (11-12)
+    # fresh seed 13 @50k vs 29329@100k +38.1 +/- 14.4, vs 29329@50k +44.3 +/- 14.8 (11-12)
+    "run-pcs-production_3bets-to50k-d50-s13-033915-11864:50000:0.35",
     "run-pcs-production_3bets-to12k-d35-163322-3053:100000:0.20",  # @100k vs @50k +33.2 +/- 12.5 (11-11)
     "run-pcs-production_3bets-to12k-d25-163332-28894:100000:0.20",  # @100k vs @50k +28.4 +/- 9.9 (11-11)
     "run-pcs-production_3bets-to12k-d15-163342-330:100000:0.20",  # @100k vs @50k +27.5 +/- 6.9 (11-11)
