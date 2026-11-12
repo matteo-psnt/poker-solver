@@ -21,17 +21,16 @@ follows is the record of them, and the procedure if it is ever done again.
 1. `just plan` — expect one change, the allowed-locations policy gaining
    `canadacentral`. `just create`. The policy is subscription-wide and denies
    the store apply until this lands.
-2. `terraform -chdir=infra/store plan` — expect **5 to add, 0 to change, 0 to
-   destroy**: the server, its database, the TLS setting, `allow-azure-services`
-   and `operator_ca[0]`. A plan that destroys `operator[0]` means
-   `infra/store/terraform.tfvars` with `operator_ip` is missing from this
-   checkout. `just store-create`. The server is the slow part, ~10 minutes.
+2. `terraform -chdir=infra/store plan` — expect **4 to add, 0 to change, 0 to
+   destroy**: the server, its database, the TLS setting and
+   `allow-azure-services`. `just store-create`. The server is the slow part,
+   ~10 minutes.
 3. Admit the laptop to the new server -- `record-admit` addresses the LIVE one:
 
    ```sh
    az postgres flexible-server firewall-rule create \
      --server-name poker-solver-record-ca --resource-group poker-solver-store-rg \
-     --name allow-operator \
+     --name "allow-operator-$(hostname -s | tr A-Z a-z)" \
      --start-ip-address "$(curl -s https://api.ipify.org)" \
      --end-ip-address   "$(curl -s https://api.ipify.org)"
    ```

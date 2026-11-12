@@ -118,22 +118,9 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "azure_services_ca" 
   end_ip_address   = "0.0.0.0"
 }
 
-# The laptop, so the console and the CLI can read. A home ISP rotates this;
-# when `psql` starts timing out rather than refusing, this variable is why.
-resource "azurerm_postgresql_flexible_server_firewall_rule" "operator_ca" {
-  count            = var.operator_ip == null ? 0 : 1
-  name             = "allow-operator"
-  server_id        = azurerm_postgresql_flexible_server.record_ca.id
-  start_ip_address = var.operator_ip
-  end_ip_address   = var.operator_ip
-
-  # `poker-solver record-admit` rewrites the address in place whenever the ISP
-  # rotates it. Terraform creates the rule and then leaves the address alone,
-  # or every apply would put a stale one back.
-  lifecycle {
-    ignore_changes = [start_ip_address, end_ip_address]
-  }
-}
+# Operator laptops are NOT here: each owns a rule named after its host, which
+# `poker-solver record-admit` creates and rewrites as its ISP rotates the
+# address. One Terraform-held rule made two laptops evict each other.
 
 resource "azurerm_postgresql_flexible_server_database" "record_ca" {
   name      = var.postgres_database

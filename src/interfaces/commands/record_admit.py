@@ -25,10 +25,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 class AdmittedPayload(BaseModel):
-    """Which address the rule now names."""
+    """Which address this machine's rule now names."""
 
     op: Literal["record-admit"] = "record-admit"
     server: str
+    rule: str
     address: str
 
 
@@ -42,12 +43,11 @@ def run(args: argparse.Namespace) -> AdmittedPayload:
         host.split(".", 1)[0],
         address,
     )
-    return AdmittedPayload(server=admission.server, address=admission.address)
+    return AdmittedPayload(server=admission.server, rule=admission.rule, address=admission.address)
 
 
 def render(payload: AdmittedPayload) -> None:
-    print(f"{payload.server}: firewall admits {payload.address}")
-    print("  Azure applies the rule within a minute or two; a read that still times out is early.")
+    print(f"{payload.server}: {payload.rule} admits {payload.address}")
 
 
 COMMAND = Command(

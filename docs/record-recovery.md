@@ -20,7 +20,7 @@ operator's own IP having rotated. Add one before concluding anything is wrong:
 ```sh
 az postgres flexible-server firewall-rule create \
   --server-name <restored> --resource-group poker-solver-store-rg \
-  --name allow-operator \
+  --name "allow-operator-$(hostname -s | tr A-Z a-z)" \
   --start-ip-address "$(curl -s https://api.ipify.org)" \
   --end-ip-address   "$(curl -s https://api.ipify.org)"
 ```

@@ -232,8 +232,7 @@ def _readmit() -> None:
         print(f"record-admit could not run: {failure}", file=sys.stderr)
         return
     print(
-        f"record-admit: {admitted.server} now admits {admitted.address}. "
-        "Azure applies the rule within a minute or two; retry then.",
+        f"record-admit: {admitted.server} {admitted.rule} now admits {admitted.address}; retry.",
         file=sys.stderr,
     )
 

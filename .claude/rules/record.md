@@ -33,8 +33,10 @@ and not SQLAlchemy Core (`ty` checks `Eval.scor_mbb`; it cannot check
   against the remote state); the `just` apply recipes delete the copy, a
   direct `terraform apply` does not -- `just _forget-coordinates` after one.
 - **A read that times out is the firewall, not the server.** The laptop's IP
-  rotates; `poker-solver record-admit` rewrites the rule in place and Terraform
-  ignores the address. Writers refuse when the schema is behind the code:
+  rotates; `poker-solver record-admit` rewrites THIS machine's rule
+  (`allow-operator-<host>`), which Terraform does not hold, and a failed read
+  runs it for you. Each laptop has its own rule, so two never evict each
+  other. Writers refuse when the schema is behind the code:
   `poker-solver record-migrate` applies the migrations.
 - **A read costs round trips, not query time.** Measured 175 ms of RTT against
   3 ms of query. A fresh engine per call, or a transaction around a

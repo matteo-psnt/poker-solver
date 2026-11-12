@@ -81,25 +81,6 @@ variable "postgres_database" {
   default = "record"
 }
 
-variable "operator_ip" {
-  description = <<-EOT
-    The laptop's public address, allowed through the server firewall so the
-    console and the CLI can read.
-
-    NO DEFAULT, on purpose. A home ISP rotates this, and a committed default
-    would keep opening the firewall to whoever holds the address next -- a
-    stale allow-rule that nothing would ever report. Set it per-apply:
-
-        terraform apply -var "operator_ip=$(curl -s https://api.ipify.org)"
-
-    or put it in `infra/store/terraform.tfvars`, which `.gitignore` covers.
-    Left unset, the rule is simply not created and the laptop cannot connect --
-    which is the safe direction to fail.
-  EOT
-  type        = string
-  default     = null
-}
-
 variable "checkpoints_container_name" {
   description = "Blob container holding one tar object per retained rung."
   type        = string
