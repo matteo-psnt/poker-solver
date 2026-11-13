@@ -100,6 +100,21 @@ Without [`just`](https://github.com/casey/just): download
 untar it into an empty directory, and from there run
 `uv run --project <clone> poker-solver blueprint-serve --runs-dir data/runs --run run-pcs-production_opens-to12k-d100-145201-6584 --at 65000`.
 
+### Setting up an operator laptop
+
+To dispatch work, read the record and run the console you need the Azure
+subscription. On a Mac with [Homebrew](https://brew.sh):
+
+```bash
+brew install just
+git clone https://github.com/matteo-psnt/poker-solver.git && cd poker-solver
+just setup          # tools, Python + console deps, hook, az login, terraform init, firewall
+uv run poker-solver doctor   # re-check any time; each failure names its fix
+```
+
+The console wants the Node major in `console/.nvmrc`; npm refuses any other.
+Each laptop gets its own record firewall rule (`allow-operator-<hostname>`).
+
 Run the tests with `uv sync --group dev && uv run pytest -m "not slow"`.
 Training, precompute and evaluation run on an Azure Batch pool that scales to
 zero and need the Terraform in `infra/`; `uv run poker-solver --help` lists

@@ -354,6 +354,45 @@ console-dev:
     npm --prefix console run dev
 
 # --------------------------------------------------------------------------- #
+# a new operator laptop
+# --------------------------------------------------------------------------- #
+# Setting up a second laptop (11-11) meant finding every step by reading the
+# code. Safe to re-run: each step skips what is already done, and `doctor` at the
+# end names whatever is still missing. Needs Homebrew and `just` first.
+
+# Install the toolchain, sign in to Azure, init Terraform, admit to the record.
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    missing=()
+    command -v az >/dev/null || missing+=(azure-cli)
+    command -v terraform >/dev/null || missing+=(hashicorp/tap/terraform)
+    command -v uv >/dev/null || missing+=(uv)
+    node_major="$(node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')"
+    [ "$node_major" = "$(cat console/.nvmrc)" ] || missing+=(node)
+    if [ ${#missing[@]} -gt 0 ]; then
+      echo "==> brew install ${missing[*]}"
+      brew install "${missing[@]}"
+    fi
+    echo "==> python, console and the pre-commit hook"
+    uv sync --group dev
+    # A worktree's node_modules links to the primary's: `npm ci` follows the
+    # link and empties the copy every checkout shares (measured 11-12).
+    [ -L console/node_modules ] || npm --prefix console ci
+    uv run pre-commit install
+    # Interactive: opens a browser. Device-code sign-in is refused by this
+    # tenant's security defaults (AADSTS530035).
+    az account show >/dev/null 2>&1 || az login
+    echo "==> terraform init (all three states; remote, so this only fetches providers)"
+    for root in infra infra/store infra/serve; do
+      terraform -chdir="$root" init -input=false >/dev/null
+    done
+    echo "==> this laptop's record firewall rule"
+    uv run poker-solver record-admit
+    echo "==> doctor"
+    uv run poker-solver doctor
+
+# --------------------------------------------------------------------------- #
 # worktrees
 # --------------------------------------------------------------------------- #
 # Every change starts in a worktree (AGENTS.md), and a fresh one lacks four

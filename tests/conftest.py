@@ -1,6 +1,7 @@
 """Suite-wide fixtures.
 
-The card-abstraction guard, the hypothesis profile, and the logger reset.
+The card-abstraction guard, the hypothesis profile, git and record-DSN
+isolation, and the logger reset.
 
 The abstraction guard is the older of the two. A test that trains for real
 needs a precomputed combo abstraction on this machine, and that artifact is
@@ -12,10 +13,12 @@ must say "not run", never "broken".
 from __future__ import annotations
 
 import logging
+import os
 
 import pytest
 from hypothesis import HealthCheck, settings
 
+from src.interfaces.cloud.config import RECORD_DSN_ENV
 from tests.memory_record import MemoryRecord
 
 # `derandomize=True` is the whole reason property tests are allowed in here.
@@ -35,6 +38,28 @@ settings.register_profile(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 settings.load_profile("suite")
+
+# Git run by a test reads no user or system config. The operator's global config
+# signs commits through 1Password, so every throwaway-repo commit failed on a
+# laptop whose agent was not reachable (6 errors, measured 11-11).
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+
+
+@pytest.fixture(autouse=True)
+def _record_dsn_does_not_leak():
+    """Put the record DSN back as each test found it.
+
+    `headless.main` exports the REAL DSN from Terraform into `os.environ`, and
+    it outlived the test: a later `score` test on that worker queried the live
+    server and hung past its 60 s timeout (measured 11-12, order-dependent).
+    """
+    before = os.environ.get(RECORD_DSN_ENV)
+    yield
+    if before is None:
+        os.environ.pop(RECORD_DSN_ENV, None)
+    else:
+        os.environ[RECORD_DSN_ENV] = before
 
 
 @pytest.fixture(autouse=True)

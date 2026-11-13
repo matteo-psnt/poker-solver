@@ -2,6 +2,9 @@
   "name": "poker-solver-console",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^26"
+  },
   "scripts": {
     "dev": "vite",
     "build": "npm run gen:types && tsc -b && vite build",

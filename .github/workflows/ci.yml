@@ -34,7 +34,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: console/.nvmrc
           cache: npm
           cache-dependency-path: console/package-lock.json
       - run: uv sync --group dev

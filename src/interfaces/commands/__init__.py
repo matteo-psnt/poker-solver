@@ -207,6 +207,10 @@ GROUPS: tuple[CommandGroup, ...] = (
                 "Admit this machine's current public IP to the record server's firewall.",
             ),
             CommandRef(
+                "doctor",
+                "Check this laptop is set up: tools, Azure sign-in, Terraform, record, console, hook.",
+            ),
+            CommandRef(
                 "record-migrate",
                 "Apply pending schema migrations to the record database (--check to only compare).",
             ),

@@ -5,7 +5,8 @@ on Azure Batch; the laptop is for tests and dispatch.
 
 ## Commands
 
-- `uv sync --group dev` — install dependencies.
+- `just setup` — a new laptop end to end; `uv run poker-solver doctor` says what is
+  missing. `uv sync --group dev` alone reinstalls the Python deps.
 - `uv run poker-solver <cmd>` — the single entrypoint. `--help` lists all of
   them, grouped: open a surface · dispatch and account for work · run on a node
   · read the record.
