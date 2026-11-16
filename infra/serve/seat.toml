@@ -11,17 +11,17 @@
 # Thresholds purify the policy; why 0.35 deep and 0.20 shallow is in memory
 # (purification-is-worth-more-than-the-ladder).
 
-# 3-bets sized off the open (production_3bets), run b. 4 seeds x 20,000 deals:
-# @86400 vs @61600 (previous base) +44.1 +/- 19.9 (11-13); @61600 vs run a @36800 +71.2 +/- 19.9.
+# Fresh seed 13 (production_3bets). 4 seeds x 20,000 deals, mbb/hand (11-16):
+# @46800 vs run b @86400 (previous base) +67.0 +/- 19.8; vs seed 7 @49600 +61.2 +/- 19.6.
 # Pinned: a rung is fielded only after its gate.
-run = "run-pcs-production_3bets-to12k-d100-b-070744-26295"
-at = 86400
+run = "run-pcs-production_3bets-to30k-d100-s13-033904-18607"
+at = 46800
 threshold = 0.35
 
 rungs = [
     # each vs its own previously fielded rung, 4 seeds x 20,000 deals, mbb/hand (11-05):
-    # fresh seed 7 @100k vs seed 13 @50k (previous) +37.2 +/- 15.2 (11-13)
-    "run-pcs-production_3bets-to50k-d50-s7-033855-7834:100000:0.35",
+    # fresh seed 21 @50k vs seed 7 @100k (previous) +47.5 +/- 14.5; vs seed 34 @50k +53.1 +/- 14.7 (11-16)
+    "run-pcs-production_3bets-to50k-d50-s21-185207-10594:50000:0.35",
     "run-pcs-production_3bets-to12k-d35-163322-3053:100000:0.20",  # @100k vs @50k +33.2 +/- 12.5 (11-11)
     "run-pcs-production_3bets-to12k-d25-163332-28894:100000:0.20",  # @100k vs @50k +28.4 +/- 9.9 (11-11)
     "run-pcs-production_3bets-to12k-d15-163342-330:100000:0.20",  # @100k vs @50k +27.5 +/- 6.9 (11-11)
