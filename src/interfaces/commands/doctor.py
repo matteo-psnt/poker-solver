@@ -108,7 +108,11 @@ def _hook() -> str:
 
 CHECKS: tuple[tuple[str, Callable[[], str], str], ...] = (
     ("tools", _tools, "brew install just azure-cli node hashicorp/tap/terraform"),
-    ("node version", _node, "brew install node (or `nvm use` in console/)"),
+    (
+        "node version",
+        _node,
+        "just setup (installs and links node@<.nvmrc>), or `nvm use` in console/",
+    ),
     ("azure sign-in", _azure, "az login"),
     ("terraform", _terraform, "just setup (runs terraform init in all three roots)"),
     ("record database", _record, "uv run poker-solver record-admit"),

@@ -368,12 +368,16 @@ setup:
     command -v az >/dev/null || missing+=(azure-cli)
     command -v terraform >/dev/null || missing+=(hashicorp/tap/terraform)
     command -v uv >/dev/null || missing+=(uv)
-    node_major="$(node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')"
-    [ "$node_major" = "$(cat console/.nvmrc)" ] || missing+=(node)
+    node_major() { node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/'; }
+    want_node="$(cat console/.nvmrc)"
+    # Plain `node` is whatever is newest; npm refuses any major but the .nvmrc's.
+    [ "$(node_major)" = "$want_node" ] || missing+=("node@$want_node")
     if [ ${#missing[@]} -gt 0 ]; then
       echo "==> brew install ${missing[*]}"
       brew install "${missing[@]}"
     fi
+    # node@N is keg-only once a newer major ships, so it needs linking onto PATH.
+    [ "$(node_major)" = "$want_node" ] || brew link --overwrite --force "node@$want_node"
     echo "==> python, console and the pre-commit hook"
     uv sync --group dev
     # A worktree's node_modules links to the primary's: `npm ci` follows the
