@@ -220,12 +220,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--vs-policy-threshold",
         type=float,
-        default=0.0,
-        help="[blueprint_match, depth_duel] Purify the OPPONENT's table at this probability, the "
-        "way the seat purifies what it serves. With --policy-threshold on the same "
-        "run and rung this makes a self-match a single-knob A/B over SERVING: the "
-        "sampling streams are shared, so the pairs that are not zero are exactly "
-        "the decisions the cut changed.",
+        default=None,
+        help="[blueprint_match, depth_duel] Purify the OPPONENT's table at this probability "
+        "(default: --policy-threshold, so both sides play as served and a self-match "
+        "reads zero). Pass 0 for a single-knob A/B over SERVING on one run and rung: "
+        "the sampling streams are shared, so the nonzero pairs are exactly the "
+        "decisions the cut changed.",
     )
     # depth_duel options; --vs-run, --vs-at, --deals and both thresholds as above.
     parser.add_argument(
@@ -367,8 +367,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=0.0,
         help="[exact_br, blueprint_match, depth_duel] Eval-time thresholding of the blueprint: zero "
         "actions below this probability and renormalise. A separate tier. Under "
-        "blueprint_match it purifies side A, which is what the SEAT does to every "
-        "rung it serves; see --vs-policy-threshold for the control.",
+        "blueprint_match it purifies BOTH sides, which is what the SEAT does to every "
+        "rung it serves, unless --vs-policy-threshold sets side B apart.",
     )
     parser.add_argument(
         "--purify",
@@ -539,7 +539,7 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         match_seed=args.seed if args.seed is not None else 1,
         match_workers=args.workers,
         match_threshold_a=args.policy_threshold,
-        match_threshold_b=args.vs_policy_threshold,
+        match_threshold_b=threshold_b(args),
         match_resolver_a=args.opponent == "deployed",
         match_resolver_b=args.vs_opponent == "deployed",
         table_bb=args.table_bb,
@@ -558,6 +558,11 @@ def run(args: argparse.Namespace) -> services.EvaluationPayload:
         progress_file=Path(args.progress_file) if args.progress_file else None,
         policy_profile=args.policy_profile,
     )
+
+
+def threshold_b(args: argparse.Namespace) -> float:
+    """Side B as served unless told otherwise: a one-sided cut hands A the purification edge."""
+    return args.policy_threshold if args.vs_policy_threshold is None else args.vs_policy_threshold
 
 
 def _ladder(text: str, runs_dir: str) -> list[tuple[Path, int | None, float]]:
