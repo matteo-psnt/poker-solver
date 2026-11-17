@@ -90,7 +90,7 @@ variable "pool_huge_max_nodes" {
     since 11-04: every fielded rung trains on at once, one run per node.
   EOT
   type        = number
-  default     = 9
+  default     = 4
 }
 
 variable "pool_mem_vm_size" {
@@ -150,7 +150,7 @@ variable "max_nodes" {
     like a live fault. Do not size this to consume the quota exactly.
 
     THE FOUR POOL CAPS SHARE ONE QUOTA, so this number is not free to raise.
-    16 x 16 + 2 x 32 + 9 x 64 + 1 x 64 = 960 vCPU of 1024, which the +8 offset
+    36 x 16 + 2 x 32 + 4 x 64 + 1 x 64 = 960 vCPU of 1024, which the +8 offset
     above leaves reachable. The previous 60/2/2 summed to 1152 -- the whole
     quota, exactly the mistake the paragraph above records. `train` carries
     scoring, which is throwaway; the D64s carry the critical path. Re-do this
@@ -169,7 +169,7 @@ variable "max_nodes" {
     not a day. Drop this back to 20-30 when the programme ends.
   EOT
   type        = number
-  default     = 16
+  default     = 36
 }
 
 variable "data_disk_gb" {
